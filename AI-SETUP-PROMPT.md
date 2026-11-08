@@ -45,7 +45,7 @@ Copy everything in the box and send it.
 ```
 I want to set up fusion-cad-mcp, an MCP server that lets you drive Autodesk
 Fusion directly: sketches, extrudes, holes, joints, exports. The repo is at
-https://github.com/Mfrostbutter/fusion-cad-mcp and the setup details are in its
+https://github.com/cat-thats-fat/fusion-cad-mcp and the setup details are in its
 README.md and CONNECT.md. Read those first if you can fetch them.
 
 I am not a developer. Please walk me through this one step at a time, wait for
@@ -63,11 +63,11 @@ Here is what I would like you to do:
 
 3. Check whether git is installed. If it is not, either walk me through
    installing it, or use the ZIP download route instead: download
-   https://github.com/Mfrostbutter/fusion-cad-mcp/archive/refs/heads/main.zip ,
+   https://github.com/cat-thats-fat/fusion-cad-mcp/archive/refs/heads/main.zip ,
    unzip it, and pip install that folder.
 
 4. Install the server:
-   pip install "fusion-cad-mcp @ git+https://github.com/Mfrostbutter/fusion-cad-mcp.git"
+   pip install "fusion-cad-mcp @ git+https://github.com/cat-thats-fat/fusion-cad-mcp.git"
    Then confirm it landed by running: fusion-cad-mcp --help
    Also find and show me the full path to the installed command, because some
    MCP clients need an absolute path rather than just the name.

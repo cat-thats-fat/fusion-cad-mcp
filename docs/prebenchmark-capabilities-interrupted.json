@@ -1,0 +1,116 @@
+{
+  "status": "failed",
+  "checks": [
+    {
+      "name": "nested_rotated_inspection",
+      "status": "passed",
+      "evidence": {
+        "bounds_mm": {
+          "min": [
+            92.0,
+            30.0,
+            10.0
+          ],
+          "max": [
+            100.0,
+            42.0,
+            12.0
+          ]
+        },
+        "body_count": 1
+      }
+    },
+    {
+      "name": "absolute_nested_relative_placement",
+      "status": "passed",
+      "evidence": {
+        "bounds_mm": {
+          "min": [
+            72.0,
+            40.0,
+            13.0
+          ],
+          "max": [
+            80.0,
+            52.0,
+            15.0
+          ]
+        },
+        "repeat_changed": false
+      }
+    },
+    {
+      "name": "semantic_geometry_and_feature_inspection",
+      "status": "passed",
+      "evidence": {
+        "top_face_z_mm": 15,
+        "ambiguous_count": 6,
+        "feature_parameter_count": 2
+      }
+    },
+    {
+      "name": "shared_reference_insertion_and_retry_refusal",
+      "status": "passed",
+      "evidence": {
+        "duplicate_error": "operation_id_exists",
+        "shared_edit_error": "shared_component_edit_unsupported",
+        "metadata_roundtrip": true,
+        "spare_bounds_mm": {
+          "min": [
+            72,
+            60,
+            13
+          ],
+          "max": [
+            80,
+            72,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "exact_clearance_and_bounded_fit_report",
+      "status": "passed",
+      "evidence": {
+        "minimum_distance_mm": 8,
+        "statuses": [
+          "pass",
+          "violation",
+          "pass",
+          "pass"
+        ]
+      }
+    },
+    {
+      "name": "contained_solid_interference",
+      "status": "passed",
+      "evidence": {
+        "overlap_mm3": 125,
+        "clearance_violation": true
+      }
+    },
+    {
+      "name": "parametric_enclosure_and_dimension_propagation",
+      "status": "passed",
+      "evidence": {
+        "initial_volume_mm3": 11712,
+        "edited_volume_mm3": 13232,
+        "edited_bounds_mm": {
+          "min": [
+            -35.0,
+            -20.0,
+            0.0
+          ],
+          "max": [
+            35.0,
+            20.0,
+            20.0
+          ]
+        },
+        "retry_error": "primitive_name_exists"
+      }
+    }
+  ],
+  "cleanup": "unverified"
+}

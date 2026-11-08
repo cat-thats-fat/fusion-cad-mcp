@@ -33,7 +33,7 @@ import textwrap
 from typing import Any
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_stdout_json, script_parse_failure
 from ..handles import emit_make_handle, emit_resolve, is_handle, parse_handle
 from ..resolver import RESOLVER_SCRIPT
 
@@ -699,12 +699,12 @@ def assert_profiles(adapter: FusionAdapter, sketch: str, expected: int) -> Envel
         )
     # Bypass the generic _run helper so we can distinguish "assertion failed"
     # (parsed.ok = False but the script ran fine) from real script-level errors.
-    env = adapter.execute_script(build_assert_profiles(sketch, expected))
+    env = adapter.execute_script(build_assert_profiles(sketch, expected), read_only=True)
     if not env.ok:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None:
-        return Envelope(ok=False, error="assert_profiles_parse_failed", message=env.message)
+        return script_parse_failure(env, "assert_profiles_parse_failed", read_only=True)
     if "error" in parsed:
         return Envelope(
             ok=False,
@@ -750,7 +750,7 @@ def _resolve_sketch(root, name, comp_hint):
             return hinted[0][0], hinted[0][1], None
         if len(hinted) > 1:
             return None, None, [{"component": c, "sketch": s.name} for s, c in hinted]
-        # zero hits in hinted component; fall through to global search
+        return None, None, None  # an explicit hint must never fall back globally
     all_m = _find_all_sketches(root, name)
     if len(all_m) == 0:
         return None, None, None  # not found
@@ -902,6 +902,7 @@ def probe_sketch_dimensions(
         adapter,
         build_probe_sketch_dimensions(sketch, component_name),
         "probe_sketch_dimensions",
+        read_only=True,
     )
 
 
@@ -953,6 +954,11 @@ def run(_ctx):
     if sk is None:
         print(json.dumps({{"ok": False, "error": "sketch_not_found", "name": SKETCH_NAME}}))
         return
+    if sk.parentComponent != design.rootComponent:
+        occurrences = design.rootComponent.allOccurrences
+        if sum(1 for i in range(occurrences.count)
+               if occurrences.item(i).component == sk.parentComponent) > 1:
+            print(json.dumps({{"ok": False, "error": "shared_component_edit_unsupported", "name": SKETCH_NAME}})); return
     target = None
     for d in sk.sketchDimensions:
         try:
@@ -1045,13 +1051,13 @@ def edit_sketch_dimension(
 # ---------- shared runner ----------
 
 
-def _run(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = adapter.execute_script(script)
+def _run(adapter: FusionAdapter, script: str, label: str, *, read_only: bool = False) -> Envelope:
+    env = adapter.execute_script(script, read_only=True) if read_only else adapter.execute_script(script)
     if not env.ok:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return script_parse_failure(env, f"{label}_parse_failed", read_only=read_only)
     if parsed.get("ok") is False:
         return Envelope(
             ok=False,

@@ -17,20 +17,20 @@ from __future__ import annotations
 import json
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_stdout_json, script_parse_failure
 from ..resolver import RESOLVER_SCRIPT
 
 _FIND_BODY_HELPER = RESOLVER_SCRIPT
 _FIND_OCC_HELPER = RESOLVER_SCRIPT
 
 
-def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = adapter.execute_script(script)
+def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, read_only: bool = False) -> Envelope:
+    env = adapter.execute_script(script, read_only=True) if read_only else adapter.execute_script(script)
     if not env.ok:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return script_parse_failure(env, f"{label}_parse_failed", read_only=read_only)
     if parsed.get("ok") is False:
         return Envelope(
             ok=False,
@@ -457,7 +457,7 @@ def interference_check(adapter: FusionAdapter, entity_names: list[str]) -> Envel
         script = build_interference_check(entity_names)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "interference_check")
+    return _ok_runner(adapter, script, "interference_check", read_only=True)
 
 
 # ---------- set_joint_limits ----------
@@ -500,13 +500,11 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    joint = None
-    for i in range(root.joints.count):
-        j = root.joints.item(i)
-        if j.name == {json.dumps(joint_name)}:
-            joint = j; break
-    if joint is None:
-        print(json.dumps({{"ok": False, "error": "joint_not_found", "name": {json.dumps(joint_name)}}})); return
+    matches = [root.joints.item(i) for i in range(root.joints.count)
+               if root.joints.item(i).name == {json.dumps(joint_name)}]
+    if len(matches) != 1:
+        print(json.dumps({{"ok": False, "error": "joint_not_found" if not matches else "joint_ambiguous", "name": {json.dumps(joint_name)}}})); return
+    joint = matches[0]
 
     jm = joint.jointMotion
     if jm is None:
@@ -588,13 +586,11 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    joint = None
-    for i in range(root.joints.count):
-        j = root.joints.item(i)
-        if j.name == {json.dumps(joint_name)}:
-            joint = j; break
-    if joint is None:
-        print(json.dumps({{"ok": False, "error": "joint_not_found", "name": {json.dumps(joint_name)}}})); return
+    matches = [root.joints.item(i) for i in range(root.joints.count)
+               if root.joints.item(i).name == {json.dumps(joint_name)}]
+    if len(matches) != 1:
+        print(json.dumps({{"ok": False, "error": "joint_not_found" if not matches else "joint_ambiguous", "name": {json.dumps(joint_name)}}})); return
+    joint = matches[0]
 
     jm = joint.jointMotion
     if jm is None:

@@ -6,7 +6,7 @@ import re
 from pathlib import PurePosixPath, PureWindowsPath
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_stdout_json, script_parse_failure
 from ..handles import emit_make_handle
 from ..resolver import RESOLVER_SCRIPT
 
@@ -71,13 +71,13 @@ def _validate_path(path: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
+def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, writes_model: bool = True) -> Envelope:
     env = adapter.execute_script(script)
     if not env.ok:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None or "ok" not in parsed:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return script_parse_failure(env, f"{label}_parse_failed", writes_model=writes_model)
     if parsed.get("ok") is not True:
         return Envelope(
             ok=False,
@@ -259,7 +259,7 @@ def export(
         script = build_export(format, body, path, refinement, units, component)
     except ValueError as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
-    return _ok_runner(adapter, script, "export")
+    return _ok_runner(adapter, script, "export", writes_model=False)
 
 
 def build_import_geometry(

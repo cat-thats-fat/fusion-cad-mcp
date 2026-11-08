@@ -1,6 +1,60 @@
+# Current inspection, validation, assembly and parametric tools
+
+The signatures below are the current typed interface. `limit` is 1..200 and `offset` is nonnegative where present. Selectors accept unique names or occurrence-qualified paths where stated; ambiguous names fail. Read every result and reported state. Native feature and primitive behavior depends on the Fusion version; see the repository validation report for live evidence.
+
+## `inspect_assembly(component=None, include=None, limit=50, offset=0)`
+
+Read the root or a uniquely selected occurrence. By default returns paginated descendant occurrences, bodies, sketches, features and joints; `include` can also select `as_built_joints`. For a selected occurrence, its descendants are listed and the selected occurrence itself is excluded. Occurrence entries include parent path, repeated-definition count, grounding, root and immediate-parent transforms, and handles where available. Matrices use Fusion `Matrix3D.asArray` with cm translations. Body bounds are root-frame mm. Native definition sections are not a universal assembly dependency graph.
+
+## `inspect_feature(feature, limit=50)`
+
+Read feature health, model parameters, current faces, bodies and linked features. A feature's surviving faces can be incomplete after later edits; generic dependency relationships are unavailable. Inspect again after topology changes.
+
+## `query_geometry(body, kind, filters=None, limit=50, offset=0, expected_count=None)`
+
+Find current face, edge or vertex handles. `filters` accepts `type`, `normal`, `parallel`, `radius`, `length`, `near`, `tolerance`, and `feature` subject to entity-kind restrictions. Coordinates and lengths are root-frame mm. `near` tests the reported sample point, not minimum distance to the whole entity. Direction comparisons use a dimensionless tolerance; radius, length and near use mm. `expected_count` checks current matches; zero feature-face matches cannot prove a feature never produced a face. Re-query after edits.
+
+## `validate_design(checks)`
+
+Accepts 1..50 checks: `{"type":"clearance","body_a":...,"body_b":...,"min_mm":...}`, `{"type":"interference","body_a":...,"body_b":...,"max_overlap_mm3":0}`, or `{"type":"bounds","body":...,"min_mm":[x,y,z],"max_mm":[x,y,z],"tolerance_mm":0}`. Body names, occurrence-qualified names and body handles are supported. Read `result.passed` and each `pass`, `violation` or `unavailable`. Bounds compare root-axis-aligned boxes, not actual containment in an irregular cavity.
+
+## `create_component(name, parent=None)`
+
+Create a uniquely named local component under root or a unique parent. Refuses shared-parent edits, duplicate names, non-parametric/rolled-back timeline and pending transforms. Returns a scoped occurrence and pose.
+
+## `insert_component(source, operation_id, parent=None, independent=False)`
+
+Insert a shared local occurrence or independent definition. `operation_id` guards duplicate insertion within the parent; independent copies use it as their component name. Cloud insertion is outside this tool's scope.
+
+## `place_component(component, origin_mm, x_axis=None, y_axis=None, relative_to=None)`
+
+Set and verify an absolute frame; `origin_mm` is mm and axes are perpendicular unit vectors. The default frame is root; `relative_to` uses the referenced occurrence frame. Grounded and unsupported shared-parent/pending-transform cases are refused.
+
+## `set_reference_metadata(component, metadata)` / `get_reference_metadata(component)`
+
+Set or read user-supplied v1 metadata: required `schema_version: 1`, `reference_id`, `units: "mm"`; optional `mounting_points` (`id`, `position_mm`, `axis`, optional `hole_diameter_mm`), `connectors` (`id`, `origin_mm`, `x_axis`, `y_axis`), `keepouts` (`id`, `min_mm`, `max_mm`) and `source_sha256`. IDs are unique, axes unit length and connector axes perpendicular. Data belongs to the component definition and uses its local frame; read returns the selected occurrence transform and root-frame body bounds. Metadata is not inferred from or certified against imported geometry. Shared and referenced definitions refuse edits; use `import_geometry` separately.
+
+## `create_parametric_enclosure(name, width, depth, height, wall, floor, component="root")`
+
+Creates an editable open rectangular enclosure centered on local XY with floor at local Z=0. Dimensions are Fusion length expressions. It does not create a lid or automatically plan an assembly.
+
+## `create_mounting_boss(name, x, y, z, outer_diameter, inner_diameter, height, component="root", target_body=None)`
+
+Create an editable local +Z boss from length expressions. Zero inner diameter makes a solid boss. It creates a new body unless `target_body` explicitly names a same-component solid to join.
+
+## `create_cutout(name, body, x, y, z, width, height, depth, plane="xy", direction="positive", component="root")`
+
+Create a rectangular cut from one selected body. Values are length expressions; x/y/z anchor the local sketch's lower-left corner. `plane` is `xy`, `xz` or `yz`; `direction` follows or opposes its normal. Fusion's XZ sketch Y maps to negative Z. Checks material removal and sibling identity, volume and bounds; it does not prove unchanged sibling topology.
+
+## `sweep(sketch, path_sketch, path_entities, name, profile_index=0)`
+
+Create one new solid using a profile and explicit `line:N`, `arc:N` or `circle:N` path references from a same-component sketch. No implicit curve chaining; path must satisfy Fusion's sweep requirements. Returns handles, body bounds/volume and verification. `name` is required and must be unique within the component. An uncertain failure must be inspected before retrying.
+
+---
+
 # Fusion MCP tool reference
 
-Reference for the 75 typed tools exposed by `fusion-cad-mcp`. Capabilities vary by Fusion version; verify results in the active design.
+Reference for typed tools exposed by `fusion-cad-mcp`. Capabilities vary by Fusion version; verify results in the active design.
 
 `rib` checks whether the required Fusion API methods are available. `rebuild_feature` currently refuses safely without modifying the design.
 
@@ -18,7 +72,7 @@ Three conventions hold everywhere and are not repeated:
 
 ## The envelope
 
-Every one of the 75 tools returns the same shape. This is the single parsing contract:
+Tools use a common envelope. The MCP response includes the same envelope in JSON text and `structuredContent`; `isError` is true when `ok` is false. Image bytes use native image blocks. This is the single parsing contract:
 
 ```python
 {
@@ -55,7 +109,7 @@ kind:path:token
 - `path` identifies the entity and may include occurrence and document scope metadata used during resolution.
 - `token` is Fusion's `entityToken` and is the actual resolver key.
 
-`list_body_entities` is the bridge: give it a body name, get back handles for its faces, edges, and vertices. That is the only way to reach sub-entity geometry.
+`list_body_entities` and `query_geometry` return current face, edge and vertex handles.
 
 Handles go stale. When an edit deletes or regenerates the entity behind a token, any tool consuming it returns:
 
@@ -66,7 +120,7 @@ Handles go stale. When an edit deletes or regenerates the entity behind a token,
 
 Re-run `list_body_entities` to get fresh handles. Never cache handles across a feature edit.
 
-**Which tools emit handles:** `create_sketch` (`handle`), `add_rectangle` (`start_point_handle` / `end_point_handle` per line), `list_body_entities` (`handle` per face/edge/vertex), `create_joint` (`joint_token`, a bare token you must assemble into a handle yourself). Everything else returns names or bare integer indices.
+**Handle producers include** `create_sketch`, `add_rectangle`, `list_body_entities`, `query_geometry`, the inspection tools, placement tools and `sweep`. Check each tool result; `create_joint` reports a bare `joint_token`.
 
 ---
 
@@ -142,7 +196,7 @@ Error `invalid_confirm`: `confirm must be one of ['discard', 'prompt', 'save'], 
 
 Error `invalid_count`: `count must be >= 1`. No upper bound.
 
-**Undo is atomic on the entire prior `execute` call, not on one CAD operation.** A script that added parameters *and* geometry loses both, silently. Prefer targeted deletion over undo.
+**Undo can affect more than the intended feature.** Inspect the timeline and document before using it; do not assume undo or exceptions restore the full previous state.
 
 The loop returns early on first failure and returns only the last envelope on success, so a partial failure at step 3 of 5 is not distinguishable from a step-1 failure. Result shape is Fusion's.
 
@@ -426,9 +480,9 @@ Returns: `ok`, `name`, `coords_mm` (an echo of your input, not a readback).
 
 Exact, case-sensitive. **No principal-name aliasing here**. `"xy"` matches only an entity literally named `xy`, and the principal planes cannot be deleted this way.
 
-Sweeps planes, then axes, then points, and deletes **every** match across all three. This is a multi-delete: duplicate names all go.
+Searches planes, axes and points. It deletes only a single unique match; duplicate names are refused as ambiguous.
 
-Errors: `invalid_input` (`name must be a non-empty string`), `construction_not_found`.
+Errors: `invalid_input` (`name must be a non-empty string`), `construction_not_found`, `construction_ambiguous`, `construction_delete_failed`.
 
 Returns: `ok`, `deleted`, a list of `"<collection>/<name>"` strings.
 
@@ -483,19 +537,14 @@ Selects edges by geometry rather than by handle, so no `list_body_entities` roun
 
 `parallel_to`: `x`, `y`, `z`, or `any`. "Parallel to axis A" means the other two coordinates of the two endpoints match within `1e-6` cm and the A coordinate differs by more than that.
 
-**Both filters use chord distance between the endpoints, not arc length.** Consequences worth internalizing:
-
-- A closed circular edge has coincident endpoints, so it measures 0 and is never selected by an axis filter, and is always removed by any positive `min_length_mm`.
-- A curved edge whose endpoints happen to share two coordinates is falsely classified as axis-parallel.
-- Arcs are under-measured, so `min_length_mm` is more aggressive on curves than you expect.
-
+`min_length_mm` uses Fusion's curve length, including circular and arc edges. Axis filtering selects only straight edges; `any` does not restrict curve type.
 Errors: `invalid_input` (`parallel_to must be one of ['any', 'x', 'y', 'z']`, `radius must be a non-empty expression string`, `min_length_mm must be >= 0`), `body_not_found`, `no_edges_matched` (carries `parallel_to` and `min_length_mm`).
 
 Returns: `ok`, `feature_name`, `edges_filleted`, `radius`.
 
 ## `chamfer_edges_by_geometry(body, distance, parallel_to="z", kind="equal", distance2=None, angle=None, min_length_mm=None, name=None)`
 
-Same edge filter and same chord-distance caveats as the fillet above.
+Uses the same edge filter and curve-length measurement as the fillet above.
 
 | `kind` | Requires |
 |---|---|
@@ -755,7 +804,7 @@ Returns: `ok`, `joint_name`, `drove` (the attribute name), `value` (your express
 
 `face_normal_filter` matches componentwise within `1e-3` against a unit normal sampled at one arbitrary point, so pass a unit vector, and note it is direction-sensitive: `[0,0,1]` and `[0,0,-1]` differ.
 
-`edge_parallel_to` tests the two endpoints within `1e-6` cm. **`length_mm` is chord distance, not arc length**, so a circular edge reports 0 and arcs are under-measured.
+`edge_parallel_to` accepts only straight edges and compares their endpoints within `1e-6` cm. `length_mm` is Fusion curve length, not endpoint chord distance.
 
 `index` is the raw index into the body's collection and survives filtering, so filtered results have gaps. The `*_count` fields are post-filter lengths, and an empty list is ambiguous between "not requested" and "everything filtered out".
 
@@ -906,7 +955,7 @@ Errors: `invalid_path` (`path must be absolute`, `path contains '..' parent-dir 
 
 Returns: `ok`, `path`, `bytes_written`, and `format` for the mesh formats.
 
-**Check `bytes_written`.** A silently failed export returns `ok: true` with `bytes_written: 0`.
+**Check `bytes_written`.** Missing or empty output is reported as an error rather than a successful export.
 
 ## `import_geometry(format, path)`
 
@@ -964,7 +1013,7 @@ Rules that are not optional:
 1. The entry point must be exactly `def run(_ctx):`. No other name works.
 2. **Do not wrap the body in try/except.** Exceptions come back as the tool error with a full traceback; catching them destroys the traceback and turns a 30-second fix into a long debug.
 3. `print()` is the return channel. Stdout becomes the response `message`.
-4. **An exception rolls back the entire script**, including geometry created before the failure. There are no partial commits.
+4. **A failure can leave changes.** Inspect the document and reported outcome before retrying; raw execution has no general rollback guarantee.
 
 Internal units are **centimeters**. `Point3D.create` takes cm and `parameter.value` returns cm. Use `ValueInput.createByString("30 mm")` for anything human-readable and let Fusion convert; multiply by 10 only when printing.
 

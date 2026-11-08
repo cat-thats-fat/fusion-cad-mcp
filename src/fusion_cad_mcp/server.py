@@ -2,7 +2,7 @@
 
 Tool registration is split per group for readability. Each tool is a thin
 shim: it calls the group module's run() function with the shared adapter,
-then returns the envelope as a plain dict for FastMCP serialization.
+then returns the envelope as MCP text and structured content with an error flag.
 """
 
 from __future__ import annotations
@@ -23,10 +23,16 @@ from .tools import document as docs
 from .tools import execute as execute_tool
 from .tools import features as feat
 from .tools import handle_tools as ht
+from .tools import inspection as inspect_tools
 from .tools import io as io_tools
 from .tools import knowledge as kn
+from .tools import native_features as native_tools
 from .tools import parameters as params
+from .tools import placement as placement_tools
+from .tools import primitives as primitive_tools
+from .tools import references as reference_tools
 from .tools import sketch as sk
+from .tools import validation as validation_tools
 from .tools import verify as verify_tools
 from .tools import visualize as viz_tools
 
@@ -64,123 +70,133 @@ def _image_result(env: Envelope, *, compare: bool = False) -> CallToolResult:
     return CallToolResult(content=content, structuredContent=metadata, isError=not env.ok)
 
 
+def _tool_result(env: Envelope) -> CallToolResult:
+    """Publish the same envelope as JSON text and structured MCP content."""
+    if env.image or env.images:
+        return _image_result(env)
+    metadata = env.to_dict()
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(metadata))],
+                          structuredContent=metadata, isError=not env.ok)
+
+
 # ---------- Group 1: Document & State ----------
 
 
 @mcp.tool()
-def doc_state() -> dict:
+def doc_state() -> CallToolResult:
     """Summary of the active Fusion document: design_type (parametric/direct), bodies/sketches/features count, units, dirty flag, components, parameters, timeline. A direct design returns parameters_count and timeline_count as None, listed in result.unavailable."""
-    return doc_state_tool.run(_get_adapter()).to_dict()
+    return _tool_result(doc_state_tool.run(_get_adapter()))
 
 
 @mcp.tool()
-def list_open_docs() -> dict:
+def list_open_docs() -> CallToolResult:
     """List documents currently open in Fusion."""
-    return docs.list_open_docs(_get_adapter()).to_dict()
+    return _tool_result(docs.list_open_docs(_get_adapter()))
 
 
 @mcp.tool()
-def list_projects() -> dict:
+def list_projects() -> CallToolResult:
     """List all projects (hubs / folders) the user can see."""
-    return docs.list_projects(_get_adapter()).to_dict()
+    return _tool_result(docs.list_projects(_get_adapter()))
 
 
 @mcp.tool()
-def search_docs(query: str, project: str | None = None) -> dict:
+def search_docs(query: str, project: str | None = None) -> CallToolResult:
     """Fuzzy-search documents by name. Optional project scope."""
-    return docs.search_docs(_get_adapter(), query, project).to_dict()
+    return _tool_result(docs.search_docs(_get_adapter(), query, project))
 
 
 @mcp.tool()
-def open_doc(name: str, project: str | None = None, file_id: str | None = None) -> dict:
+def open_doc(name: str, project: str | None = None, file_id: str | None = None) -> CallToolResult:
     """Open a unique exact document name, or an explicit file_id from search_docs."""
-    return docs.open_doc(_get_adapter(), name, project, file_id).to_dict()
+    return _tool_result(docs.open_doc(_get_adapter(), name, project, file_id))
 
 
 @mcp.tool()
-def save() -> dict:
+def save() -> CallToolResult:
     """Save the active document. Initial cloud save may require Fusion's Save dialog."""
-    return docs.save(_get_adapter()).to_dict()
+    return _tool_result(docs.save(_get_adapter()))
 
 
 @mcp.tool()
-def save_as(path: str) -> dict:
+def save_as(path: str) -> CallToolResult:
     """Return save_as_unsupported; use export for local files or Fusion's Save dialog."""
-    return docs.save_as(_get_adapter(), path).to_dict()
+    return _tool_result(docs.save_as(_get_adapter(), path))
 
 
 @mcp.tool()
-def close(confirm: str = "prompt") -> dict:
+def close(confirm: str = "prompt") -> CallToolResult:
     """Close the active document. confirm must be 'save', 'discard', or 'prompt'.
     Never auto-pick save vs discard for dirty docs; surface the choice to the user.
     """
-    return docs.close(_get_adapter(), confirm).to_dict()
+    return _tool_result(docs.close(_get_adapter(), confirm))
 
 
 @mcp.tool()
-def undo(count: int = 1) -> dict:
-    """Undo the last `count` actions. WARNING: undo is atomic on the prior execute call.
-    Mixed-content scripts get fully wiped. Prefer delete-loop cleanup when possible.
+def undo(count: int = 1) -> CallToolResult:
+    """Undo the last `count` actions in the active document.
+    Undo may affect unrelated work. Inspect the timeline and use only when whole-document
+    recovery is explicitly intended; do not assume it restores every previous state.
     """
-    return docs.undo(_get_adapter(), count).to_dict()
+    return _tool_result(docs.undo(_get_adapter(), count))
 
 
 @mcp.tool()
-def redo(count: int = 1) -> dict:
+def redo(count: int = 1) -> CallToolResult:
     """Redo the last `count` undone actions."""
-    return docs.redo(_get_adapter(), count).to_dict()
+    return _tool_result(docs.redo(_get_adapter(), count))
 
 
 # ---------- Group 2: Sketch (parameters subset) ----------
 
 
 @mcp.tool()
-def add_parameters(defs: list[dict]) -> dict:
+def add_parameters(defs: list[dict]) -> CallToolResult:
     """Add user parameters idempotently. Existing names are skipped, not overwritten.
 
     Each def: {name, expression, units?, comment?}.
     Reserved math names (sin/cos/pi/e/sqrt/etc) are rejected at validation time
     because Fusion will silently bind expressions to the math function.
     """
-    return params.add_parameters(_get_adapter(), defs).to_dict()
+    return _tool_result(params.add_parameters(_get_adapter(), defs))
 
 
 @mcp.tool()
-def update_parameter(name: str, expression: str) -> dict:
+def update_parameter(name: str, expression: str) -> CallToolResult:
     """Update one user parameter's expression. Returns before/after values."""
-    return params.update_parameter(_get_adapter(), name, expression).to_dict()
+    return _tool_result(params.update_parameter(_get_adapter(), name, expression))
 
 
 @mcp.tool()
-def list_parameters() -> dict:
+def list_parameters() -> CallToolResult:
     """List all user parameters with resolved values, expressions, units, comments."""
-    return params.list_parameters(_get_adapter()).to_dict()
+    return _tool_result(params.list_parameters(_get_adapter()))
 
 
 # ---------- Group 2: Sketch geometry ----------
 
 
 @mcp.tool()
-def create_sketch(plane: str, name: str, component: str | None = None) -> dict:
+def create_sketch(plane: str, name: str, component: str | None = None) -> CallToolResult:
     """Create a sketch on xy/xz/yz, a named plane, or a scoped planar face handle.
     component selects a unique component or occurrence path. Coordinates are sketch-local.
     Shared component definitions are refused to prevent editing every instance.
     """
-    return sk.create_sketch(_get_adapter(), plane, name, component).to_dict()
+    return _tool_result(sk.create_sketch(_get_adapter(), plane, name, component))
 
 
 @mcp.tool()
-def add_line(sketch: str, p1: list, p2: list) -> dict:
+def add_line(sketch: str, p1: list, p2: list) -> CallToolResult:
     """Add a single line to a sketch. p1, p2 are [x, y] in mm."""
-    return sk.add_line(_get_adapter(), sketch, p1, p2).to_dict()
+    return _tool_result(sk.add_line(_get_adapter(), sketch, p1, p2))
 
 
 @mcp.tool()
-def add_rectangle(sketch: str, kind: str, p1: list, p2: list, p3: list | None = None) -> dict:
+def add_rectangle(sketch: str, kind: str, p1: list, p2: list, p3: list | None = None) -> CallToolResult:
     """Add a rectangle to a sketch. kind in {center, corner, 3pt}. Returns line_indices for the 4 edges.
     center: p1=center point, p2=corner. corner: p1, p2 are opposite corners. 3pt: p1, p2 define one edge, p3 sets the other edge direction.
     """
-    return sk.add_rectangle(_get_adapter(), sketch, kind, p1, p2, p3).to_dict()
+    return _tool_result(sk.add_rectangle(_get_adapter(), sketch, kind, p1, p2, p3))
 
 
 @mcp.tool()
@@ -192,7 +208,7 @@ def add_circle(
     p1: list | None = None,
     p2: list | None = None,
     p3: list | None = None,
-) -> dict:
+) -> CallToolResult:
     """Add a circle. kind=center_radius needs center+radius_mm. kind=3pt needs p1+p2+p3.
     Returns circle_index for later reference."""
     kw = {
@@ -200,29 +216,29 @@ def add_circle(
         for k, v in {"center": center, "radius_mm": radius_mm, "p1": p1, "p2": p2, "p3": p3}.items()
         if v is not None
     }
-    return sk.add_circle(_get_adapter(), sketch, kind, **kw).to_dict()
+    return _tool_result(sk.add_circle(_get_adapter(), sketch, kind, **kw))
 
 
 @mcp.tool()
 def add_polygon(
     sketch: str, sides: int, center: list, vertex: list, inscribed: bool = True
-) -> dict:
+) -> CallToolResult:
     """Add a regular polygon. sides >= 3. Inscribed (default) means vertices lie on the radius."""
-    return sk.add_polygon(_get_adapter(), sketch, sides, center, vertex, inscribed).to_dict()
+    return _tool_result(sk.add_polygon(_get_adapter(), sketch, sides, center, vertex, inscribed))
 
 
 @mcp.tool()
-def add_geometric_constraint(sketch: str, kind: str, entities: list) -> dict:
+def add_geometric_constraint(sketch: str, kind: str, entities: list) -> CallToolResult:
     """Apply a geometric constraint. kind in {horizontal, vertical, parallel, perpendicular, coincident,
     tangent, equal, concentric, fix, midpoint, symmetric}. entities is a list of entity refs like
     'line:0', 'line:0:start', 'circle:1:center', or 'origin'."""
-    return sk.add_geometric_constraint(_get_adapter(), sketch, kind, entities).to_dict()
+    return _tool_result(sk.add_geometric_constraint(_get_adapter(), sketch, kind, entities))
 
 
 @mcp.tool()
 def add_dimension(
     sketch: str, kind: str, entities: list, expression: str, text_pos: list | None = None
-) -> dict:
+) -> CallToolResult:
     """Add a dimension with an expression. kind in {distance_h, distance_v, distance, angle, radial, diameter}.
     Parameter-name expressions ('body_width', 'length / 2') work AND propagate when the param changes
     (gotchas.md G9, verified 2026-05-31). Use literal mm only when you want a baked value.
@@ -232,18 +248,18 @@ def add_dimension(
       angle: 2 line refs
       radial / diameter: 1 circle or arc ref
     """
-    return sk.add_dimension(_get_adapter(), sketch, kind, entities, expression, text_pos).to_dict()
+    return _tool_result(sk.add_dimension(_get_adapter(), sketch, kind, entities, expression, text_pos))
 
 
 @mcp.tool()
-def assert_profiles(sketch: str, expected: int) -> dict:
+def assert_profiles(sketch: str, expected: int) -> CallToolResult:
     """Check that the sketch has the expected number of closed profiles. Returns ok=False if not.
     Use after building a sketch to catch self-intersecting polygons (which return profiles=2 silently)."""
-    return sk.assert_profiles(_get_adapter(), sketch, expected).to_dict()
+    return _tool_result(sk.assert_profiles(_get_adapter(), sketch, expected))
 
 
 @mcp.tool()
-def probe_sketch_dimensions(sketch: str, component_name: str | None = None) -> dict:
+def probe_sketch_dimensions(sketch: str, component_name: str | None = None) -> CallToolResult:
     """Dump every dimension in a sketch with parameter name, expression, value, and
     entity-attachment coordinates.
 
@@ -256,7 +272,7 @@ def probe_sketch_dimensions(sketch: str, component_name: str | None = None) -> d
     entity_one, entity_two. Entity descriptors include point/start/end/center
     coords in mm so you can match dims to specific lines/circles/ellipses.
     """
-    return sk.probe_sketch_dimensions(_get_adapter(), sketch, component_name).to_dict()
+    return _tool_result(sk.probe_sketch_dimensions(_get_adapter(), sketch, component_name))
 
 
 @mcp.tool()
@@ -265,7 +281,7 @@ def edit_sketch_dimension(
     dim_name: str,
     new_expression: str,
     component_name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Change a sketch dimension's expression by parameter name (e.g. `d278`).
 
     Triggers design.computeAll() before returning. After calling this, run
@@ -285,15 +301,15 @@ def edit_sketch_dimension(
         component_name: Optional disambiguation when the sketch name exists in
             multiple components.
     """
-    return sk.edit_sketch_dimension(
+    return _tool_result(sk.edit_sketch_dimension(
         _get_adapter(), sketch, dim_name, new_expression, component_name
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def add_ellipse(sketch: str, center: list, major_axis_end: list, minor_axis_end: list) -> dict:
+def add_ellipse(sketch: str, center: list, major_axis_end: list, minor_axis_end: list) -> CallToolResult:
     """Add an ellipse defined by center + major-axis endpoint + minor-axis endpoint. All in mm."""
-    return sk.add_ellipse(_get_adapter(), sketch, center, major_axis_end, minor_axis_end).to_dict()
+    return _tool_result(sk.add_ellipse(_get_adapter(), sketch, center, major_axis_end, minor_axis_end))
 
 
 @mcp.tool()
@@ -307,7 +323,7 @@ def add_arc(
     start: list | None = None,
     end: list | None = None,
     sweep_radians: float | None = None,
-) -> dict:
+) -> CallToolResult:
     """Add an arc. kind in {3pt, center_start_end, center_start_sweep}.
     3pt: p1, p2, p3.
     center_start_end: center, start, end.
@@ -326,13 +342,13 @@ def add_arc(
         }.items()
         if v is not None
     }
-    return sk.add_arc(_get_adapter(), sketch, kind, **kw).to_dict()
+    return _tool_result(sk.add_arc(_get_adapter(), sketch, kind, **kw))
 
 
 @mcp.tool()
-def add_spline(sketch: str, points: list, closed: bool = False) -> dict:
+def add_spline(sketch: str, points: list, closed: bool = False) -> CallToolResult:
     """Add a fitted spline through a list of [x, y] points (mm). Optionally closed."""
-    return sk.add_spline(_get_adapter(), sketch, points, closed).to_dict()
+    return _tool_result(sk.add_spline(_get_adapter(), sketch, points, closed))
 
 
 # ---------- Group 3: Features ----------
@@ -349,7 +365,7 @@ def extrude(
     is_full_length: bool = True,
     participants: list[str] | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Extrude a sketch profile into a feature.
     operation: new_body | join | cut | intersect | new_component
     extent_kind: distance (needs expression) | symmetric (needs expression) | all_positive | all_negative
@@ -357,7 +373,7 @@ def extrude(
     participants: body names to operate on (for cut/join/intersect)
     Returns feature_name + bodies_added.
     """
-    return feat.extrude(
+    return _tool_result(feat.extrude(
         _get_adapter(),
         sketch,
         profile_index,
@@ -368,7 +384,7 @@ def extrude(
         is_full_length,
         participants,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -379,13 +395,13 @@ def fillet_edges_by_geometry(
     min_length_mm: float | None = None,
     is_tangent_chain: bool = True,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Fillet edges of a body by geometric filter (no UI selection needed).
     parallel_to: x | y | z | any — only edges parallel to that axis (or all).
     radius: expression like 'corner_r' or '8 mm'.
     min_length_mm: optional minimum edge length filter (skips tiny rounding edges).
     """
-    return feat.fillet_edges_by_geometry(
+    return _tool_result(feat.fillet_edges_by_geometry(
         _get_adapter(),
         body,
         radius,
@@ -393,7 +409,7 @@ def fillet_edges_by_geometry(
         min_length_mm,
         is_tangent_chain,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -406,11 +422,11 @@ def chamfer_edges_by_geometry(
     angle: str | None = None,
     min_length_mm: float | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Chamfer edges of a body by geometric filter.
     kind: equal (one distance) | two_dist (needs distance2) | dist_angle (needs angle).
     """
-    return feat.chamfer_edges_by_geometry(
+    return _tool_result(feat.chamfer_edges_by_geometry(
         _get_adapter(),
         body,
         distance,
@@ -420,13 +436,13 @@ def chamfer_edges_by_geometry(
         angle,
         min_length_mm,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def mirror_feature(feature_or_body: str, plane: str, name: str | None = None) -> dict:
+def mirror_feature(feature_or_body: str, plane: str, name: str | None = None) -> CallToolResult:
     """Mirror a feature or body across a plane. plane: xy | xz | yz | <construction_plane_name>."""
-    return feat.mirror_feature(_get_adapter(), feature_or_body, plane, name).to_dict()
+    return _tool_result(feat.mirror_feature(_get_adapter(), feature_or_body, plane, name))
 
 
 @mcp.tool()
@@ -439,11 +455,11 @@ def pattern_rectangular(
     y_count: int = 1,
     y_distance: str | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Rectangular pattern. x_axis / y_axis: x | y | z | <construction_axis_name>.
     x_distance / y_distance: total-extent expressions like '40 mm' or '4 * pitch'.
     """
-    return feat.pattern_rectangular(
+    return _tool_result(feat.pattern_rectangular(
         _get_adapter(),
         feature_or_body,
         x_axis,
@@ -453,7 +469,7 @@ def pattern_rectangular(
         y_count,
         y_distance,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -463,16 +479,16 @@ def pattern_circular(
     count: int = 6,
     total_angle: str = "360 deg",
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Circular pattern around an axis. axis: x | y | z | <construction_axis_name>."""
-    return feat.pattern_circular(
+    return _tool_result(feat.pattern_circular(
         _get_adapter(),
         feature_or_body,
         axis,
         count,
         total_angle,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -482,16 +498,16 @@ def combine(
     operation: str = "join",
     keep_tools: bool = False,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Boolean combine. operation: join | cut | intersect. keep_tools: preserve tool bodies after op."""
-    return feat.combine(
+    return _tool_result(feat.combine(
         _get_adapter(),
         target_body,
         tool_bodies,
         operation,
         keep_tools,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -505,13 +521,13 @@ def revolve(
     is_symmetric: bool = False,
     participants: list[str] | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Revolve a sketch profile around an axis.
     axis: x | y | z | <construction_axis_name>
     extent_kind: full (360deg) | angle (needs angle expr)
     operation: new_body | join | cut | intersect | new_component
     """
-    return feat.revolve(
+    return _tool_result(feat.revolve(
         _get_adapter(),
         sketch,
         profile_index,
@@ -522,7 +538,7 @@ def revolve(
         is_symmetric,
         participants,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -532,19 +548,19 @@ def shell(
     face_normals_to_remove: list | None = None,
     direction: str = "inside",
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Hollow out a body. face_normals_to_remove is a list of [nx, ny, nz] for faces to remove
     (e.g. [[0, 0, 1]] removes the top face). Empty / omitted = closed shell.
     direction: inside | outside | both.
     """
-    return feat.shell(
+    return _tool_result(feat.shell(
         _get_adapter(),
         body,
         thickness,
         face_normals_to_remove,
         direction,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -561,14 +577,14 @@ def add_hole(
     depth_expression: str | None = None,
     name: str | None = None,
     face_handle: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Add a hole to one root-component body, optionally on an explicit planar face.
     kind: simple | counterbore (needs cbore_diameter + cbore_depth) | countersink (needs csink_diameter + csink_angle).
     position_mm: model-space [x, y, z]. Without face_handle, select the nearest
     trimmed +Z face at that XY. Only the selected body participates in the cut.
     extent_kind: all | distance (needs depth_expression).
     """
-    return feat.add_hole(
+    return _tool_result(feat.add_hole(
         _get_adapter(),
         body,
         position_mm,
@@ -582,17 +598,17 @@ def add_hole(
         depth_expression,
         name,
         face_handle,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def rebuild_feature(feature_name: str, component_name: str | None = None) -> dict:
+def rebuild_feature(feature_name: str, component_name: str | None = None) -> CallToolResult:
     """Return safe_rebuild_unavailable without changing the design.
     Automatic delete-and-recreate cannot preserve downstream references or
     reliably identify replacement profiles. Inspect audit_feature_health and
     correct the original feature inputs instead.
     """
-    return feat.rebuild_feature(_get_adapter(), feature_name, component_name).to_dict()
+    return _tool_result(feat.rebuild_feature(_get_adapter(), feature_name, component_name))
 
 
 @mcp.tool()
@@ -603,11 +619,11 @@ def move_body(
     rotation_angle_deg: float | None = None,
     rotation_origin_mm: list | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Move a body via a Move feature (parametric in the timeline).
     Provide translation_mm (mm) and/or rotation (axis + angle_deg).
     """
-    return feat.move_body(
+    return _tool_result(feat.move_body(
         _get_adapter(),
         body,
         translation_mm,
@@ -615,7 +631,7 @@ def move_body(
         rotation_angle_deg,
         rotation_origin_mm,
         name,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -627,27 +643,27 @@ def rib(
     name: str | None = None,
     target_body: str | None = None,
     is_flipped: bool = False,
-) -> dict:
+) -> CallToolResult:
     """Create a symmetric to-next rib on builds exposing RibFeatures.createInput.
     target_body is required. Older builds return rib_not_scriptable.
     is_flipped reverses the in-plane extrusion direction. A warning/error
     returns rib_feature_unhealthy and reports that the model may have changed.
     """
-    return feat.rib(
+    return _tool_result(feat.rib(
         _get_adapter(), sketch, thickness, side, extend_profile, name, target_body, is_flipped
-    ).to_dict()
+    ))
 
 
 # ---------- Group 5: Assembly & Motion (first slice, no joints) ----------
 
 
 @mcp.tool()
-def bodies_to_components(mapping: dict) -> dict:
+def bodies_to_components(mapping: dict) -> CallToolResult:
     """Convert root-level bodies into named components, preserving world position.
     mapping is {body_name: new_component_name}. Multi-body designs need this before
     joint/motion work — Fusion's joints operate on components, not bodies.
     """
-    return asm.bodies_to_components(_get_adapter(), mapping).to_dict()
+    return _tool_result(asm.bodies_to_components(_get_adapter(), mapping))
 
 
 @mcp.tool()
@@ -657,53 +673,53 @@ def move_component(
     rotation_axis: list | None = None,
     rotation_angle_deg: float | None = None,
     rotation_origin_mm: list | None = None,
-) -> dict:
+) -> CallToolResult:
     """Move an occurrence by translation (mm) and/or rotation (axis + angle deg).
     rotation_origin_mm defaults to [0, 0, 0] (world origin) if omitted.
     Use a full occurrence path when a name is ambiguous. Grounded occurrences
     and designs with pending position changes return an error. The response
     reports whether the move was applied and includes the resulting transform.
     """
-    return asm.move_component(
+    return _tool_result(asm.move_component(
         _get_adapter(),
         name,
         translation_mm,
         rotation_axis,
         rotation_angle_deg,
         rotation_origin_mm,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def ground_component(name: str) -> dict:
+def ground_component(name: str) -> CallToolResult:
     """Pin an occurrence at its current world pose. Release Ground To Parent before adding a pin."""
-    return asm.ground_component(_get_adapter(), name).to_dict()
+    return _tool_result(asm.ground_component(_get_adapter(), name))
 
 
 @mcp.tool()
-def unground_component(name: str) -> dict:
+def unground_component(name: str) -> CallToolResult:
     """Clear Pin and Ground To Parent on an occurrence."""
-    return asm.unground_component(_get_adapter(), name).to_dict()
+    return _tool_result(asm.unground_component(_get_adapter(), name))
 
 
 @mcp.tool()
-def create_rigid_group(component_names: list, name: str | None = None) -> dict:
+def create_rigid_group(component_names: list, name: str | None = None) -> CallToolResult:
     """Lock 2+ components together as a rigid group (they move as one)."""
-    return asm.create_rigid_group(_get_adapter(), component_names, name).to_dict()
+    return _tool_result(asm.create_rigid_group(_get_adapter(), component_names, name))
 
 
 @mcp.tool()
-def create_contact_set(body_names: list) -> dict:
+def create_contact_set(body_names: list) -> CallToolResult:
     """Create a contact set for physics / motion analysis between 2+ bodies."""
-    return asm.create_contact_set(_get_adapter(), body_names).to_dict()
+    return _tool_result(asm.create_contact_set(_get_adapter(), body_names))
 
 
 @mcp.tool()
-def interference_check(entity_names: list) -> dict:
+def interference_check(entity_names: list) -> CallToolResult:
     """Run an interference analysis on 2+ bodies or occurrences.
     Returns per-pair interference volume in mm^3. Empty pair list = no interference.
     """
-    return asm.interference_check(_get_adapter(), entity_names).to_dict()
+    return _tool_result(asm.interference_check(_get_adapter(), entity_names))
 
 
 @mcp.tool()
@@ -712,7 +728,7 @@ def set_joint_limits(
     min_value: str | None = None,
     max_value: str | None = None,
     rest_value: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Set min/max/rest values on an existing joint by name.
     Values are expressions: angles for revolute (e.g. '45 deg'), distances for slider.
     rest_value is the NEW May 2026 snap-back position. Pass None to leave any field unset.
@@ -720,20 +736,20 @@ def set_joint_limits(
     (cylindrical joints get rotation limits). The response echoes back what
     Fusion actually stored under `applied` (internal units: radians / cm).
     """
-    return asm.set_joint_limits(
+    return _tool_result(asm.set_joint_limits(
         _get_adapter(), joint_name, min_value, max_value, rest_value
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def drive_joint(joint_name: str, value: str) -> dict:
+def drive_joint(joint_name: str, value: str) -> CallToolResult:
     """Drive an existing joint to a target value.
     value is an expression: angle for revolute, distance for slider, etc.
     Tries jointMotion attributes in order: rotation, slide, roll, pitch, yaw.
     Fusion silently ignores drives beyond the joint's limits; check `applied`
     in the response (false = the joint stayed where it was).
     """
-    return asm.drive_joint(_get_adapter(), joint_name, value).to_dict()
+    return _tool_result(asm.drive_joint(_get_adapter(), joint_name, value))
 
 
 @mcp.tool()
@@ -745,7 +761,7 @@ def create_joint(
     offset_mm: str | None = None,
     angle_deg: str | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Create a Joint between two entity-handle origins.
 
     Joint origins are specified as entity handles (kind:path:token). Supported
@@ -785,7 +801,7 @@ def create_joint(
       (usually means the two geometries are mateable only with a different
       motion type, or one geometry is in a frozen component).
     """
-    return asm.create_joint(
+    return _tool_result(asm.create_joint(
         _get_adapter(),
         geometry_one,
         geometry_two,
@@ -794,7 +810,7 @@ def create_joint(
         offset_mm,
         angle_deg,
         name,
-    ).to_dict()
+    ))
 
 
 # ---------- Group 4: Construction Geometry ----------
@@ -813,7 +829,7 @@ def create_construction_plane(
     p1: list | None = None,
     p2: list | None = None,
     p3: list | None = None,
-) -> dict:
+) -> CallToolResult:
     """Create a construction plane. kind in {offset, midplane, at_angle, 3_points}.
     offset: base_plane + offset expr (e.g. 'thickness')
     midplane: plane_a + plane_b (between two existing planes)
@@ -836,7 +852,7 @@ def create_construction_plane(
         }.items()
         if v is not None
     }
-    return cons.create_construction_plane(_get_adapter(), kind, name, **kw).to_dict()
+    return _tool_result(cons.create_construction_plane(_get_adapter(), kind, name, **kw))
 
 
 @mcp.tool()
@@ -847,7 +863,7 @@ def create_construction_axis(
     p2: list | None = None,
     body: str | None = None,
     face_normal: list | None = None,
-) -> dict:
+) -> CallToolResult:
     """Create a construction axis. kind in {2_points, normal_to_face_by_geometry}.
     2_points: p1, p2 each as [x, y, z] in mm
     normal_to_face_by_geometry: body name + face_normal [nx, ny, nz] (finds the face whose normal matches)
@@ -862,19 +878,19 @@ def create_construction_axis(
         }.items()
         if v is not None
     }
-    return cons.create_construction_axis(_get_adapter(), kind, name, **kw).to_dict()
+    return _tool_result(cons.create_construction_axis(_get_adapter(), kind, name, **kw))
 
 
 @mcp.tool()
-def create_construction_point(coords: list, name: str | None = None) -> dict:
+def create_construction_point(coords: list, name: str | None = None) -> CallToolResult:
     """Create a construction point at explicit [x, y, z] coordinates (mm)."""
-    return cons.create_construction_point(_get_adapter(), coords, name).to_dict()
+    return _tool_result(cons.create_construction_point(_get_adapter(), coords, name))
 
 
 @mcp.tool()
-def delete_construction(name: str) -> dict:
+def delete_construction(name: str) -> CallToolResult:
     """Delete a construction plane / axis / point by name."""
-    return cons.delete_construction(_get_adapter(), name).to_dict()
+    return _tool_result(cons.delete_construction(_get_adapter(), name))
 
 
 # ---------- Group 5 / 6 / 2 / 3: Handle-consuming tools ----------
@@ -887,7 +903,7 @@ def list_body_entities(
     face_normal_filter: list | None = None,
     edge_parallel_to: str | None = None,
     min_edge_length_mm: float | None = None,
-) -> dict:
+) -> CallToolResult:
     """Enumerate faces / edges / vertices of a body and return their handles.
     This is the bridge between name-addressing (bodies) and handle-addressing (sub-entities).
 
@@ -899,22 +915,22 @@ def list_body_entities(
     Returns face/edge/vertex lists, each with handle, index, and geometric info.
     Use the returned handles in measure, fillet_edges, chamfer_edges, project_to_sketch, etc.
     """
-    return ht.list_body_entities(
+    return _tool_result(ht.list_body_entities(
         _get_adapter(),
         body,
         kinds,
         face_normal_filter,
         edge_parallel_to,
         min_edge_length_mm,
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def measure(entity_a: str, entity_b: str, kind: str = "distance") -> dict:
+def measure(entity_a: str, entity_b: str, kind: str = "distance") -> CallToolResult:
     """Measure between two entities using their handles (from list_body_entities or tool returns).
     kind: distance (min distance + nearest points) | min_distance (value only) | angle.
     """
-    return ht.measure(_get_adapter(), entity_a, entity_b, kind).to_dict()
+    return _tool_result(ht.measure(_get_adapter(), entity_a, entity_b, kind))
 
 
 @mcp.tool()
@@ -922,13 +938,13 @@ def find_mesh_using_ray(
     origin_mm: list,
     direction: list,
     component_name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Cast a ray in root coordinates and return intersected mesh handles.
     origin_mm is [x, y, z] in mm and direction is [dx, dy, dz].
     Pass a unique component name or full occurrence path to limit hits to that
     occurrence and its descendants. Omit component_name to search the whole assembly.
     """
-    return ht.find_mesh_using_ray(_get_adapter(), origin_mm, direction, component_name).to_dict()
+    return _tool_result(ht.find_mesh_using_ray(_get_adapter(), origin_mm, direction, component_name))
 
 
 @mcp.tool()
@@ -936,22 +952,22 @@ def ray_collision_with_mesh(
     mesh_handle: str,
     origin_mm: list,
     direction: list,
-) -> dict:
+) -> CallToolResult:
     """NEW May 2026: cast a ray against ONE MeshBody, return all intersection points.
     mesh_handle: handle of a mesh body (e.g. from find_mesh_using_ray or list_body_entities).
     """
-    return ht.ray_collision_with_mesh(_get_adapter(), mesh_handle, origin_mm, direction).to_dict()
+    return _tool_result(ht.ray_collision_with_mesh(_get_adapter(), mesh_handle, origin_mm, direction))
 
 
 @mcp.tool()
 def fillet_edges(
     edge_handles: list, radius: str, is_tangent_chain: bool = True, name: str | None = None
-) -> dict:
+) -> CallToolResult:
     """Fillet specific edges by handle (UI-selection style).
     edge_handles: list from list_body_entities (kinds=['edge']).
     radius: expression like 'corner_r' or '8 mm'.
     """
-    return ht.fillet_edges(_get_adapter(), edge_handles, radius, is_tangent_chain, name).to_dict()
+    return _tool_result(ht.fillet_edges(_get_adapter(), edge_handles, radius, is_tangent_chain, name))
 
 
 @mcp.tool()
@@ -962,57 +978,57 @@ def chamfer_edges(
     distance2: str | None = None,
     angle: str | None = None,
     name: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Chamfer specific edges by handle.
     kind: equal | two_dist (needs distance2) | dist_angle (needs angle).
     """
-    return ht.chamfer_edges(
+    return _tool_result(ht.chamfer_edges(
         _get_adapter(), edge_handles, distance, kind, distance2, angle, name
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def project_to_sketch(sketch: str, entity_handles: list) -> dict:
+def project_to_sketch(sketch: str, entity_handles: list) -> CallToolResult:
     """Project entities (by handle) onto a named sketch. Useful for cut-extrudes that reference body geometry."""
-    return ht.project_to_sketch(_get_adapter(), sketch, entity_handles).to_dict()
+    return _tool_result(ht.project_to_sketch(_get_adapter(), sketch, entity_handles))
 
 
 # ---------- Group 6: Verify & Visualize ----------
 
 
 @mcp.tool()
-def bounding_box(body_name: str | None = None) -> dict:
+def bounding_box(body_name: str | None = None) -> CallToolResult:
     """Return mm bbox + extents for a body (by name) or all bodies if name omitted.
     Walks root + every occurrence.
     """
-    return verify_tools.bounding_box(_get_adapter(), body_name).to_dict()
+    return _tool_result(verify_tools.bounding_box(_get_adapter(), body_name))
 
 
 @mcp.tool()
-def volume(body_name: str | None = None) -> dict:
+def volume(body_name: str | None = None) -> CallToolResult:
     """Return volume in cm^3 and mm^3 for a body (by name) or all bodies if name omitted."""
-    return verify_tools.volume(_get_adapter(), body_name).to_dict()
+    return _tool_result(verify_tools.volume(_get_adapter(), body_name))
 
 
 @mcp.tool()
-def mass(body_name: str | None = None) -> dict:
+def mass(body_name: str | None = None) -> CallToolResult:
     """Return mass (kg), material name, density, and volume for a body or all bodies.
     Material is whatever the body has been assigned; uses Fusion's physical-properties calc.
     """
-    return verify_tools.mass(_get_adapter(), body_name).to_dict()
+    return _tool_result(verify_tools.mass(_get_adapter(), body_name))
 
 
 @mcp.tool()
-def center_of_mass(body_name: str | None = None) -> dict:
+def center_of_mass(body_name: str | None = None) -> CallToolResult:
     """Return center of mass in mm world coordinates for a body or all bodies."""
-    return verify_tools.center_of_mass(_get_adapter(), body_name).to_dict()
+    return _tool_result(verify_tools.center_of_mass(_get_adapter(), body_name))
 
 
 @mcp.tool()
 def audit_feature_health(
     component_name: str | None = None,
     include_healthy: bool = False,
-) -> dict:
+) -> CallToolResult:
     """Sweep the feature tree (root + every sub-component) and report features
     whose healthState != 0.
 
@@ -1034,9 +1050,9 @@ def audit_feature_health(
     }
     States 3, 4, and 5 mean suppressed, rolled back, and unknown, respectively.
     """
-    return verify_tools.audit_feature_health(
+    return _tool_result(verify_tools.audit_feature_health(
         _get_adapter(), component_name, include_healthy
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
@@ -1057,11 +1073,11 @@ def screenshot(
 
 
 @mcp.tool()
-def set_view(direction: str = "iso-top-right", fit: bool = True) -> dict:
+def set_view(direction: str = "iso-top-right", fit: bool = True) -> CallToolResult:
     """Orient the viewport to a named direction. Optionally fit to view.
     Use when you want to change camera without capturing a screenshot.
     """
-    return viz_tools.set_view(_get_adapter(), direction, fit).to_dict()
+    return _tool_result(viz_tools.set_view(_get_adapter(), direction, fit))
 
 
 @mcp.tool()
@@ -1117,7 +1133,7 @@ def find_api(
     kind: str | None = None,
     namespace: str | None = None,
     limit: int = 5,
-) -> dict:
+) -> CallToolResult:
     """Search the local Fusion API help corpus.
 
     Returns top-N matches as {slug, title, namespace, kind, url, is_preview, introduced, snippet}.
@@ -1127,21 +1143,21 @@ def find_api(
       kind: 'object' | 'member' | 'manual' | etc — restrict to one page type
       namespace: substring match on namespace (e.g. 'Fusion', 'CAM', 'core')
     """
-    return kn.find_api(query, kind=kind, namespace=namespace, limit=limit).to_dict()
+    return _tool_result(kn.find_api(query, kind=kind, namespace=namespace, limit=limit))
 
 
 @mcp.tool()
-def find_pattern(query: str, limit: int = 5) -> dict:
+def find_pattern(query: str, limit: int = 5) -> CallToolResult:
     """Search historical Fusion modeling recipes by intent.
 
     Entries may describe older builds or retired APIs. Check current Autodesk
     documentation and verify resulting geometry when adapting a recipe.
     """
-    return kn.find_pattern(query, limit).to_dict()
+    return _tool_result(kn.find_pattern(query, limit))
 
 
 @mcp.tool()
-def find_tool(query: str, limit: int = 5) -> dict:
+def find_tool(query: str, limit: int = 5) -> CallToolResult:
     """Search this server's own tool reference (tools.md) by intent or symptom.
 
     Returns the matching sections: signatures, exact enum values, return keys,
@@ -1150,17 +1166,17 @@ def find_tool(query: str, limit: int = 5) -> dict:
 
     Works with Fusion closed.
     """
-    return kn.find_tool(query, limit).to_dict()
+    return _tool_result(kn.find_tool(query, limit))
 
 
 @mcp.tool()
-def find_gotcha(query: str, limit: int = 5) -> dict:
+def find_gotcha(query: str, limit: int = 5) -> CallToolResult:
     """Search gotchas.md (known failure modes) by symptom or keyword.
 
     Use when something behaves unexpectedly: check here for the documented cause
     + fix before debugging from scratch.
     """
-    return kn.find_gotcha(query, limit).to_dict()
+    return _tool_result(kn.find_gotcha(query, limit))
 
 
 @mcp.tool()
@@ -1171,7 +1187,7 @@ def export(
     refinement: str = "medium",
     units: str = "mm",
     component: str | None = None,
-) -> dict:
+) -> CallToolResult:
     """Export geometry to a file. format in {stl, 3mf, step, iges, obj, f3d, sat, smt}.
     path: absolute path (relative + '..' + Windows reserved names rejected).
     body: optional unique body selector for STL/3MF/OBJ.
@@ -1180,31 +1196,180 @@ def export(
     refinement: low | medium | high — applies to STL and OBJ mesh quality.
     units: mm | cm | m | inch — STL only.
     """
-    return io_tools.export(
+    return _tool_result(io_tools.export(
         _get_adapter(), format, path, body, refinement, units, component
-    ).to_dict()
+    ))
 
 
 @mcp.tool()
-def import_geometry(format: str, path: str, target_component: str | None = None) -> dict:
+def import_geometry(format: str, path: str, target_component: str | None = None) -> CallToolResult:
     """Import geometry from a file into the active design.
     format in {step, iges, sat, smt, f3d}.
     path: absolute path to an existing file.
     Returns imported object identities, source hash, units, and target frame.
     target_component accepts a unique component or occurrence path.
     """
-    return io_tools.import_geometry(_get_adapter(), format, path, target_component).to_dict()
+    return _tool_result(io_tools.import_geometry(_get_adapter(), format, path, target_component))
 
 
 # ---------- Escape hatch ----------
 
 
 @mcp.tool()
-def execute(script: str) -> dict:
+def inspect_assembly(component: str | None = None, include: list[str] | None = None,
+                     limit: int = 50, offset: int = 0) -> CallToolResult:
+    """Read bounded assembly structure, occurrence transforms, bodies, sketches, features and joints.
+    component is root (default) or a unique occurrence path. include selects occurrences, bodies,
+    sketches, features, joints or as_built_joints. Occurrences lists the selected subtree's descendants;
+    limit (1..200) and offset bound each section. Frames and units accompany measurements.
+    Reads shared definitions without editing them. Does not recompute or move the timeline.
+    """
+    return _tool_result(inspect_tools.inspect_assembly(_get_adapter(), component, include, limit, offset))
+
+
+@mcp.tool()
+def inspect_feature(feature: str, limit: int = 50) -> CallToolResult:
+    """Read a unique feature name or 'Occurrence:1 / Feature': health, parameters, current faces,
+    affected bodies and linked features. Surviving faces are not a complete history or dependency graph.
+    limit bounds each collection. Does not move the timeline or alter the design.
+    """
+    return _tool_result(inspect_tools.inspect_feature(_get_adapter(), feature, limit))
+
+
+@mcp.tool()
+def query_geometry(body: str, kind: str, filters: dict | None = None, limit: int = 50,
+                   offset: int = 0, expected_count: int | None = None) -> CallToolResult:
+    """Find current face/edge/vertex handles on a unique body or occurrence-qualified body.
+    Filters: type (Fusion geometry class), normal/parallel [x,y,z], radius/length in mm,
+    near [x,y,z] (distance to sample point), tolerance (mm for lengths; dimensionless for directions),
+    feature (current surviving faces).
+    Geometry is reported in root coordinates. expected_count refuses ambiguous/unexpected selection.
+    Re-query after topology edits. limit 1..200; offset paginates matching entities.
+    """
+    return _tool_result(inspect_tools.query_geometry(_get_adapter(), body, kind, filters, limit, offset, expected_count))
+
+
+@mcp.tool()
+def validate_design(checks: list[dict]) -> CallToolResult:
+    """Read-only mechanical checks (1..50). Each check is one of:
+    {type:'clearance', body_a, body_b, min_mm}; {type:'interference', body_a, body_b, max_overlap_mm3?:0};
+    {type:'bounds', body, min_mm:[x,y,z], max_mm:[x,y,z], tolerance_mm?:0}.
+    Body selectors accept names, occurrence-qualified names or body handles. Clearance uses B-rep
+    measurement plus interference. Bounds are conservative root-axis boxes, not cavity containment.
+    Read result.passed and each status: pass, violation or unavailable. No unchecked result passes.
+    """
+    return _tool_result(validation_tools.validate_design(_get_adapter(), checks))
+
+
+@mcp.tool()
+def set_reference_metadata(component: str, metadata: dict) -> CallToolResult:
+    """Attach portable v1 mechanical metadata to a local component definition. Geometry is unchanged.
+    Required metadata: schema_version:1, units:'mm', reference_id. Optional mounting_points
+    [{id,position_mm,axis,hole_diameter_mm?}], connectors [{id,origin_mm,x_axis,y_axis}],
+    keepouts [{id,min_mm,max_mm}], source_sha256. Directions must be unit vectors.
+    All coordinates are component-local. Shared/referenced definitions refuse edits.
+    Import STEP with import_geometry first; this tool does not import or fetch models.
+    """
+    return _tool_result(reference_tools.set_reference_metadata(_get_adapter(), component, metadata))
+
+
+@mcp.tool()
+def get_reference_metadata(component: str) -> CallToolResult:
+    """Read portable mechanical metadata, root-frame body bounds, and component-to-root transform.
+    Mounts, connectors and keep-outs remain explicitly component-local; metadata is user supplied,
+    not inferred or certified. Use an occurrence path for repeated components. Read-only.
+    """
+    return _tool_result(reference_tools.get_reference_metadata(_get_adapter(), component))
+
+
+@mcp.tool()
+def create_component(name: str, parent: str | None = None) -> CallToolResult:
+    """Create a uniquely named empty local component under root or a unique parent occurrence.
+    Requires a parametric design with the timeline at its end and no pending transforms.
+    Refuses duplicate names and edits to shared parents. Returns scoped occurrence identity and pose.
+    """
+    return _tool_result(placement_tools.create_component(_get_adapter(), name, parent))
+
+
+@mcp.tool()
+def insert_component(source: str, operation_id: str, parent: str | None = None,
+                     independent: bool = False) -> CallToolResult:
+    """Insert another local occurrence of source, or an independent definition when independent=True.
+    source and parent are occurrence selectors/handles. operation_id prevents duplicate retries in
+    the same parent; an independent copy also uses it as its component name. Shared insertion never
+    renames the source definition. No cloud links; placement starts at the parent origin.
+    """
+    return _tool_result(placement_tools.insert_component(_get_adapter(), source, operation_id, parent, independent))
+
+
+@mcp.tool()
+def place_component(component: str, origin_mm: list[float], x_axis: list[float] | None = None,
+                    y_axis: list[float] | None = None, relative_to: str | None = None) -> CallToolResult:
+    """Set an occurrence's absolute coordinate frame: origin in mm plus perpendicular unit X/Y axes.
+    Default axes are root X/Y. relative_to expresses the frame in another occurrence's coordinates.
+    Verifies the full resulting transform and captures its own position snapshot. Refuses pinned,
+    parent-grounded, shared-parent or pending-transform edits. Repeating the same pose is a no-op.
+    Use move_component for relative translations/rotations; this tool sets an absolute pose.
+    """
+    return _tool_result(placement_tools.place_component(_get_adapter(), component, origin_mm, x_axis, y_axis, relative_to))
+
+
+@mcp.tool()
+def create_parametric_enclosure(name: str, width: str, depth: str, height: str, wall: str,
+                               floor: str, component: str = "root") -> CallToolResult:
+    """Create an open rectangular enclosure centered on component XY, with floor at local Z=0.
+    Dimensions are Fusion length expressions (e.g. case_width, '2 mm'). Creates constrained native
+    sketches and editable extrudes, verifies dimensions/volume/health, and returns feature selectors.
+    Name must be unused in the component; repeated names refuse rather than duplicate geometry.
+    Shared or externally linked component edits refuse. Does not create a lid or plan an assembly.
+    """
+    return _tool_result(primitive_tools.create_parametric_enclosure(_get_adapter(), name, width, depth, height, wall, floor, component))
+
+
+@mcp.tool()
+def create_mounting_boss(name: str, x: str, y: str, z: str, outer_diameter: str,
+                         inner_diameter: str, height: str, component: str = "root",
+                         target_body: str | None = None) -> CallToolResult:
+    """Create an editable cylindrical/annular boss along component +Z at local x,y,z expressions.
+    All dimensions accept Fusion length expressions. inner_diameter='0 mm' makes a solid boss.
+    Creates a new body unless target_body explicitly selects a solid to join in the same component.
+    Checks material added, sibling identity/volume/bounds and feature health. Returns feature selectors.
+    """
+    return _tool_result(primitive_tools.create_mounting_boss(_get_adapter(), name, x, y, z, outer_diameter, inner_diameter,
+                                               height, component, target_body))
+
+
+@mcp.tool()
+def create_cutout(name: str, body: str, x: str, y: str, z: str, width: str, height: str,
+                 depth: str, plane: str = "xy", direction: str = "positive",
+                 component: str = "root") -> CallToolResult:
+    """Cut a parametric rectangle from one explicit solid. Local x,y,z anchor its lower-left corner;
+    width/height follow the selected xy/xz/yz sketch axes (Fusion XZ sketch Y is -Z).
+    All dimensions/positions are length expressions. depth follows plane normal or negative normal.
+    Verifies material removal and sibling preservation; a missed body is an error with targeted cleanup.
+    """
+    return _tool_result(primitive_tools.create_cutout(_get_adapter(), name, body, x, y, z, width, height, depth,
+                                        plane, direction, component))
+
+
+@mcp.tool()
+def sweep(sketch: str, path_sketch: str, path_entities: list[str], name: str,
+          profile_index: int = 0) -> CallToolResult:
+    """Create a native new-body sweep from a closed sketch profile along explicitly listed curves.
+    path_entities are line:N, arc:N or circle:N in path_sketch; no implicit chained selection.
+    Both sketches must belong to the same uniquely editable component. Use a unique name to refuse
+    duplicate retries. Verifies positive solid volume and health; returns feature/body handles.
+    Cuts, guide rails, twist and multi-section lofts remain available through execute.
+    """
+    return _tool_result(native_tools.sweep(_get_adapter(), sketch, path_sketch, path_entities, profile_index, name))
+
+
+@mcp.tool()
+def execute(script: str) -> CallToolResult:
     """Raw Python passthrough. The script must define `def run(_ctx):` as entry point.
     Use print() for any data to return; stdout becomes the response message.
     """
-    return execute_tool.run(_get_adapter(), script).to_dict()
+    return _tool_result(execute_tool.run(_get_adapter(), script))
 
 
 _USAGE = """\

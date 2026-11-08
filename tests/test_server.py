@@ -71,7 +71,8 @@ async def test_compare_wire_reply_links_before_and_after_native_images(monkeypat
     }
     assert json.loads(reply.content[0].text) == reply.structuredContent
     assert [(block.type, block.data) for block in reply.content[1:]] == [
-        ("image", _IMAGE_A["data"]), ("image", _IMAGE_B["data"])
+        ("image", _IMAGE_A["data"]),
+        ("image", _IMAGE_B["data"]),
     ]
 
 
@@ -111,3 +112,99 @@ def test_main_closes_adapter_when_server_exits(monkeypatch, run_fails):
         server.main()
     assert events == ["run", "close"]
     assert server._adapter is None
+
+
+@pytest.mark.asyncio
+async def test_new_tool_registration_and_wire_preflight(monkeypatch):
+    class Adapter:
+        def __init__(self):
+            self.calls = []
+
+        def execute_script(self, script, *, read_only=False):
+            self.calls.append(read_only)
+            return Envelope(ok=True, message='{"ok":true,"sections":{}}')
+
+    adapter = Adapter()
+    monkeypatch.setattr(server, "_adapter", adapter)
+    async with create_connected_server_and_client_session(
+        server.mcp, read_timeout_seconds=timedelta(seconds=5)
+    ) as client:
+        registered = [t.name for t in (await client.list_tools()).tools]
+        for name in ("sweep", "inspect_assembly", "create_parametric_enclosure"):
+            assert registered.count(name) == 1
+        missing = await client.call_tool(
+            "sweep", {"sketch": "p", "path_sketch": "q", "path_entities": ["line:0"]}
+        )
+        assert missing.isError is True
+        assert adapter.calls == []
+        invalid = await client.call_tool(
+            "create_parametric_enclosure",
+            {
+                "name": "case",
+                "width": "",
+                "depth": "10 mm",
+                "height": "10 mm",
+                "wall": "1 mm",
+                "floor": "1 mm",
+            },
+        )
+        assert json.loads(invalid.content[0].text)["error"] == "invalid_input"
+        assert adapter.calls == []
+        inspected = await client.call_tool(
+            "inspect_assembly", {"include": ["occurrences"], "limit": 2}
+        )
+        assert inspected.isError is False
+        payload = json.loads(inspected.content[0].text)
+        assert payload["ok"] is True
+        assert payload["result"]["sections"] == {}
+        assert adapter.calls == [True]
+
+
+@pytest.mark.asyncio
+async def test_wire_structured_envelopes_and_error_flag_for_legacy_new_and_raw(monkeypatch):
+    class Adapter:
+        def execute_script(self, script, *, read_only=False):
+            if script == "bad":
+                return Envelope(ok=False, error="fusion_error", message="failed")
+            if script == "good":
+                return Envelope(ok=True, message="done")
+            return Envelope(ok=True, message='{"ok":true,"sections":{}}')
+
+    adapter = Adapter()
+    monkeypatch.setattr(server, "_adapter", adapter)
+    monkeypatch.setattr(
+        server.doc_state_tool, "run", lambda _: Envelope(ok=True, result={"active_design": True})
+    )
+    async with create_connected_server_and_client_session(
+        server.mcp, read_timeout_seconds=timedelta(seconds=5)
+    ) as client:
+        tools = {t.name: t for t in (await client.list_tools()).tools}
+        assert set(tools["sweep"].inputSchema["required"]) == {
+            "sketch",
+            "path_sketch",
+            "path_entities",
+            "name",
+        }
+        legacy = await client.call_tool("doc_state", {})
+        new = await client.call_tool("inspect_assembly", {"include": ["occurrences"]})
+        invalid = await client.call_tool(
+            "create_parametric_enclosure",
+            {
+                "name": "case",
+                "width": "",
+                "depth": "10 mm",
+                "height": "10 mm",
+                "wall": "1 mm",
+                "floor": "1 mm",
+            },
+        )
+        raw_ok = await client.call_tool("execute", {"script": "good"})
+        raw_fail = await client.call_tool("execute", {"script": "bad"})
+    for reply in (legacy, new, invalid, raw_ok, raw_fail):
+        assert reply.structuredContent is not None
+        assert json.loads(reply.content[0].text) == reply.structuredContent
+        assert reply.isError is (not reply.structuredContent["ok"])
+    assert legacy.structuredContent["result"]["active_design"] is True
+    assert invalid.structuredContent["error"] == "invalid_input"
+    assert raw_ok.structuredContent["message"] == "done"
+    assert raw_fail.structuredContent["error"] == "fusion_error"

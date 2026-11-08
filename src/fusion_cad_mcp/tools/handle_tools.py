@@ -17,7 +17,7 @@ import json
 import textwrap
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_stdout_json, script_parse_failure
 from ..handles import (
     emit_make_handle,
     emit_resolve,
@@ -25,6 +25,7 @@ from ..handles import (
     emit_scope_expr,
     parse_handle,
 )
+from ..health import FEATURE_HEALTH_CHECK, FEATURE_HEALTH_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 from .sketch import SKETCH_RESOLVER_SCRIPT
 
@@ -42,16 +43,16 @@ MEASURE_KINDS = {"distance", "min_distance", "angle"}
 
 
 def _header() -> str:
-    return "import adsk.core, adsk.fusion\nimport json\n"
+    return "import adsk.core, adsk.fusion\nimport json\n" + FEATURE_HEALTH_SCRIPT
 
 
-def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = adapter.execute_script(script)
+def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, read_only: bool = False) -> Envelope:
+    env = adapter.execute_script(script, read_only=True) if read_only else adapter.execute_script(script)
     if not env.ok:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return script_parse_failure(env, f"{label}_parse_failed", read_only=read_only)
     if parsed.get("ok") is False:
         return Envelope(
             ok=False,
@@ -122,7 +123,7 @@ def measure(
         script = build_measure(entity_a, entity_b, kind)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "measure")
+    return _ok_runner(adapter, script, "measure", read_only=True)
 
 
 # ---------- find_mesh_using_ray (NEW May 2026) ----------
@@ -200,7 +201,7 @@ def find_mesh_using_ray(
         script = build_find_mesh_using_ray(component_name, origin_mm, direction)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "find_mesh_using_ray")
+    return _ok_runner(adapter, script, "find_mesh_using_ray", read_only=True)
 
 
 # ---------- ray_collision_with_mesh (NEW May 2026) ----------
@@ -258,7 +259,7 @@ def ray_collision_with_mesh(
         script = build_ray_collision_with_mesh(mesh_handle, origin_mm, direction)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "ray_collision_with_mesh")
+    return _ok_runner(adapter, script, "ray_collision_with_mesh", read_only=True)
 
 
 # ---------- fillet_edges (UI selection style) ----------
@@ -294,7 +295,9 @@ def run(_ctx):
     fil_in = root.features.filletFeatures.createInput()
     fil_in.addConstantRadiusEdgeSet(edges, adsk.core.ValueInput.createByString({json.dumps(radius)}), {is_tan})
     feat = root.features.filletFeatures.add(fil_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "edges_filleted": edges.count,
@@ -383,7 +386,9 @@ def run(_ctx):
     chm_in = root.features.chamferFeatures.createInput2()
     {chm_call}
     feat = root.features.chamferFeatures.add(chm_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "edges_chamfered": edges.count,
@@ -441,6 +446,8 @@ def run(_ctx):
 
     {resolve}
     result = sk.project2(_to_project, True)
+    if result is None or len(result) == 0:
+        print(json.dumps({{"ok": False, "error": "projection_no_curves", "mutation_state": "unknown"}})); return
 
     print(json.dumps({{
         "ok": True,
@@ -607,7 +614,7 @@ def list_body_entities(
         )
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "list_body_entities")
+    return _ok_runner(adapter, script, "list_body_entities", read_only=True)
 
 
 __all__ = [

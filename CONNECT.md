@@ -21,7 +21,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:27182/mcp
 ## 2. Install
 
 ```bash
-pip install "fusion-cad-mcp @ git+https://github.com/Mfrostbutter/fusion-cad-mcp.git"
+pip install "fusion-cad-mcp @ git+https://github.com/cat-thats-fat/fusion-cad-mcp.git"
 ```
 
 Check it:
@@ -62,7 +62,7 @@ Or edit the config directly. User scope, `~/.claude.json`, loads in every sessio
 
 Project scope, `.mcp.json` in a repo root, loads only in that repo. Use that if you only do CAD work in one place.
 
-Verify with `/mcp` inside Claude Code. You should see `fusion` connected with 75 tools.
+Verify with `/mcp` inside Claude Code. You should see `fusion` connected with its named tools.
 
 ### Claude Desktop
 
@@ -106,7 +106,7 @@ Any client speaking stdio MCP works. The server is `fusion-cad-mcp` with no argu
 `find_api` searches Autodesk's Fusion API help. That is Autodesk's content and is not redistributed, so you build a local copy once:
 
 ```bash
-pip install "fusion-cad-mcp[corpus] @ git+https://github.com/Mfrostbutter/fusion-cad-mcp.git"
+pip install "fusion-cad-mcp[corpus] @ git+https://github.com/cat-thats-fat/fusion-cad-mcp.git"
 fusion-cad-mcp corpus build --i-accept-autodesk-terms
 ```
 

@@ -9,6 +9,7 @@ geometry; unit tests remain necessary for unavailable API versions and faults.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import math
@@ -44,19 +45,60 @@ def checked(env):
     return env.result or {}
 
 
+class _FixtureAdapter:
+    """Guard typed scripts in the same Fusion call that performs their work."""
+
+    def __init__(self, fixture):
+        self.fixture = fixture
+
+    def __getattr__(self, name):
+        if name not in {"read_query", "list_tools"}:
+            raise AttributeError(f"Fixture adapter does not expose {name}")
+        return getattr(self.fixture.transport, name)
+
+    def execute_script(self, script, **kwargs):
+        expected = self.fixture.creation_id
+        if expected is None:
+            raise RuntimeError("Cannot execute a typed test without a confirmed fixture")
+        tree = ast.parse(script)
+        entries = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "run"]
+        if len(entries) != 1:
+            raise RuntimeError("Expected one generated run entry point")
+        entry = entries[0]
+        # Inserting at the first statement supports the generators' normal
+        # multiline entry points without changing their code or stdout contract.
+        first = entry.body[0]
+        if first.lineno == entry.lineno:
+            raise RuntimeError("Fixture guard requires a multiline run entry point")
+        lines = script.splitlines(keepends=True)
+        indent = " " * first.col_offset
+        guard = (
+            indent + "_fixture_doc = __import__('adsk.core', fromlist=['Application']).Application.get().activeDocument\n"
+            + indent + f"if (_fixture_doc is None or _fixture_doc.creationId != {expected!r}\n"
+            + indent + f"        or _fixture_doc.name != {self.fixture.name!r} or _fixture_doc.isSaved):\n"
+            + indent + "    raise RuntimeError('Active document is not the test fixture')\n"
+        )
+        lines.insert(first.lineno - 1, guard)
+        return self.fixture.transport.execute_script("".join(lines), **kwargs)
+
+
 class Fixture:
     def __init__(self, adapter):
-        self.adapter = adapter
+        self.transport = adapter
+        self.adapter = _FixtureAdapter(self)
         self.name = "MCP Live Regression " + uuid.uuid4().hex[:8]
         self.creation_id = None
         self.previous_id = None
+        self.start_attempted = False
         self.checks = []
 
     def script(self, body, *, guard=True):
         prefix = "import adsk.core, adsk.fusion, json, math\n\ndef run(_ctx):\n    app=adsk.core.Application.get()\n"
+        prefix += "    if not __debug__: raise RuntimeError('Live validation requires assertions enabled in Fusion')\n"
         if guard:
-            prefix += f"    assert app.activeDocument.creationId == {self.creation_id!r}, 'fixture is not active'\n"
-        env = self.adapter.execute_script(
+            prefix += f"    if not app.activeDocument or app.activeDocument.creationId != {self.creation_id!r}: raise RuntimeError('fixture is not active')\n"
+            prefix += f"    if app.activeDocument.name != {self.name!r} or app.activeDocument.isSaved: raise RuntimeError('fixture changed ownership')\n"
+        env = self.transport.execute_script(
             prefix + textwrap.indent(textwrap.dedent(body).strip(), "    ")
         )
         checked(env)
@@ -74,6 +116,7 @@ class Fixture:
         print(json.dumps(self.checks[-1]), flush=True)
 
     def start(self):
+        self.start_attempted = True
         info = self.script(
             f"""
             previous=app.activeDocument.creationId if app.activeDocument else None
@@ -90,20 +133,28 @@ class Fixture:
 
     def close(self):
         if self.creation_id is None:
+            if self.start_attempted:
+                raise RuntimeError("Fixture creation outcome is unknown; cleanup cannot be verified")
             return
-        self.script(
+        result = self.script(
             f"""
             docs=[app.documents.item(i) for i in range(app.documents.count)]
             matches=[d for d in docs if d.creationId=={self.creation_id!r}]
-            assert len(matches)==1 and matches[0].name=={self.name!r}
+            if len(matches)!=1 or matches[0].name!={self.name!r}:
+                raise RuntimeError('fixture identity not confirmed')
+            if matches[0].isSaved:
+                raise RuntimeError('fixture was saved; refusing to discard it')
             previous=[d for d in docs if d.creationId=={self.previous_id!r} and d not in matches]
-            assert matches[0].close(False)
+            if not matches[0].close(False):
+                raise RuntimeError('Fusion refused to close fixture')
             if len(previous)==1:
                 previous[0].activate()
             print(json.dumps({{'closed_fixture':True}}))
         """,
             guard=False,
         )
+        if result.get("closed_fixture") is not True:
+            raise RuntimeError("Fixture close acknowledgement was missing")
 
     def box(self, label, p1, p2, depth, *, direction="positive", component=None):
         checked(sketch.create_sketch(self.adapter, "xy", label + " Sketch", component))
@@ -691,6 +742,8 @@ class Fixture:
 
 
 def main():
+    if not __debug__:
+        raise RuntimeError("Live validation cannot run with Python optimization enabled")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--run", action="store_true", help="Authorize creating an unsaved regression fixture"

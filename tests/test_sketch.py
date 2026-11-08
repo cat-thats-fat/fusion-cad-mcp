@@ -241,7 +241,7 @@ class FakeAdapter:
         self.scripts: list[str] = []
         self.message = message
 
-    def execute_script(self, s: str) -> Envelope:
+    def execute_script(self, s: str, *, read_only: bool = False) -> Envelope:
         self.scripts.append(s)
         return Envelope(ok=True, message=self.message)
 

@@ -94,6 +94,7 @@ def test_build_fillet_y_parallel():
 
 def test_build_fillet_any_parallel_skips_axis_filter(monkeypatch):
     diagonal = SimpleNamespace(
+        length=3 ** 0.5,
         startVertex=SimpleNamespace(geometry=point()),
         endVertex=SimpleNamespace(geometry=point(1, 1, 1)),
     )
@@ -101,7 +102,7 @@ def test_build_fillet_any_parallel_skips_axis_filter(monkeypatch):
     edge_set = Mock()
     fillets = SimpleNamespace(
         createInput=lambda: SimpleNamespace(addConstantRadiusEdgeSet=edge_set),
-        add=lambda _: SimpleNamespace(name="Fillet"),
+        add=lambda _: SimpleNamespace(name="Fillet", healthState=0),
     )
     root = root_with(bodies=[body], features=SimpleNamespace(filletFeatures=fillets))
     adapter = ScriptAdapter(

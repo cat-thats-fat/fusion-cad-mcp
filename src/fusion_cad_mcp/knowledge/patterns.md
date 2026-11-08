@@ -1,5 +1,10 @@
 # Fusion MCP Patterns
 
+## Typed assembly and enclosure workflow
+
+Begin with `doc_state` and `inspect_assembly`; resolve repeated names with occurrence-qualified paths. Create or insert local components, then set and read back absolute placement. Add named parameters and build explicit enclosure, boss, cutout or sweep features. Import reference geometry separately and attach only known component-local mounts/connectors/keep-outs with `set_reference_metadata`; inspect the selected occurrence transform and root-frame bounds. Re-query topology after edits. Validate explicit clearance, interference and root-axis bounding boxes with `validate_design`; an unavailable check is not a pass, and an AABB pass does not prove irregular cavity containment. The primitives do not plan a complete design. If an edit outcome is unknown, inspect before retrying; recovery reports only their stated scope.
+
+
 Historical Python recipes for `fusion_mcp_execute` scripts. Some examples retain retired APIs such as `ExtrudeFeatureInput.setDistanceExtent` and `ConstructionPlaneInput.setByDistanceOnPath`. These are version-specific records, not proof of compatibility with the installed build. Prefer the current named tools and check Autodesk's current API documentation before adapting a recipe. Every snippet assumes the standard `run()` wrapper:
 
 ```python

@@ -50,13 +50,9 @@ A polygon where two edges cross internally (e.g. an 8-vertex Z-profile where edg
 
 Profile count of 0 means the polygon did not close (vertex typo or float mismatch).
 
-## Undo wipes whole-script transactions silently
+## Undo and exceptions do not prove rollback
 
-`update(undo)` reverses the last `execute` as ONE atomic transaction. If that script added params AND created geometry, undo wipes both. Common symptom: "wait, why are these params missing?" several scripts later.
-
-**Same rollback on exception-driven failure.** It is not only user undo. If a script throws partway (say, on `params.add` call 6 of 25), the 5 adds that already succeeded are silently wiped too. The tool error shows the traceback for the failing call but does NOT report which prior changes rolled back. Re-running an idempotent script after the fix then picks up from the last committed state, not the failed transaction's intermediate state.
-
-**Rule.** Make every script idempotent (params, bodies, sketches all checked-and-added). When rollback is plausible, split into two `execute` calls: params first, geometry second. Prefer the delete-loop cleanup over undo when resetting geometry.
+An undo may affect more than the intended edit. Some historical Fusion sessions observed rollback after a failed script, but this is not a general guarantee: a failed or timed-out write may leave partial changes. Inspect the document, timeline, feature health and any reported targeted cleanup before retrying. Do not delete by name or undo unrelated work blindly.
 
 ## `apiDocumentation` with null apiCategory returns empty silently
 
@@ -883,18 +879,9 @@ assert abs(floors[0] - (BASE_H - SOCKET_D)) < 0.05, f"socket opens the wrong way
 
 Generalises: for any feature where a sign error still removes the same material (pockets, counterbores, recesses), verify **where a face landed**, never the volume.
 
-## An exception rolls back the entire `execute`, including geometry that succeeded
+## An exception can leave an uncertain `execute` outcome
 
-The tool runs each `execute` as one transaction. A traceback anywhere discards **everything the script built**, not just the failing step.
-
-Cost a full rebuild once: a script created 6 bodies correctly, then threw `AttributeError` in the *reporting* code at the very end (`BoundingBox3D.combine` returns a bool and mutates in place, so `tot = tot.combine(bb) or tot` blows up). The geometry was perfect. The next call reported `bodies=0`.
-
-So:
-
-- Keep verification/printing trivially safe, or put it in a **separate** `execute` after the build lands.
-- Make build scripts **idempotent** (delete-by-name at the top) so a rerun after a rollback is free.
-- This is not a reason to `try/except` around `run()`. Swallowing the traceback loses the diagnosis and still rolls back. Fix the reporting bug.
-
+In one historical session a reporting exception was followed by an empty body collection. Do not generalize this observation into a rollback guarantee. Check the design after failures and timeouts; a script can partially apply, and an unnamed retry can create duplicates. Keep reporting simple and use targeted recovery where the tool explicitly provides and verifies it.
 
 ## Restarting Fusion invalidates the MCP session; the client 404s until it reconnects
 
@@ -1170,7 +1157,7 @@ Reading inputs from a broken feature is not safe. On an `ExtrudeFeature` whose s
 InternalValidationError: res == 0
 ```
 
-This matters for any "capture the inputs, delete, recreate" repair routine (see G10). The crash happens during capture, before you have anything to work with, and an uncaught exception rolls back the whole `execute` transaction.
+This matters for any "capture the inputs, delete, recreate" repair routine (see G10). The crash happens during capture, before you have anything to work with. Do not assume an uncaught exception restores earlier changes.
 
 Wrap every input read from a suspect feature, and treat a raising getter as "not rebuildable" so the original feature is preserved rather than destroyed by a repair that cannot finish.
 
@@ -1213,32 +1200,9 @@ Verified 2026-07-31 by probe: `floor` REJECTED; `floor_t`, `wall`, `corner_r` al
 The error message names no parameter, so in a 38-param batch add you get no clue which one failed.
 Probe suspects individually (see the transaction gotcha below).
 
-## A failed `execute` rolls back the ENTIRE script (2026-07-31)
+## Historical failed-script observations (2026-07-31)
 
-The MCP `execute` call is one transaction. If any statement raises, everything the script did is
-discarded, including work that already succeeded before the failure.
-
-Observed: a 38-entry idempotent parameter add failed on `floor` about two-thirds through.
-Afterwards `userParameters.count` was **0**, not 25. Again later, a `RectangularPatternFeatures.add`
-threw at the end of a script that had already built a fully constrained sketch and a cut feature;
-the sketch did not exist afterwards.
-
-Two consequences:
-
-1. **Idempotent scripts stay safe** (`if not params.itemByName(name)`), because a re-run starts from
-   the same clean state. This is why the idempotent-add pattern matters more than it looks.
-2. **Probe risky calls inside `try/except`** so the script itself returns success and the good work
-   persists. Use this to test an unfamiliar API signature across several variants in ONE call
-   instead of burning a round trip per guess:
-
-```python
-for label, ent in candidates:
-    try:
-        result = SomeApi.create(ent, opt)
-        print(f"  {label}: OK {result.count}")
-    except Exception as e:
-        print(f"  {label}: FAIL {str(e).strip()[:80]}")
-```
+Some old sessions observed that an exception removed earlier work in the same call. Other outcomes are possible, and the observation does not establish transaction semantics for every Fusion build or failure mode. After a failure inspect current parameters, geometry, feature health and timeline before retrying. Prefer small, named operations; avoid broad delete-and-rebuild cleanup.
 
 ## `Path.create` requires an assembly-context proxy (2026-07-31)
 
@@ -1919,7 +1883,7 @@ vertices for volume.
 
 Roughly 100 mutually overlapping circles in one sketch does not merely run slowly, it does not
 return. A probe that built the circles and then read `sketch.profiles.count` timed out with no
-result. The rollback was clean, so nothing was left behind, but no amount of patience helps.
+result. In that specific probe the rollback was observed to be clean; a timeout in another operation may leave changes.
 
 This rules out the obvious construction for any arrangement-based pattern (flower of life,
 overlapping-circle lattices, Voronoi from generators): you cannot draw the generators and let Fusion
@@ -2036,9 +2000,7 @@ tangent-continuous chain, not for the selection, or the assert will fire on a co
 ## Keep diagnostics trivial inside long build scripts (2026-08-03)
 
 A format-string bug in a progress `print` (three specifiers, four arguments) threw after a 568-point
-sketch had been rebuilt and its profiles classified. A failed `execute` rolls back the **whole**
-script, so the entire correct rebuild was discarded for a typo in a status line.
+sketch had been rebuilt and its profiles classified. In that historical session the rebuild was discarded after the failed call. Other failures can leave changes, so inspect rather than assuming either outcome.
 
 Compute expensive geometry first, assert on it, and keep the reporting to plain `%s` and single-value
-`%f` until the script has proven itself. Anything clever in a `print` is a rollback risk out of all
-proportion to its value.
+`%f` until the script has proven itself. Complicated reporting can fail after geometry has changed, leaving an uncertain outcome.

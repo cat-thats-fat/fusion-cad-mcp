@@ -114,5 +114,35 @@ def parse_stdout_json(envelope: Envelope) -> dict[str, Any] | None:
         return None
 
 
+def parse_status_json(envelope: Envelope) -> dict[str, Any] | None:
+    """Read a generated tool result only when its status is explicitly boolean."""
+    parsed = parse_stdout_json(envelope)
+    return parsed if parsed is not None and type(parsed.get("ok")) is bool else None
+
+
+def script_parse_failure(
+    envelope: Envelope, error: str, *, read_only: bool = False, writes_model: bool | None = None
+) -> Envelope:
+    """Report an unconfirmed execution when a script's result is missing or malformed.
+
+    An acknowledged Fusion call can lose its stdout after executing. A script
+    with external side effects, such as export, is not safe to replay blindly
+    even though it does not write the model.
+    """
+    return Envelope(
+        ok=False,
+        error=error,
+        message=envelope.message,
+        traceback=envelope.traceback,
+        state={
+            **(envelope.state or {}),
+            "failure_kind": "protocol",
+            "execution_outcome": "unknown",
+            "model_may_have_changed": not read_only if writes_model is None else writes_model,
+            "retry_safe": read_only,
+        },
+    )
+
+
 # Re-export for convenience
-__all__ = ["Envelope", "from_fusion_response", "parse_stdout_json"]
+__all__ = ["Envelope", "from_fusion_response", "parse_stdout_json", "parse_status_json", "script_parse_failure"]

@@ -17,9 +17,10 @@ axis, face), we resolve at runtime by walking the root component's collections.
 from __future__ import annotations
 
 import json
+import textwrap
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_stdout_json, script_parse_failure
 
 PRINCIPAL_PLANES = {
     "xy": "root.xYConstructionPlane",
@@ -39,8 +40,8 @@ def _plane_expr(name: str) -> str:
     if name_lc in PRINCIPAL_PLANES:
         return PRINCIPAL_PLANES[name_lc]
     return (
-        f"next((root.constructionPlanes.item(i) for i in range(root.constructionPlanes.count) "
-        f"if root.constructionPlanes.item(i).name == {json.dumps(name)}), None)"
+        f"(lambda m: m[0] if len(m) == 1 else None)([root.constructionPlanes.item(i) for i in range(root.constructionPlanes.count) "
+        f"if root.constructionPlanes.item(i).name == {json.dumps(name)}])"
     )
 
 
@@ -49,8 +50,8 @@ def _axis_expr(name: str) -> str:
     if name_lc in PRINCIPAL_AXES:
         return PRINCIPAL_AXES[name_lc]
     return (
-        f"next((root.constructionAxes.item(i) for i in range(root.constructionAxes.count) "
-        f"if root.constructionAxes.item(i).name == {json.dumps(name)}), None)"
+        f"(lambda m: m[0] if len(m) == 1 else None)([root.constructionAxes.item(i) for i in range(root.constructionAxes.count) "
+        f"if root.constructionAxes.item(i).name == {json.dumps(name)}])"
     )
 
 
@@ -60,7 +61,7 @@ def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return script_parse_failure(env, f"{label}_parse_failed")
     if parsed.get("ok") is False:
         return Envelope(
             ok=False,
@@ -73,6 +74,39 @@ def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
 
 def _header() -> str:
     return "import adsk.core, adsk.fusion\nimport json\nP = adsk.core.Point3D.create\n"
+
+
+def _protect_helper_creation(script: str, created_var: str, collection: str) -> str:
+    """Recover only objects created by this call; never undo unrelated work."""
+    start = script.index("    helper = root.sketches.add(")
+    end = script.index("    print(json.dumps(", start)
+    block = script[start:end]
+    block = block.replace(
+        "helper = root.sketches.add(root.xYConstructionPlane)",
+        '_helper_started = True\n    helper = root.sketches.add(root.xYConstructionPlane)\n    if helper is None: raise RuntimeError("helper sketch creation returned None")',
+    )
+    needle = f"{created_var} = root.{collection}.add(inp)"
+    block = block.replace(
+        needle,
+        f'_add_started = True\n    _created = {needle}\n    if _created is None: raise RuntimeError("construction creation returned None")',
+    )
+    return (
+        script[:start]
+        + "    helper = None\n    _helper_started = False\n    _created = None\n    _add_started = False\n    try:\n"
+        + textwrap.indent(block, "    ")
+        + "    except Exception as exc:\n"
+        + "        cleanup = []\n"
+        + "        safe_helper = not _add_started or _created is not None\n"
+        + "        if _created is not None:\n"
+        + "            try: safe_helper = bool(_created.deleteMe()) and _created.isValid is False; cleanup.append({'object': 'created', 'deleted': safe_helper})\n"
+        + "            except Exception: safe_helper = False; cleanup.append({'object': 'created', 'deleted': False})\n"
+        + "        if helper is not None and safe_helper:\n"
+        + "            try: cleanup.append({'object': 'helper', 'deleted': bool(helper.deleteMe()) and helper.isValid is False})\n"
+        + "            except Exception: cleanup.append({'object': 'helper', 'deleted': False})\n"
+        + "        elif helper is not None: cleanup.append({'object': 'helper', 'deleted': False})\n"
+        + "        print(json.dumps({'ok': False, 'error': 'construction_creation_failed', 'detail': str(exc), 'cleanup': cleanup, 'mutation_state': 'unknown' if (_helper_started and helper is None) or (_add_started and _created is None) else ('rolled_back' if all(x['deleted'] for x in cleanup) else 'partial')})); return\n"
+        + script[end:]
+    )
 
 
 # ---------- create_construction_plane ----------
@@ -148,7 +182,7 @@ def build_create_construction_plane(
             f"    inp.setByThreePoints(sp1, sp2, sp3)\n"
         )
 
-    return (
+    script = (
         _header()
         + "\ndef run(_ctx):\n"
         + "    app = adsk.core.Application.get()\n"
@@ -164,6 +198,11 @@ def build_create_construction_plane(
         + f"        'kind': {json.dumps(kind)},\n"
         + "        'name': plane.name,\n"
         + "    }))\n"
+    )
+    return (
+        _protect_helper_creation(script, "plane", "constructionPlanes")
+        if kind == "3_points"
+        else script
     )
 
 
@@ -209,6 +248,8 @@ def build_create_construction_axis(
             f"    inp.setByTwoPoints(sp1, sp2)\n"
         )
     else:  # normal_to_face_by_geometry
+        if face_point is not None:
+            raise ValueError("face_point is not supported; select a unique planar face by normal")
         if not body or not face_normal or len(face_normal) != 3:
             raise ValueError(
                 "kind=normal_to_face_by_geometry requires body + face_normal [nx,ny,nz]"
@@ -216,19 +257,21 @@ def build_create_construction_axis(
         # Find face by matching normal direction; tolerance ~1e-3 on each component
         nx, ny, nz = face_normal
         face_finder = (
-            f"    _find = lambda root, name: next("
-            f"(root.bRepBodies.item(i) for i in range(root.bRepBodies.count) "
-            f"if root.bRepBodies.item(i).name == name), None)\n"
+            f"    _find = lambda root, name: (lambda m: m[0] if len(m) == 1 else None)(["
+            f"root.bRepBodies.item(i) for i in range(root.bRepBodies.count) "
+            f"if root.bRepBodies.item(i).name == name])\n"
             f"    body = _find(root, {json.dumps(body)})\n"
             f"    if body is None:\n"
             f"        print(json.dumps({{'ok': False, 'error': 'body_not_found', 'name': {json.dumps(body)}}})); return\n"
-            f"    target_face = None\n"
+            f"    matching_faces = []\n"
             f"    for i in range(body.faces.count):\n"
             f"        f = body.faces.item(i)\n"
             f"        ok, n = f.evaluator.getNormalAtPoint(f.pointOnFace)\n"
             f"        if ok and abs(n.x - {nx}) < 1e-3 and abs(n.y - {ny}) < 1e-3 and abs(n.z - {nz}) < 1e-3:\n"
-            f"            target_face = f\n"
-            f"            break\n"
+            f"            if adsk.core.Plane.cast(f.geometry) is not None: matching_faces.append(f)\n"
+            f"    if len(matching_faces) > 1:\n"
+            f"        print(json.dumps({{'ok': False, 'error': 'face_ambiguous', 'count': len(matching_faces)}})); return\n"
+            f"    target_face = matching_faces[0] if matching_faces else None\n"
             f"    if target_face is None:\n"
             f"        print(json.dumps({{'ok': False, 'error': 'face_not_found_by_normal',"
             f" 'normal': [{nx}, {ny}, {nz}]}})); return\n"
@@ -237,7 +280,7 @@ def build_create_construction_axis(
         )
         setup = face_finder
 
-    return (
+    script = (
         _header()
         + "\ndef run(_ctx):\n"
         + "    app = adsk.core.Application.get()\n"
@@ -251,6 +294,9 @@ def build_create_construction_axis(
         + "    print(json.dumps({'ok': True, 'kind': "
         + json.dumps(kind)
         + ", 'name': ax.name}))\n"
+    )
+    return (
+        _protect_helper_creation(script, "ax", "constructionAxes") if kind == "2_points" else script
     )
 
 
@@ -271,7 +317,7 @@ def build_create_construction_point(coords: list[float], name: str | None = None
     if not coords or len(coords) != 3:
         raise ValueError("coords must be [x, y, z] in mm")
     name_block = f"    pt.name = {json.dumps(name)}\n" if name else ""
-    return (
+    script = (
         _header()
         + "\ndef run(_ctx):\n"
         + "    app = adsk.core.Application.get()\n"
@@ -292,6 +338,7 @@ def build_create_construction_point(coords: list[float], name: str | None = None
         + json.dumps(coords)
         + "}))\n"
     )
+    return _protect_helper_creation(script, "pt", "constructionPoints") if True else script
 
 
 def create_construction_point(
@@ -316,18 +363,23 @@ def build_delete_construction(name: str) -> str:
         + "    if design is None:\n"
         + "        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return\n"
         + "    root = design.rootComponent\n"
-        + "    deleted = []\n"
+        + "    matches = []\n"
         + "    for coll_name in ('constructionPlanes', 'constructionAxes', 'constructionPoints'):\n"
         + "        coll = getattr(root, coll_name)\n"
-        + "        for i in range(coll.count - 1, -1, -1):\n"
+        + "        for i in range(coll.count):\n"
         + "            item = coll.item(i)\n"
-        + f"            if item.name == {json.dumps(name)}:\n"
-        + "                deleted.append(coll_name + '/' + item.name)\n"
-        + "                item.deleteMe()\n"
+        + f"            if item.name == {json.dumps(name)}: matches.append((coll_name, item))\n"
+        + "    if len(matches) != 1:\n"
+        + "        print(json.dumps({'ok': False, 'error': 'construction_not_found' if not matches else 'construction_ambiguous',"
+        + f" 'name': {json.dumps(name)}, 'matches': [kind for kind, item in matches]}})); return\n"
+        + "    kind, item = matches[0]\n"
+        + "    try:\n"
+        + "        deleted = item.deleteMe()\n"
+        + "    except Exception as exc:\n"
+        + "        print(json.dumps({'ok': False, 'error': 'construction_delete_failed', 'detail': str(exc), 'mutation_state': 'unknown'})); return\n"
         + "    if not deleted:\n"
-        + "        print(json.dumps({'ok': False, 'error': 'construction_not_found',"
-        + f" 'name': {json.dumps(name)}}})); return\n"
-        + "    print(json.dumps({'ok': True, 'deleted': deleted}))\n"
+        + "        print(json.dumps({'ok': False, 'error': 'construction_delete_failed', 'mutation_state': 'unknown'})); return\n"
+        + f"    print(json.dumps({{'ok': True, 'deleted': [kind + '/' + {json.dumps(name)}]}}))\n"
     )
 
 

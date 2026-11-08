@@ -19,11 +19,11 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    # Capped below 2.0: mcp 2.x dropped mcp.server.fastmcp, which server.py
-    # imports. Without the ceiling pip installs 2.x and the entry point dies
-    # with ModuleNotFoundError. Lift only after porting to mcp.server.mcpserver.
-    # FastMCP passes through native CallToolResult starting in supported 1.x releases.
-    "mcp>=1.20.0,<2",
+    # MCP 1.30.0 is the tested minimum for the native CallToolResult wire
+    # contract with current Pydantic. MCP 1.20 imports a removed Pydantic
+    # private helper when paired with Pydantic 2.14. Keep below 2 until the
+    # server is ported away from the 1.x FastMCP interface.
+    "mcp>=1.30.0,<2",
     "httpx>=0.27",
     "httpx-sse>=0.4,<1",
     "jsonschema>=4.18,<5",
@@ -33,7 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 # Only needed to build the local Fusion API corpus that find_api searches.
 # The server itself never imports these, so a plain install stays light and
-# the 73 tools that do not touch the corpus work without them.
+# tools that do not touch the corpus work without them.
 corpus = [
     "requests>=2.31",
     "beautifulsoup4>=4.12",

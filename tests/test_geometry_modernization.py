@@ -22,6 +22,7 @@ def execute(script, monkeypatch, design):
     core.Application = types.SimpleNamespace(get=lambda: types.SimpleNamespace(activeProduct=design))
     core.ValueInput = types.SimpleNamespace(createByString=lambda s: s)
     fusion.Design = types.SimpleNamespace(cast=lambda p: p)
+    fusion.FeatureHealthStates = types.SimpleNamespace(HealthyFeatureHealthState=0)
     fusion.FeatureOperations = types.SimpleNamespace(NewBodyFeatureOperation=1)
     fusion.ExtentDirections = types.SimpleNamespace(PositiveExtentDirection=1, NegativeExtentDirection=-1)
     fusion.DistanceExtentDefinition = types.SimpleNamespace(create=lambda value: ("distance", value))
@@ -38,7 +39,7 @@ def test_distance_extrude_direction_is_one_sided(monkeypatch, direction, expecte
     profile = object()
     sketch_obj = types.SimpleNamespace(name="outline", profiles=types.SimpleNamespace(count=1, item=lambda i: profile))
     inp = MagicMock()
-    feat = types.SimpleNamespace(name="Extrude", bodies=types.SimpleNamespace(count=0))
+    feat = types.SimpleNamespace(name="Extrude", healthState=0, bodies=types.SimpleNamespace(count=0))
     extrudes = types.SimpleNamespace(createInput=lambda p, op: inp, add=lambda i: feat)
     root = types.SimpleNamespace(sketches=types.SimpleNamespace(count=1, item=lambda i: sketch_obj),
                                  features=types.SimpleNamespace(extrudeFeatures=extrudes),
@@ -83,11 +84,12 @@ def test_hole_uses_requested_face_and_only_selected_body(monkeypatch):
     core.Point3D = types.SimpleNamespace(create=lambda x, y, z: point)
     core.Plane = types.SimpleNamespace(cast=lambda geometry: geometry)
     core.ValueInput = types.SimpleNamespace(createByString=lambda s: s)
+    fusion.FeatureHealthStates = types.SimpleNamespace(HealthyFeatureHealthState=0)
     fusion.BRepFace = types.SimpleNamespace(cast=lambda f: f)
     fusion.ExtentDirections = types.SimpleNamespace(PositiveExtentDirection=1, NegativeExtentDirection=-1)
     inp = MagicMock()
     inp.setPositionByPoint.return_value = True
-    feature = types.SimpleNamespace(name="Hole")
+    feature = types.SimpleNamespace(name="Hole", healthState=0)
     hole_features = types.SimpleNamespace(createSimpleInput=lambda diameter: inp, add=lambda i: feature)
     comp = types.SimpleNamespace(features=types.SimpleNamespace(holeFeatures=hole_features))
     body = types.SimpleNamespace(name="target", parentComponent=comp)
@@ -120,13 +122,13 @@ def test_rib_capability_gate_and_current_api_signature(monkeypatch, is_flipped):
         monkeypatch.setitem(sys.modules, name, module)
     body = types.SimpleNamespace(name="target")
     curves = [object(), object()]
-    sk = types.SimpleNamespace(sketchCurves=types.SimpleNamespace(count=2, item=lambda i: curves[i]))
+    sk = types.SimpleNamespace(name="profile", sketchCurves=types.SimpleNamespace(count=2, item=lambda i: curves[i]))
     inp = types.SimpleNamespace(isSymmetric=False, isFlipped=None, setToNextExtent=MagicMock(return_value=True))
     create = MagicMock(return_value=inp)
     feature = types.SimpleNamespace(name="Rib", healthState=0, errorOrWarningMessage="")
     ribs = types.SimpleNamespace(createInput=create, add=MagicMock(return_value=feature))
     root = types.SimpleNamespace(features=types.SimpleNamespace(ribFeatures=ribs),
-        sketches=types.SimpleNamespace(itemByName=lambda name: sk),
+        sketches=Collection(sk),
         bRepBodies=types.SimpleNamespace(count=1, item=lambda i: body),
         allOccurrences=types.SimpleNamespace(count=0))
     body.parentComponent = root
@@ -269,15 +271,16 @@ def test_rectangular_pattern_executes_direction_two(
     target = types.SimpleNamespace(name="rib")
     inp = types.SimpleNamespace(setDirectionTwo=MagicMock())
     create = MagicMock(return_value=inp)
-    patterns = types.SimpleNamespace(createInput=create, add=lambda value: types.SimpleNamespace(name="Pattern"))
+    patterns = types.SimpleNamespace(createInput=create, add=lambda value: types.SimpleNamespace(name="Pattern", healthState=0))
     feature_collection = types.SimpleNamespace(count=1, item=lambda index: target, rectangularPatternFeatures=patterns)
     axes = {name: object() for name in "xyz"}
-    root = types.SimpleNamespace(features=feature_collection, **{f"{name}ConstructionAxis": axis for name, axis in axes.items()})
+    root = types.SimpleNamespace(features=feature_collection, bRepBodies=Collection(), allOccurrences=Collection(), **{f"{name}ConstructionAxis": axis for name, axis in axes.items()})
     core.Application = types.SimpleNamespace(get=lambda: types.SimpleNamespace(activeProduct=types.SimpleNamespace(rootComponent=root)))
     core.ValueInput = types.SimpleNamespace(createByReal=lambda n: n, createByString=lambda s: s)
     core.ObjectCollection = types.SimpleNamespace(create=lambda: types.SimpleNamespace(add=lambda obj: None))
     fusion.Design = types.SimpleNamespace(cast=lambda product: product)
     fusion.PatternDistanceType = types.SimpleNamespace(ExtentPatternDistanceType="extent")
+    fusion.FeatureHealthStates = types.SimpleNamespace(HealthyFeatureHealthState=0)
     script = features.build_pattern_rectangular("rib", x_axis=primary, x_count=3, x_distance="30 mm", y_axis=secondary, y_count=count, y_distance=distance)
     ns = {}
     exec(script, ns)

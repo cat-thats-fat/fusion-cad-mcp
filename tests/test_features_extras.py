@@ -32,7 +32,6 @@ def test_build_revolve_with_participants():
         "sk", 0, axis="z", operation="cut", extent_kind="full", participants=["plate"]
     )
     assert "participantBodies" in src
-    assert "_find_body" in src
 
 
 # ---------- shell ----------

@@ -1,6 +1,6 @@
 ---
 name: fusion-cad
-description: "Use this skill whenever the user wants to do CAD work through Autodesk Fusion, either via the fusion-cad-mcp server (75 named tools: create_sketch, add_rectangle, extrude, add_hole, fillet_edges, create_joint, export, and so on) or via Autodesk's own Fusion MCP (fusion_mcp_execute, fusion_mcp_read, fusion_mcp_update, fusion_mcp_electronics_read). Covers parametric constrained sketches, extrudes, holes, fillets, chamfers, shells, multi-body modeling, assemblies and components, as-built joints, motion (hinges, sliders), print-in-place mechanisms and print orientation, exports to STL/3MF/STEP, undo/redo, screenshots, API documentation lookup, and explicit camera control. Trigger on any mention of Fusion 360, the Fusion MCP, .f3d/.f3z/.step files, parametric CAD design, building or editing 3D models programmatically, sketches, extrudes, fillets, counterbore holes, components, joints, hinges, sliders, assemblies, print-in-place parts, print orientation, or when the user asks to model a bracket, tray, mount, panel, organizer, rack mount, or any functional 3D-printed product. Use even if the user does not name the MCP explicitly: if they ask Claude to design something in Fusion or build a part, this skill applies."
+description: "Use this skill whenever the user wants to do CAD work through Autodesk Fusion, either via the fusion-cad-mcp server (named tools: create_sketch, add_rectangle, extrude, add_hole, fillet_edges, create_joint, export, and so on) or via Autodesk's own Fusion MCP (fusion_mcp_execute, fusion_mcp_read, fusion_mcp_update, fusion_mcp_electronics_read). Covers parametric constrained sketches, extrudes, holes, fillets, chamfers, shells, multi-body modeling, assemblies and components, as-built joints, motion (hinges, sliders), print-in-place mechanisms and print orientation, exports to STL/3MF/STEP, undo/redo, screenshots, API documentation lookup, and explicit camera control. Trigger on any mention of Fusion 360, the Fusion MCP, .f3d/.f3z/.step files, parametric CAD design, building or editing 3D models programmatically, sketches, extrudes, fillets, counterbore holes, components, joints, hinges, sliders, assemblies, print-in-place parts, print orientation, or when the user asks to model a bracket, tray, mount, panel, organizer, rack mount, or any functional 3D-printed product. Use even if the user does not name the MCP explicitly: if they ask Claude to design something in Fusion or build a part, this skill applies."
 ---
 
 # Fusion CAD
@@ -13,7 +13,7 @@ Drive Autodesk Fusion safely and efficiently through an MCP server.
 
 This matters before anything else, because the tool surface is completely different.
 
-**`fusion-cad-mcp` (this project).** 75 named, typed tools: `create_sketch`, `extrude`, `add_hole`, `create_joint`. Each one validates arguments, returns a structured envelope, and encodes the gotchas so you do not have to. **Prefer this whenever it is available.**
+**`fusion-cad-mcp` (this project).** named, typed tools: `create_sketch`, `extrude`, `add_hole`, `create_joint`. Each one validates arguments, returns a structured envelope, and encodes the gotchas so you do not have to. **Prefer this whenever it is available.**
 
 **Autodesk's own Fusion MCP.** Four fat tools that take raw Python or query objects:
 
@@ -32,7 +32,7 @@ Load on demand. This file is the operating manual; those are the depth.
 
 | File | What it is | When to load |
 |---|---|---|
-| `tools.md` | All 75 tools: signatures, exact enums, return keys, error codes | Before calling a tool whose arguments you are not sure of |
+| `tools.md` | Tool reference: signatures, exact enums, return keys, error codes | Before calling a tool whose arguments you are not sure of |
 | `gotchas.md` | Failure-mode catalog, each with symptom and fix | When something behaves unexpectedly, or before a risky operation |
 | `patterns.md` | Reusable Python for `execute` | When no typed tool covers the operation |
 
@@ -49,11 +49,11 @@ The server can also search these for you without loading them: `find_tool`, `fin
 
 ## The two things every tool shares
 
-**The envelope.** Every tool returns `{ok, message, result, state, image, error, traceback}`. One parsing contract.
+**The envelope.** Every tool returns `{ok, message, result, state, image, error, traceback}`. One parsing contract. MCP provides it in JSON text and `structuredContent`; `isError` follows `ok`. Images use native image blocks.
 
-**`ok: true` does not mean success.** `doc_state` returns `ok: true` with `{"active_design": false}`. `drive_joint` returns `ok: true` when Fusion silently ignored a beyond-limit drive; check `applied`. `move_component` returns `ok: true` when a joint solver overrode the move; check `moved`. `export` returns `ok: true` with `bytes_written: 0`. **Read `result`, not just `ok`.**
+**`ok: true` does not mean success.** `doc_state` returns `ok: true` with `{"active_design": false}`. `drive_joint` returns `ok: true` when Fusion silently ignored a beyond-limit drive; check `applied`. `move_component` returns `ok: true` when a joint solver overrode the move; check `moved`. `export` reports an error when output is missing or empty. **Read `result`, not just `ok`.**
 
-**Handles.** Bodies, sketches, components, and joints are addressed by **name**. Faces, edges, and vertices have no stable name and are addressed by an opaque handle, `kind:path:token`. `list_body_entities` converts a body name into handles for its faces, edges, and vertices; that is the only route to sub-entity geometry. Handles go stale after edits and return `handle_invalid`, so never cache them across a feature change.
+**Handles.** Bodies, sketches, components, and joints are addressed by **name**. Faces, edges, and vertices have no stable name and are addressed by an opaque handle, `kind:path:token`. `list_body_entities` and `query_geometry` return handles for current faces, edges, and vertices. Handles go stale after edits and return `handle_invalid`, so never cache them across a feature change.
 
 ## Standard build
 
@@ -67,6 +67,14 @@ The server can also search these for you without loading them: `find_tool`, `fin
 8. **`audit_feature_health`** after anything that edits sketches, parameters, or features. It catches downstream breakage the API otherwise reports as healthy.
 9. **Export** with an absolute path, and check `bytes_written`.
 
+## Inspect, assemble and validate
+
+Use `inspect_assembly`, `inspect_feature` and `query_geometry` before selecting geometry. Assembly inspection includes a paginated occurrence hierarchy by default; a selected occurrence's listing covers its descendants. Specify occurrence-qualified names for repeated components; handles can become stale after edits. `query_geometry` uses root-frame coordinates and its `near` test is distance to a sample point, not minimum distance. Feature-created faces are only currently surviving faces; a generic dependency graph is unavailable.
+
+Use `create_component`, `insert_component` and `place_component` for local assembly structure and poses. `place_component` takes absolute origin in mm and perpendicular unit axes, optionally relative to another occurrence; read back its transform. The parametric `create_parametric_enclosure`, `create_mounting_boss` and `create_cutout` tools are individual primitives, not an automatic planner. `sweep` uses explicit path-curve references and requires a unique name; inspect any unknown outcome before retrying.
+
+`set_reference_metadata` stores user-provided mount, connector and keep-out data on a component definition in component-local mm. `get_reference_metadata` returns that data, the selected occurrence transform, and root-frame body bounds. Shared or linked definitions refuse edits. `validate_design` checks explicit bounds, interference and minimum clearance; inspect every status and `passed`. Axis-aligned bounds do not establish cavity containment.
+
 ## Traps that cost the most time
 
 Full catalog in `gotchas.md`. These bite first.
@@ -75,13 +83,11 @@ Full catalog in `gotchas.md`. These bite first.
 
 **Internal units are centimeters.** Tools convert for you at the boundary, so you pass and receive mm. Raw scripts do not: `Point3D.create` takes cm, and `parameter.value` returns cm. Use `ValueInput.createByString("30 mm")` and let Fusion convert.
 
-**Edge length is chord distance, not arc length.** The geometric fillet and chamfer filters measure straight-line distance between endpoints, so a closed circular edge measures 0 and is never selected, and arcs are under-measured.
+**Edge lengths use Fusion curve length.** Axis-parallel filtering applies only to straight edges; `parallel_to="any"` can include curves. Use `query_geometry` for bounded semantic selection.
 
 **`add_hole` targets one body.** Provide a face handle and a point on that planar face, or omit the handle to select the nearest upward planar face containing the XY point. The Z coordinate selects among candidate faces. Child-component bodies are currently refused; inspect `actual_position_mm`.
 
-**Undo is atomic on the whole prior call.** A script that added parameters *and* geometry loses both, silently. Prefer targeted deletion.
-
-**An exception rolls back the entire script.** There are no partial commits inside one `execute`.
+**Failures may leave changes.** Do not assume an exception or timeout rolled a script back. Inspect the design and reported mutation/rollback state before retrying; targeted cleanup has only the scope explicitly reported. Undo can also affect unrelated work, so inspect before using it.
 
 **Joint limits and drives report in internal units** (radians, centimeters), not what you passed in.
 
@@ -115,10 +121,10 @@ Look the API up before writing against an unfamiliar method. `find_api` costs on
 
 ## Setup
 
-`fusion-cad-mcp` is at **https://github.com/Mfrostbutter/fusion-cad-mcp**:
+`fusion-cad-mcp` is at **https://github.com/cat-thats-fat/fusion-cad-mcp**:
 
 ```bash
-pip install "fusion-cad-mcp @ git+https://github.com/Mfrostbutter/fusion-cad-mcp.git"
+pip install "fusion-cad-mcp @ git+https://github.com/cat-thats-fat/fusion-cad-mcp.git"
 ```
 
 Then point your MCP client at the `fusion-cad-mcp` command. `CONNECT.md` in that repo has per-client config and troubleshooting.
@@ -128,7 +134,7 @@ The server talks to Autodesk's MCP at `127.0.0.1:27182`, which is enabled in **P
 `find_api` needs a local corpus of Autodesk's API help, which is not redistributed. Build it once:
 
 ```
-pip install "fusion-cad-mcp[corpus] @ git+https://github.com/Mfrostbutter/fusion-cad-mcp.git"
+pip install "fusion-cad-mcp[corpus] @ git+https://github.com/cat-thats-fat/fusion-cad-mcp.git"
 fusion-cad-mcp corpus build --i-accept-autodesk-terms
 ```
 

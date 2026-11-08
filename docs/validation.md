@@ -1,5 +1,10 @@
 # Modernization validation
 
+This is the historical PR #1 report for baseline `7fed4e6`. The subsequent
+capability upgrade has its own [verification report](prebenchmark-validation.md)
+and [test review](prebenchmark-test-review.md); counts and transport limits below
+describe the earlier revision.
+
 Validated on Windows with Python 3.12 and Autodesk Fusion 2706.1.17. Earlier
 checks also exercised 2705.1.30 before updating Fusion. No user design was saved
 or changed; the live harness creates and closes its own unsaved fixture.

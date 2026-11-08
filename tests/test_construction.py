@@ -128,3 +128,45 @@ def test_delete_construction_requires_name():
     a = FakeAdapter()
     env = c.delete_construction(a, "")
     assert env.ok is False
+
+
+def test_helper_add_failure_reports_unknown_not_rolled_back(monkeypatch):
+    import types
+
+    from tests._assembly_fakes import ScriptAdapter
+
+    def add(_):
+        raise RuntimeError("could have created helper")
+
+    root = types.SimpleNamespace(
+        sketches=types.SimpleNamespace(add=add), xYConstructionPlane=object()
+    )
+    adapter = ScriptAdapter(
+        monkeypatch,
+        types.SimpleNamespace(rootComponent=root),
+        core={"Point3D": types.SimpleNamespace(create=lambda *args: args)},
+    )
+    out = c.create_construction_point(adapter, [1, 2, 3]).result
+    assert out["error"] == "construction_creation_failed"
+    assert out["mutation_state"] == "unknown"
+    assert out["cleanup"] == []
+
+
+def test_helper_delete_requires_verified_invalidity(monkeypatch):
+    import types
+
+    from tests._assembly_fakes import ScriptAdapter
+
+    helper = types.SimpleNamespace(isValid=True, deleteMe=lambda: True)
+    root = types.SimpleNamespace(
+        sketches=types.SimpleNamespace(add=lambda _: helper), xYConstructionPlane=object()
+    )
+    adapter = ScriptAdapter(
+        monkeypatch,
+        types.SimpleNamespace(rootComponent=root),
+        core={"Point3D": types.SimpleNamespace(create=lambda *args: args)},
+    )
+    out = c.create_construction_point(adapter, [1, 2, 3]).result
+    assert out["error"] == "construction_creation_failed"
+    assert out["mutation_state"] == "partial"
+    assert out["cleanup"] == [{"object": "helper", "deleted": False}]

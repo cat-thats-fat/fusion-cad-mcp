@@ -52,7 +52,9 @@ class _FusionStub:
             return _reply(
                 payload,
                 {"protocolVersion": self.protocol, "capabilities": {"tools": {}}},
-                {"Mcp-Session-Id": f"fixture-session-{self.session_count}"} if self.session else None,
+                {"Mcp-Session-Id": f"fixture-session-{self.session_count}"}
+                if self.session
+                else None,
             )
         if request.method == "DELETE":
             return httpx.Response(405)
@@ -77,13 +79,20 @@ def test_handshake_uses_negotiated_protocol_and_optional_session(session):
         assert result.ok and result.message == "complete"
         adapter.execute_script("def run(ctx): pass")
     assert stub.methods == [
-        "initialize", "notifications/initialized", "tools/list", "tools/call", "tools/call",
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "tools/call",
+        "tools/call",
     ] + (["DELETE"] if session else [])
     first_request, init = stub.calls[0]
     assert "Mcp-Session-Id" not in first_request.headers
     assert "Mcp-Protocol-Version" not in first_request.headers
     assert init["params"]["protocolVersion"] == "2025-06-18"
-    assert set(first_request.headers["Accept"].split(", ")) == {"application/json", "text/event-stream"}
+    assert set(first_request.headers["Accept"].split(", ")) == {
+        "application/json",
+        "text/event-stream",
+    }
     for request, _ in stub.calls[1:]:
         assert request.headers["Mcp-Protocol-Version"] == "2025-03-26"
         assert request.headers.get("Mcp-Session-Id") == ("fixture-session-1" if session else None)
@@ -112,24 +121,36 @@ def test_list_tools_pages_and_enforces_schema_before_calling_fusion():
             adapter.call_tool(_TOOL, {"featureType": "bad"})
         with pytest.raises(AdapterError, match="does not advertise"):
             adapter.call_tool("missing", {})
-    assert stub.methods == ["initialize", "notifications/initialized", "tools/list", "tools/list", "DELETE"]
+    assert stub.methods == [
+        "initialize",
+        "notifications/initialized",
+        "tools/list",
+        "tools/list",
+        "DELETE",
+    ]
 
 
 def test_invalid_tool_schema_stops_before_dispatch():
     def bad_schema(request, payload):
         if payload.get("method") == "tools/list":
-            return _reply(payload, {"tools": [{"name": _TOOL, "inputSchema": {"type": "object", "required": True}}]})
+            return _reply(
+                payload,
+                {"tools": [{"name": _TOOL, "inputSchema": {"type": "object", "required": True}}]},
+            )
         return None
 
     stub = _FusionStub(override=bad_schema)
     with stub.adapter() as adapter, pytest.raises(AdapterError, match="invalid input schema"):
-        adapter.execute_script("def run(ctx): pass")
+        adapter.call_tool(_TOOL, {"featureType": "script"})
     assert "tools/call" not in stub.methods
 
 
 def test_expired_session_retries_only_after_rediscovery():
     def expire(request, payload):
-        if payload.get("method") == "tools/call" and request.headers["Mcp-Session-Id"] == "fixture-session-1":
+        if (
+            payload.get("method") == "tools/call"
+            and request.headers["Mcp-Session-Id"] == "fixture-session-1"
+        ):
             return httpx.Response(404)
         return None
 
@@ -151,8 +172,8 @@ def test_other_http_errors_do_not_replay_tools(status):
 
     stub = _FusionStub(override=reject)
     with stub.adapter() as adapter, pytest.raises(AdapterError, match=f"HTTP {status}") as error:
-        adapter.execute_script("def run(ctx): pass")
-    assert ("outcome is unknown" in str(error.value)) == (status >= 500)
+        adapter.call_tool(_TOOL, {"featureType": "script"})
+    assert ("outcome is unknown" in str(error.value)) == (status >= 500 or status == 409)
     assert stub.methods.count("tools/call") == 1
     assert stub.methods.count("initialize") == 1
 
@@ -165,7 +186,7 @@ def test_404_without_session_does_not_replay_tools():
 
     stub = _FusionStub(session=False, override=missing)
     with stub.adapter() as adapter, pytest.raises(AdapterError, match="HTTP 404"):
-        adapter.execute_script("def run(ctx): pass")
+        adapter.call_tool(_TOOL, {"featureType": "script"})
     assert stub.methods.count("tools/call") == 1
 
 
@@ -176,8 +197,11 @@ def test_read_timeout_reports_uncertain_outcome_and_never_replays():
         return None
 
     stub = _FusionStub(override=timeout)
-    with stub.adapter() as adapter, pytest.raises(AdapterError, match="timed out.*outcome is unknown"):
-        adapter.execute_script("def run(ctx): pass")
+    with (
+        stub.adapter() as adapter,
+        pytest.raises(AdapterError, match="timed out.*outcome is unknown"),
+    ):
+        adapter.call_tool(_TOOL, {"featureType": "script"})
     assert stub.methods.count("tools/call") == 1
     call, cancel = stub.calls[3][1], stub.calls[4][1]
     assert cancel["method"] == "notifications/cancelled"
@@ -185,12 +209,12 @@ def test_read_timeout_reports_uncertain_outcome_and_never_replays():
 
 
 def test_sse_handles_notifications_and_stops_at_the_response():
-    class LiveStream(httpx.SyncByteStream):
+    class LiveStream(httpx.AsyncByteStream):
         def __init__(self, request_id):
             self.request_id = request_id
             self.closed = False
 
-        def __iter__(self):
+        async def __aiter__(self):
             yield b': heartbeat\r\ndata: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\r\n\r\n'
             yield (
                 f'event: message\r\ndata: {{"jsonrpc":"2.0",\r\ndata: "id":{self.request_id},'
@@ -198,7 +222,7 @@ def test_sse_handles_notifications_and_stops_at_the_response():
             ).encode()
             raise AssertionError("client must stop consuming the stream at its reply")
 
-        def close(self):
+        async def aclose(self):
             self.closed = True
 
     streams = []
@@ -227,7 +251,9 @@ def test_sse_resumes_by_get_and_does_not_replay_post(resume_status):
         if payload.get("method") == "tools/call":
             call_id = payload["id"]
             return httpx.Response(
-                200, headers={"Content-Type": "text/event-stream"}, text="id: fixture-event\ndata:\n\n"
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                text="id: fixture-event\ndata:\n\n",
             )
         if request.method == "GET":
             assert request.headers["Last-Event-ID"] == "fixture-event"
@@ -246,12 +272,23 @@ def test_sse_resumes_by_get_and_does_not_replay_post(resume_status):
             assert adapter.execute_script("def run(ctx): pass").ok
         else:
             with pytest.raises(AdapterError, match="outcome is unknown"):
-                adapter.execute_script("def run(ctx): pass")
+                adapter.call_tool(_TOOL, {"featureType": "script"})
     assert stub.methods.count("tools/call") == 1
     assert stub.methods.count("GET") == 1
 
 
-@pytest.mark.parametrize("stall", ["heartbeats", "partial_drip", "partial_then_silent", "json_drip", "resume"])
+@pytest.mark.parametrize(
+    "stall",
+    [
+        "heartbeats",
+        "partial_drip",
+        "partial_then_silent",
+        "json_drip",
+        "resume",
+        "header_drip",
+        "chunk_drip",
+    ],
+)
 def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
     calls = []
 
@@ -278,8 +315,34 @@ def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
             self.stream_stall("heartbeats")
 
         def stream_stall(self, kind):
+            if kind == "header_drip":
+                try:
+                    self.connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Slow: "
+                    )
+                    for _ in range(40):
+                        self.connection.sendall(b"x")
+                        time.sleep(0.04)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+                self.close_connection = True
+                return
+            if kind == "chunk_drip":
+                try:
+                    self.connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+                    )
+                    for _ in range(40):
+                        self.connection.sendall(b"1")
+                        time.sleep(0.04)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+                self.close_connection = True
+                return
             self.send_response(200)
-            self.send_header("Content-Type", "application/json" if kind == "json_drip" else "text/event-stream")
+            self.send_header(
+                "Content-Type", "application/json" if kind == "json_drip" else "text/event-stream"
+            )
             self.end_headers()
             try:
                 if kind == "partial_then_silent":
@@ -291,7 +354,11 @@ def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
                     self.wfile.flush()
                     time.sleep(0.28)
                 else:
-                    chunk = {"heartbeats": b": heartbeat\n\n", "partial_drip": b"x", "json_drip": b" "}[kind]
+                    chunk = {
+                        "heartbeats": b": heartbeat\n\n",
+                        "partial_drip": b"x",
+                        "json_drip": b" ",
+                    }[kind]
                     # A finite producer guarantees that the pre-fix test does not hang.
                     end = time.monotonic() + 1.5
                     while time.monotonic() < end:
@@ -333,7 +400,7 @@ def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
         adapter.list_tools()
         started = time.monotonic()
         with pytest.raises(AdapterError, match="timed out.*outcome is unknown"):
-            adapter.execute_script("def run(ctx): pass")
+            adapter.call_tool(_TOOL, {"featureType": "script"})
         assert time.monotonic() - started < (0.65 if stall == "resume" else 1.1)
         assert sum(c["method"] == "tools/call" for c in calls) == 1
         if stall == "resume":
@@ -341,7 +408,9 @@ def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
             assert gets == [{"method": "GET", "last_event_id": "resume-point"}]
         # A separate thread must acquire the lock and use the same adapter/session.
         result = []
-        worker = threading.Thread(target=lambda: result.append(adapter.execute_script("def run(ctx): pass")), daemon=True)
+        worker = threading.Thread(
+            target=lambda: result.append(adapter.execute_script("def run(ctx): pass")), daemon=True
+        )
         worker.start()
         worker.join(2)
         assert not worker.is_alive()
@@ -358,3 +427,243 @@ def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
         thread.join(2)
     assert calls[-1]["method"] == "DELETE"
     assert adapter._client.is_closed
+
+
+def test_high_level_timeout_state_and_read_only_request():
+    def timeout(request, payload):
+        if payload.get("method") == "tools/call":
+            raise httpx.ReadTimeout("fixture", request=request)
+        return None
+
+    stub = _FusionStub(override=timeout)
+    with stub.adapter() as adapter:
+        mutating = adapter.execute_script("pass")
+        readonly = adapter.execute_script("pass", read_only=True)
+    assert mutating.error == "transport_timeout"
+    assert mutating.state == {
+        "failure_kind": "transport",
+        "execution_outcome": "unknown",
+        "model_may_have_changed": True,
+        "retry_safe": False,
+    }
+    assert readonly.state["execution_outcome"] == "unknown"
+    assert readonly.state["model_may_have_changed"] is False
+    assert readonly.state["retry_safe"] is True
+    calls = [p for _, p in stub.calls if p.get("method") == "tools/call"]
+    assert calls[1]["params"]["arguments"]["object"]["readOnly"] is True
+    assert "readOnly" not in calls[0]["params"]["arguments"]["object"]
+
+
+def test_lock_wait_is_bounded_and_reports_not_started():
+    adapter = FusionAdapter(timeout=0.15, transport=httpx.MockTransport(_FusionStub()))
+    locked = threading.Event()
+    release = threading.Event()
+
+    def holder():
+        with adapter._lock:
+            locked.set()
+            release.wait(2)
+
+    worker = threading.Thread(target=holder)
+    worker.start()
+    assert locked.wait(1)
+    try:
+        started = time.monotonic()
+        result = adapter.execute_script("pass")
+        assert time.monotonic() - started < 0.7
+        assert result.error == "adapter_busy"
+        assert result.state["execution_outcome"] == "not_started"
+        assert result.state["retry_safe"] is True
+    finally:
+        release.set()
+        worker.join(2)
+        adapter.close()
+    assert not adapter._worker.is_alive()
+
+
+def test_cancellation_and_delete_with_stalled_headers_are_bounded():
+    calls = []
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def slow_headers(self):
+            try:
+                self.connection.sendall(b"HTTP/1.1 200 OK\r\nX-Slow: ")
+                for _ in range(35):
+                    self.connection.sendall(b"x")
+                    time.sleep(0.04)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            self.close_connection = True
+
+        def do_DELETE(self):
+            calls.append("DELETE")
+            self.slow_headers()
+
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = payload["method"]
+            calls.append(method)
+            if method in {"tools/call", "notifications/cancelled"}:
+                self.slow_headers()
+                return
+            if method == "notifications/initialized":
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            result = {
+                "initialize": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}},
+                "tools/list": {"tools": [_TOOL_DEFINITION]},
+            }[method]
+            body = json.dumps({"jsonrpc": "2.0", "id": payload["id"], "result": result}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            if method == "initialize":
+                self.send_header("Mcp-Session-Id", "session")
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    adapter = FusionAdapter(url=f"http://127.0.0.1:{server.server_port}/mcp", timeout=0.2)
+    try:
+        adapter.list_tools()
+        start = time.monotonic()
+        result = adapter.execute_script("pass")
+        assert result.error == "transport_timeout"
+        assert time.monotonic() - start < 1.1
+        assert calls.count("tools/call") == calls.count("notifications/cancelled") == 1
+        start = time.monotonic()
+        adapter.close()
+        assert time.monotonic() - start < 0.8
+        assert not adapter._worker.is_alive()
+        assert calls[-1] == "DELETE"
+    finally:
+        if adapter._worker.is_alive():
+            adapter.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+
+
+def test_calls_after_close_fail_promptly_and_close_is_idempotent():
+    adapter = _FusionStub().adapter()
+    adapter.close()
+    adapter.close()
+    started = time.monotonic()
+    result = adapter.execute_script("pass")
+    assert result.error == "adapter_closed"
+    assert result.state["execution_outcome"] == "not_started"
+    with pytest.raises(AdapterError, match="closed"):
+        adapter.list_tools()
+    assert time.monotonic() - started < 0.5
+    assert not adapter._worker.is_alive()
+
+
+def test_unexpected_worker_timeout_quarantines_adapter():
+    import asyncio
+
+    adapter = _FusionStub().adapter()
+    try:
+        with pytest.raises(AdapterError) as error:
+            adapter._run_async(asyncio.sleep(2), wait=0.02)
+        assert error.value.code == "transport_timeout"
+        assert error.value.outcome == "unknown"
+        result = adapter.execute_script("pass")
+        assert result.error == "adapter_unavailable"
+        assert result.state["execution_outcome"] == "not_started"
+    finally:
+        adapter.close()
+    assert not adapter._worker.is_alive()
+
+
+def test_coroutine_timeout_does_not_quarantine_responsive_worker():
+    adapter = _FusionStub().adapter()
+
+    async def fail():
+        raise TimeoutError("inside coroutine")
+
+    try:
+        with pytest.raises(TimeoutError, match="inside coroutine"):
+            adapter._run_async(fail())
+        assert adapter.execute_script("pass").ok
+    finally:
+        adapter.close()
+
+
+def test_huge_sse_retry_fails_as_timeout_without_resume_or_replay():
+    def huge_retry(request, payload):
+        if payload.get("method") == "tools/call":
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                text="id: checkpoint\nretry: " + "9" * 400 + "\ndata:\n\n",
+            )
+        return None
+
+    stub = _FusionStub(override=huge_retry)
+    with stub.adapter() as adapter:
+        out = adapter.execute_script("pass")
+        assert out.error == "transport_timeout"
+        assert out.state["execution_outcome"] == "unknown"
+        assert out.state["retry_safe"] is False
+    assert stub.methods.count("tools/call") == 1
+    assert stub.methods.count("GET") == 0
+    assert stub.methods.count("notifications/cancelled") == 1
+
+
+def test_malformed_sse_retry_is_ignored_and_known_stream_resumes():
+    call_id = None
+
+    def malformed(request, payload):
+        nonlocal call_id
+        if payload.get("method") == "tools/call":
+            call_id = payload["id"]
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                text="id: checkpoint\nretry: not-a-number\ndata:\n\n",
+            )
+        if request.method == "GET":
+            data = json.dumps({"jsonrpc": "2.0", "id": call_id, "result": _TOOL_RESULT})
+            return httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, text=f"data: {data}\n\n"
+            )
+        return None
+
+    stub = _FusionStub(override=malformed)
+    with stub.adapter() as adapter:
+        assert adapter.execute_script("pass").ok
+    assert stub.methods.count("tools/call") == 1
+    assert stub.methods.count("GET") == 1
+
+
+@pytest.mark.parametrize("result,code", [
+    ({"content": []}, "empty_content"),
+    (None, "invalid_transport_response"),
+    ({"content": [{"type": "unsupported"}]}, "unexpected_content_type"),
+])
+@pytest.mark.parametrize("read_only", [False, True])
+def test_missing_tool_result_is_protocol_uncertainty_without_replay(result, code, read_only):
+    def malformed(request, payload):
+        if payload.get("method") == "tools/call":
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": payload["id"], "result": result})
+        return None
+
+    stub = _FusionStub(override=malformed)
+    with stub.adapter() as adapter:
+        out = adapter.execute_script("pass", read_only=read_only)
+    assert not out.ok and out.error == code
+    assert out.state == {
+        "failure_kind": "protocol", "execution_outcome": "unknown",
+        "model_may_have_changed": not read_only, "retry_safe": read_only,
+    }
+    assert stub.methods.count("tools/call") == 1

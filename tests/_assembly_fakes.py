@@ -37,12 +37,13 @@ class ScriptAdapter:
         adsk.core, adsk.fusion = modules["adsk.core"], modules["adsk.fusion"]
         adsk.core.Application = SimpleNamespace(get=lambda: app)
         adsk.fusion.Design = SimpleNamespace(cast=lambda product: product)
+        adsk.fusion.FeatureHealthStates = SimpleNamespace(HealthyFeatureHealthState=0)
         vars(adsk.core).update(core or {})
         vars(adsk.fusion).update(fusion or {})
         for name, module in modules.items():
             monkeypatch.setitem(sys.modules, name, module)
 
-    def execute_script(self, script):
+    def execute_script(self, script, *, read_only=False):
         self.scripts.append(script)
         namespace = {}
         output = io.StringIO()
@@ -53,7 +54,7 @@ class ScriptAdapter:
 
 
 class NoScriptAdapter:
-    def execute_script(self, script):
+    def execute_script(self, script, *, read_only=False):
         raise AssertionError("invalid input must not submit a Fusion script")
 
 

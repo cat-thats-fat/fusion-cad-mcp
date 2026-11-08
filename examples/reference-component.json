@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "reference_id": "example-module",
+  "units": "mm",
+  "mounting_points": [
+    {"id": "mount-a", "position_mm": [3, 3, 0], "axis": [0, 0, 1], "hole_diameter_mm": 2.5},
+    {"id": "mount-b", "position_mm": [27, 17, 0], "axis": [0, 0, 1], "hole_diameter_mm": 2.5}
+  ],
+  "connectors": [
+    {"id": "port", "origin_mm": [30, 10, 2], "x_axis": [1, 0, 0], "y_axis": [0, 1, 0]}
+  ],
+  "keepouts": [
+    {"id": "plug-access", "min_mm": [30, 6, 0], "max_mm": [45, 14, 6]}
+  ]
+}

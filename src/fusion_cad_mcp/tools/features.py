@@ -19,8 +19,9 @@ import json
 import textwrap
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_stdout_json, script_parse_failure
 from ..handles import emit_resolve, parse_handle
+from ..health import FEATURE_HEALTH_CHECK, FEATURE_HEALTH_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 from .sketch import SKETCH_RESOLVER_SCRIPT
 
@@ -47,41 +48,32 @@ PRINCIPAL_AXES = {
 }
 
 
-_FIND_BODY_HELPER = """
-def _find_body(root, name):
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    return walk(root)
+_FIND_BODY_HELPER = RESOLVER_SCRIPT + """
+def _select_root_body(root, name):
+    body, error = _select_body(root, name)
+    if error: return None, error
+    if getattr(body, 'assemblyContext', None) is not None or getattr(body, 'parentComponent', root) != root:
+        return None, {'ok': False, 'error': 'child_component_edit_unsupported', 'name': name}
+    return body, None
 """
 
-_FIND_FEATURE_OR_BODY_HELPER = """
+_FIND_FEATURE_OR_BODY_HELPER = _FIND_BODY_HELPER + """
 def _find_feature_or_body(root, name):
-    for i in range(root.features.count):
-        f = root.features.item(i)
-        if f.name == name: return ('feature', f)
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    b = walk(root)
-    if b is not None: return ('body', b)
-    return (None, None)
+    feature, owner, feature_error = _select_feature(root, name)
+    body, body_error = _select_body(root, name)
+    if feature_error and feature_error['error'] != 'feature_not_found': return None, None, feature_error
+    if body_error and body_error['error'] != 'body_not_found': return None, None, body_error
+    if feature is not None and body is not None:
+        return None, None, {'ok': False, 'error': 'target_ambiguous', 'name': name}
+    if feature is not None:
+        if owner != root: return None, None, {'ok': False, 'error': 'child_component_edit_unsupported', 'name': name}
+        return 'feature', feature, None
+    if body is not None:
+        body, error = _select_root_body(root, name)
+        if error: return None, None, error
+        return 'body', body, None
+    return None, None, {'ok': False, 'error': 'target_not_found', 'name': name}
 """
-
 
 def _resolve_plane_expr(plane: str) -> str:
     """Return Python expression evaluating to the named plane.
@@ -91,8 +83,8 @@ def _resolve_plane_expr(plane: str) -> str:
         return PRINCIPAL_PLANES[plane_lc]
     # Otherwise: resolve at runtime via name lookup in constructionPlanes
     return f"""(
-        next((root.constructionPlanes.item(i) for i in range(root.constructionPlanes.count)
-              if root.constructionPlanes.item(i).name == {json.dumps(plane)}), None)
+        (lambda m: m[0] if len(m) == 1 else None)([root.constructionPlanes.item(i) for i in range(root.constructionPlanes.count)
+              if root.constructionPlanes.item(i).name == {json.dumps(plane)}])
     )"""
 
 
@@ -101,8 +93,8 @@ def _resolve_axis_expr(axis: str) -> str:
     if axis_lc in PRINCIPAL_AXES:
         return PRINCIPAL_AXES[axis_lc]
     return f"""(
-        next((root.constructionAxes.item(i) for i in range(root.constructionAxes.count)
-              if root.constructionAxes.item(i).name == {json.dumps(axis)}), None)
+        (lambda m: m[0] if len(m) == 1 else None)([root.constructionAxes.item(i) for i in range(root.constructionAxes.count)
+              if root.constructionAxes.item(i).name == {json.dumps(axis)}])
     )"""
 
 
@@ -110,7 +102,7 @@ def _emit_header() -> str:
     return """\
 import adsk.core, adsk.fusion
 import json
-"""
+""" + FEATURE_HEALTH_SCRIPT
 
 
 def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
@@ -119,7 +111,7 @@ def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
         return env
     parsed = parse_stdout_json(env)
     if parsed is None:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return script_parse_failure(env, f"{label}_parse_failed")
     if parsed.get("ok") is False:
         return Envelope(
             ok=False,
@@ -180,7 +172,6 @@ def build_extrude(
     parts_block = ""
     parts_helper = ""
     if participants:
-        parts_helper = ""
         parts_block = "\n".join(
             [
                 "    _parts = []",
@@ -220,7 +211,9 @@ def run(_ctx):
     {extent_setter}
 {parts_block}
     feat = owner.features.extrudeFeatures.add(ext_in)
-{name_block}    body_names = [feat.bodies.item(i).name for i in range(feat.bodies.count)] if feat.bodies.count > 0 else []
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    body_names = [feat.bodies.item(i).name for i in range(feat.bodies.count)] if feat.bodies.count > 0 else []
     print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
@@ -314,17 +307,21 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    body = _find_body(root, {json.dumps(body)})
-    if body is None:
-        print(json.dumps({{"ok": False, "error": "body_not_found", "name": {json.dumps(body)}}})); return
+    body, error = _select_root_body(root, {json.dumps(body)})
+    if error:
+        print(json.dumps(error)); return
 
     edges = adsk.core.ObjectCollection.create()
     matched = 0
     for i in range(body.edges.count):
         e = body.edges.item(i)
-        sp = e.startVertex.geometry
-        ep = e.endVertex.geometry
-        edge_length_cm = ((sp.x - ep.x)**2 + (sp.y - ep.y)**2 + (sp.z - ep.z)**2) ** 0.5
+        if {parallel_to!r} != 'any' and adsk.core.Line3D.cast(e.geometry) is None:
+            continue
+        edge_length_cm = e.length
+        if {parallel_to!r} != 'any':
+            if e.startVertex is None or e.endVertex is None: continue
+            sp = e.startVertex.geometry
+            ep = e.endVertex.geometry
         if {axis_check} and {min_len_check}:
             edges.add(e)
             matched += 1
@@ -337,7 +334,9 @@ def run(_ctx):
     fil_in = root.features.filletFeatures.createInput()
     fil_in.addConstantRadiusEdgeSet(edges, adsk.core.ValueInput.createByString({json.dumps(radius)}), {is_tan})
     feat = root.features.filletFeatures.add(fil_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "edges_filleted": matched,
@@ -443,17 +442,21 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    body = _find_body(root, {json.dumps(body)})
-    if body is None:
-        print(json.dumps({{"ok": False, "error": "body_not_found", "name": {json.dumps(body)}}})); return
+    body, error = _select_root_body(root, {json.dumps(body)})
+    if error:
+        print(json.dumps(error)); return
 
     edges = adsk.core.ObjectCollection.create()
     matched = 0
     for i in range(body.edges.count):
         e = body.edges.item(i)
-        sp = e.startVertex.geometry
-        ep = e.endVertex.geometry
-        edge_length_cm = ((sp.x - ep.x)**2 + (sp.y - ep.y)**2 + (sp.z - ep.z)**2) ** 0.5
+        if {parallel_to!r} != 'any' and adsk.core.Line3D.cast(e.geometry) is None:
+            continue
+        edge_length_cm = e.length
+        if {parallel_to!r} != 'any':
+            if e.startVertex is None or e.endVertex is None: continue
+            sp = e.startVertex.geometry
+            ep = e.endVertex.geometry
         if {axis_check} and {min_len_check}:
             edges.add(e)
             matched += 1
@@ -464,7 +467,9 @@ def run(_ctx):
     chm_in = root.features.chamferFeatures.createInput2()
     {chm_call}
     feat = root.features.chamferFeatures.add(chm_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "edges_chamfered": matched,
@@ -504,25 +509,7 @@ def build_mirror_feature(
     plane_expr = _resolve_plane_expr(plane)
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
     return f"""\
-{_emit_header()}
-def _find_feature_or_body(root, name):
-    for i in range(root.features.count):
-        f = root.features.item(i)
-        if f.name == name: return ('feature', f)
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    b = walk(root)
-    if b is not None: return ('body', b)
-    return (None, None)
-
+{_emit_header()}{_FIND_FEATURE_OR_BODY_HELPER}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -531,9 +518,9 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    kind, target = _find_feature_or_body(root, {json.dumps(feature_or_body)})
-    if target is None:
-        print(json.dumps({{"ok": False, "error": "target_not_found", "name": {json.dumps(feature_or_body)}}})); return
+    kind, target, error = _find_feature_or_body(root, {json.dumps(feature_or_body)})
+    if error:
+        print(json.dumps(error)); return
 
     plane = {plane_expr}
     if plane is None:
@@ -544,7 +531,9 @@ def run(_ctx):
 
     mir_in = root.features.mirrorFeatures.createInput(items, plane)
     feat = root.features.mirrorFeatures.add(mir_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "mirrored_kind": kind,
@@ -598,25 +587,7 @@ def build_pattern_rectangular(
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
 
     return f"""\
-{_emit_header()}
-def _find_feature_or_body(root, name):
-    for i in range(root.features.count):
-        f = root.features.item(i)
-        if f.name == name: return ('feature', f)
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    b = walk(root)
-    if b is not None: return ('body', b)
-    return (None, None)
-
+{_emit_header()}{_FIND_FEATURE_OR_BODY_HELPER}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -625,9 +596,9 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    _kind, target = _find_feature_or_body(root, {json.dumps(feature_or_body)})
-    if target is None:
-        print(json.dumps({{"ok": False, "error": "target_not_found", "name": {json.dumps(feature_or_body)}}})); return
+    _kind, target, error = _find_feature_or_body(root, {json.dumps(feature_or_body)})
+    if error:
+        print(json.dumps(error)); return
 
     # repr(), not json: None must render as Python None, not null.
     x_axis = {x_axis_expr}
@@ -662,7 +633,9 @@ def run(_ctx):
         )
 
     feat = root.features.rectangularPatternFeatures.add(pat_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "x_count": {x_count},
@@ -717,25 +690,7 @@ def build_pattern_circular(
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
 
     return f"""\
-{_emit_header()}
-def _find_feature_or_body(root, name):
-    for i in range(root.features.count):
-        f = root.features.item(i)
-        if f.name == name: return ('feature', f)
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    b = walk(root)
-    if b is not None: return ('body', b)
-    return (None, None)
-
+{_emit_header()}{_FIND_FEATURE_OR_BODY_HELPER}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -744,9 +699,9 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    _kind, target = _find_feature_or_body(root, {json.dumps(feature_or_body)})
-    if target is None:
-        print(json.dumps({{"ok": False, "error": "target_not_found", "name": {json.dumps(feature_or_body)}}})); return
+    _kind, target, error = _find_feature_or_body(root, {json.dumps(feature_or_body)})
+    if error:
+        print(json.dumps(error)); return
 
     axis = {axis_expr}
     if axis is None:
@@ -759,7 +714,9 @@ def run(_ctx):
     pat_in.quantity = adsk.core.ValueInput.createByReal({count})
     pat_in.totalAngle = adsk.core.ValueInput.createByString({json.dumps(total_angle)})
     feat = root.features.circularPatternFeatures.add(pat_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "count": {count},
@@ -809,20 +766,7 @@ def build_combine(
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
 
     return f"""\
-{_emit_header()}
-def _find_body(root, name):
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    return walk(root)
-
+{_emit_header()}{_FIND_BODY_HELPER}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -831,22 +775,24 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    target = _find_body(root, {json.dumps(target_body)})
-    if target is None:
-        print(json.dumps({{"ok": False, "error": "target_body_not_found", "name": {json.dumps(target_body)}}})); return
+    target, error = _select_root_body(root, {json.dumps(target_body)})
+    if error:
+        print(json.dumps(error)); return
 
     tools = adsk.core.ObjectCollection.create()
     for nm in {json.dumps(tool_bodies)}:
-        b = _find_body(root, nm)
-        if b is None:
-            print(json.dumps({{"ok": False, "error": "tool_body_not_found", "name": nm}})); return
+        b, error = _select_root_body(root, nm)
+        if error:
+            print(json.dumps(error)); return
         tools.add(b)
 
     combo_in = root.features.combineFeatures.createInput(target, tools)
     combo_in.operation = {op_expr}
     combo_in.isKeepToolBodies = {keep}
     feat = root.features.combineFeatures.add(combo_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "operation": {json.dumps(operation)},
@@ -907,15 +853,15 @@ def build_revolve(
         extent_setter = f"rev_in.setAngleExtent({sym}, adsk.core.ValueInput.createByString({json.dumps(angle)}))"
 
     parts_block = ""
-    parts_helper = ""
+    parts_helper = SKETCH_RESOLVER_SCRIPT
     if participants:
-        parts_helper = _FIND_BODY_HELPER
+        parts_helper = SKETCH_RESOLVER_SCRIPT + _FIND_BODY_HELPER
         parts_block = "\n".join(
             [
                 "    _parts = []",
                 *[
-                    f"    _b = _find_body(root, {json.dumps(p)})"
-                    + f"\n    if _b is None: print(json.dumps({{'ok': False, 'error': 'participant_not_found', 'name': {json.dumps(p)}}})); return"
+                    f"    _b, _error = _select_root_body(root, {json.dumps(p)})"
+                    + "\n    if _error: print(json.dumps(_error)); return"
                     + "\n    _parts.append(_b)"
                     for p in participants
                 ],
@@ -935,13 +881,11 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    sk = None
-    for i in range(root.sketches.count):
-        s = root.sketches.item(i)
-        if s.name == {json.dumps(sketch)}:
-            sk = s; break
-    if sk is None:
-        print(json.dumps({{"ok": False, "error": "sketch_not_found", "name": {json.dumps(sketch)}}})); return
+    sk, owner, error = _select_sketch(root, {json.dumps(sketch)})
+    if error:
+        print(json.dumps(error)); return
+    if owner != root:
+        print(json.dumps({{"ok": False, "error": "child_component_edit_unsupported", "name": {json.dumps(sketch)}}})); return
     if {profile_index} < 0 or {profile_index} >= sk.profiles.count:
         print(json.dumps({{"ok": False, "error": "profile_index_out_of_range",
                            "got": {profile_index}, "count": sk.profiles.count}})); return
@@ -954,7 +898,9 @@ def run(_ctx):
     {extent_setter}
 {parts_block}
     feat = root.features.revolveFeatures.add(rev_in)
-{name_block}    body_names = [feat.bodies.item(i).name for i in range(feat.bodies.count)] if feat.bodies.count > 0 else []
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    body_names = [feat.bodies.item(i).name for i in range(feat.bodies.count)] if feat.bodies.count > 0 else []
     print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
@@ -1062,15 +1008,17 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    body = _find_body(root, {json.dumps(body)})
-    if body is None:
-        print(json.dumps({{"ok": False, "error": "body_not_found", "name": {json.dumps(body)}}})); return
+    body, error = _select_root_body(root, {json.dumps(body)})
+    if error:
+        print(json.dumps(error)); return
 
 {face_finder}
     shell_in = root.features.shellFeatures.createInput(target_faces, False)
     {thickness_setters}
     feat = root.features.shellFeatures.add(shell_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "faces_removed": removed_count,
@@ -1145,9 +1093,9 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    body = _find_body(root, {json.dumps(body)})
-    if body is None:
-        print(json.dumps({{"ok": False, "error": "body_not_found", "name": {json.dumps(body)}}})); return
+    body, error = _select_root_body(root, {json.dumps(body)})
+    if error:
+        print(json.dumps(error)); return
 
     matrix = adsk.core.Matrix3D.create()
     matrix.translation = adsk.core.Vector3D.create({tx}, {ty}, {tz})
@@ -1157,7 +1105,9 @@ def run(_ctx):
 
     mv_in = root.features.moveFeatures.createInput(bodies, matrix)
     feat = root.features.moveFeatures.add(mv_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "body": {json.dumps(body)},
@@ -1204,7 +1154,7 @@ def build_rib(
         raise ValueError("is_flipped must be a bool")
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
     return f"""\
-{_emit_header()}{RESOLVER_SCRIPT}
+{_emit_header()}{SKETCH_RESOLVER_SCRIPT}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -1215,9 +1165,11 @@ def run(_ctx):
     ribs = root.features.ribFeatures
     if not hasattr(ribs, 'createInput') or not hasattr(ribs, 'add'):
         print(json.dumps({{"ok": False, "error": "rib_not_scriptable"}})); return
-    sk = root.sketches.itemByName({json.dumps(sketch)})
-    if sk is None:
-        print(json.dumps({{"ok": False, "error": "sketch_not_found"}})); return
+    sk, owner, error = _select_sketch(root, {json.dumps(sketch)})
+    if error:
+        print(json.dumps(error)); return
+    if owner != root:
+        print(json.dumps({{"ok": False, "error": "child_component_edit_unsupported", "name": {json.dumps(sketch)}}})); return
     body, error = _select_body(root, {target_body!r})
     if error:
         print(json.dumps(error)); return
@@ -1236,12 +1188,11 @@ def run(_ctx):
     feat = ribs.add(rib_in)
     if feat is None:
         print(json.dumps({{"ok": False, "error": "rib_creation_failed"}})); return
-{name_block}    health = feat.healthState
-    if health != adsk.fusion.FeatureHealthStates.HealthyFeatureHealthState:
-        print(json.dumps({{"ok": False, "error": "rib_feature_unhealthy",
-                           "feature_name": feat.name, "health_state": int(health),
-                           "health_message": feat.errorOrWarningMessage,
-                           "model_may_have_changed": True}})); return
+{name_block}    _health_error = _feature_health_error(feat)
+    if _health_error:
+        if _health_error['error'] == 'feature_unhealthy':
+            _health_error['error'] = 'rib_feature_unhealthy'
+        print(json.dumps(_health_error)); return
     print(json.dumps({{"ok": True, "feature_name": feat.name, "thickness": {json.dumps(thickness)}, "side": "symmetric"}}))
 """
 
@@ -1378,7 +1329,9 @@ def run(_ctx):
     {extent_setter}
     hole_in.participantBodies = [body]
     feat = body.parentComponent.features.holeFeatures.add(hole_in)
-{name_block}    print(json.dumps({{
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "feature_creation_failed", "model_may_have_changed": True}})); return
+{FEATURE_HEALTH_CHECK}{name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "kind": {json.dumps(kind)},

@@ -157,3 +157,66 @@ def test_text_before_image_preserves_both_without_structured_content():
         "message": "Screenshot caption",
         "image": {"data": "AAAA", "mime_type": "image/png"},
     }
+
+
+@pytest.mark.parametrize("text", ["{}", '{"ok":"yes"}'])
+@pytest.mark.parametrize(
+    "tool,read_only",
+    [
+        (
+            lambda a: __import__(
+                "fusion_cad_mcp.tools.inspection", fromlist=["x"]
+            ).inspect_assembly(a),
+            True,
+        ),
+        (
+            lambda a: __import__("fusion_cad_mcp.tools.validation", fromlist=["x"]).validate_design(
+                a, [{"type": "bounds", "body": "b", "min_mm": [0, 0, 0], "max_mm": [1, 1, 1]}]
+            ),
+            True,
+        ),
+        (
+            lambda a: __import__(
+                "fusion_cad_mcp.tools.references", fromlist=["x"]
+            ).get_reference_metadata(a, "root"),
+            True,
+        ),
+        (
+            lambda a: __import__(
+                "fusion_cad_mcp.tools.references", fromlist=["x"]
+            ).set_reference_metadata(
+                a, "root", {"schema_version": 1, "units": "mm", "reference_id": "ref"}
+            ),
+            False,
+        ),
+        (
+            lambda a: __import__("fusion_cad_mcp.tools.placement", fromlist=["x"]).create_component(
+                a, "Part"
+            ),
+            False,
+        ),
+        (
+            lambda a: __import__("fusion_cad_mcp.tools.native_features", fromlist=["x"]).sweep(
+                a, "p", "q", ["line:0"], name="Sweep"
+            ),
+            False,
+        ),
+        (
+            lambda a: __import__(
+                "fusion_cad_mcp.tools.primitives", fromlist=["x"]
+            ).create_parametric_enclosure(a, "Case", "10 mm", "10 mm", "10 mm", "1 mm", "1 mm"),
+            False,
+        ),
+    ],
+)
+def test_new_wrappers_fail_closed_on_missing_or_invalid_status(text, tool, read_only):
+    class Adapter:
+        def execute_script(self, script, *, read_only=False):
+            return Envelope(ok=True, message=text)
+
+    result = tool(Adapter())
+    assert result.ok is False
+    assert result.state["failure_kind"] == "protocol"
+    assert result.state["execution_outcome"] == "unknown"
+    assert result.state["retry_safe"] is read_only
+    assert result.state["model_may_have_changed"] is (not read_only)

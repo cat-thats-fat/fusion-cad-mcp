@@ -295,7 +295,7 @@ def _edge_adapter(monkeypatch, features=None, sketches=(), occurrences=()):
 def test_build_fillet_edges_resolves_each_handle(monkeypatch):
     fillet_input = SimpleNamespace(addConstantRadiusEdgeSet=Mock())
     fillets = SimpleNamespace(
-        createInput=lambda: fillet_input, add=Mock(return_value=SimpleNamespace(name="Fillet1")),
+        createInput=lambda: fillet_input, add=Mock(return_value=SimpleNamespace(name="Fillet1", healthState=0)),
     )
     adapter, edges = _edge_adapter(monkeypatch, SimpleNamespace(filletFeatures=fillets))
     handles = [f"edge:b/edge[{i}]:t{i}" for i in range(3)]
@@ -325,7 +325,7 @@ def test_build_chamfer_edges_equal(monkeypatch):
     )
     chamfers = SimpleNamespace(
         createInput2=Mock(return_value=chamfer_input),
-        add=Mock(return_value=SimpleNamespace(name="Chamfer1")),
+        add=Mock(return_value=SimpleNamespace(name="Chamfer1", healthState=0)),
     )
     adapter, edges = _edge_adapter(monkeypatch, SimpleNamespace(chamferFeatures=chamfers))
 
