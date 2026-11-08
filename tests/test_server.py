@@ -208,3 +208,43 @@ async def test_wire_structured_envelopes_and_error_flag_for_legacy_new_and_raw(m
     assert invalid.structuredContent["error"] == "invalid_input"
     assert raw_ok.structuredContent["message"] == "done"
     assert raw_fail.structuredContent["error"] == "fusion_error"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("inspect_assembly", {"include": ["bodies"], "limit": 1}),
+        ("inspect_feature", {"feature": "fixture"}),
+        ("query_geometry", {"body": "fixture", "kind": "face"}),
+    ],
+)
+async def test_inspection_wire_keeps_result_without_repeating_stdout(monkeypatch, name, arguments):
+    # Synthetic adapter output tests serialization, not Fusion geometry. The
+    # unknown nested field ensures compaction cannot silently whitelist data.
+    payload = {
+        "ok": True,
+        "count": 1,
+        "items": [{"handle": "face:fixture:opaque-token", "sample_point_mm": [1, 2, 3]}],
+        "extension_data": {"warning": "preserve this", "future_field": [False, None, 0]},
+    }
+    stdout = json.dumps(payload) + "\n"
+    calls = []
+
+    class Adapter:
+        def execute_script(self, script, *, read_only=False):
+            calls.append(read_only)
+            return Envelope(ok=True, message=stdout)
+
+    monkeypatch.setattr(server, "_adapter", Adapter())
+    async with create_connected_server_and_client_session(
+        server.mcp, read_timeout_seconds=timedelta(seconds=5)
+    ) as client:
+        reply = await client.call_tool(name, arguments)
+        raw = await client.call_tool("execute", {"script": "fixture stdout"})
+    assert reply.isError is False
+    assert reply.structuredContent == {"ok": True, "message": "", "result": payload}
+    assert json.loads(reply.content[0].text) == reply.structuredContent
+    # The same stdout stays intact on the explicit raw execution escape hatch.
+    assert raw.structuredContent["message"] == stdout
+    assert calls == [True, False]

@@ -147,3 +147,13 @@ def test_find_gotcha_returns_lock_badge_g9():
     assert env.ok is True
     headings = [h["heading"].lower() for h in env.result["hits"]]
     assert any("lock-badge" in h or "lock badge" in h or "g9" in h for h in headings)
+
+
+def test_find_tool_import_geometry_reports_active_design_and_target(monkeypatch):
+    monkeypatch.setattr(kn, "_resolve_skill_doc", lambda name: kn.PACKAGED_KNOWLEDGE_DIR / name)
+    env = kn.find_tool("import_geometry")
+    assert env.ok is True
+    hit = env.result["hits"][0]
+    assert "target_component=None" in hit["heading"]
+    assert "active design" in hit["snippet"]
+    assert "importToNewDocument" in hit["snippet"]

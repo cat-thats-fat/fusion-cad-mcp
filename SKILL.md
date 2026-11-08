@@ -71,6 +71,11 @@ The server can also search these for you without loading them: `find_tool`, `fin
 
 Use `inspect_assembly`, `inspect_feature` and `query_geometry` before selecting geometry. Assembly inspection includes a paginated occurrence hierarchy by default; a selected occurrence's listing covers its descendants. Specify occurrence-qualified names for repeated components; handles can become stale after edits. `query_geometry` uses root-frame coordinates and its `near` test is distance to a sample point, not minimum distance. Feature-created faces are only currently surviving faces; a generic dependency graph is unavailable.
 
+Read successful inspection data from `result`; `message` is empty to avoid
+duplicating that JSON. Select only needed assembly `include` sections and use
+small pages: the limit applies per section. Consume either MCP text or structured
+content once. Failure diagnostics and raw `execute` stdout remain intact.
+
 Use `create_component`, `insert_component` and `place_component` for local assembly structure and poses. `place_component` takes absolute origin in mm and perpendicular unit axes, optionally relative to another occurrence; read back its transform. The parametric `create_parametric_enclosure`, `create_mounting_boss` and `create_cutout` tools are individual primitives, not an automatic planner. `sweep` uses explicit path-curve references and requires a unique name; inspect any unknown outcome before retrying.
 
 `set_reference_metadata` stores user-provided mount, connector and keep-out data on a component definition in component-local mm. `get_reference_metadata` returns that data, the selected occurrence transform, and root-frame body bounds. Shared or linked definitions refuse edits. `validate_design` checks explicit bounds, interference and minimum clearance; inspect every status and `passed`. Axis-aligned bounds do not establish cavity containment.
@@ -153,6 +158,10 @@ fusion-cad-mcp corpus build --i-accept-autodesk-terms
 ```
 
 Everything else works without it.
+
+If `find_api` reports `corpus_not_built` and Autodesk's own MCP is connected, use
+its `fusion_mcp_read` with `queryType="apiDocumentation"`, an explicit
+`apiCategory` and a narrow `searchPattern`. This does not build the local corpus.
 
 If Fusion is restarted, the adapter re-handshakes on a rejected session. If errors
 persist, inspect the error and listener state, then reconnect the MCP client as

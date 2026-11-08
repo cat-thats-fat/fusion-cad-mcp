@@ -2,6 +2,13 @@
 
 The signatures below are the current typed interface. `limit` is 1..200 and `offset` is nonnegative where present. Selectors accept unique names or occurrence-qualified paths where stated; ambiguous names fail. Read every result and reported state. Native feature and primitive behavior depends on the Fusion version; see the repository validation report for live evidence.
 
+Successful `inspect_assembly`, `inspect_feature` and `query_geometry` replies put
+their complete data in `result`; `message` is empty rather than a duplicate JSON
+dump. Failure diagnostics and raw `execute` stdout are preserved. For large
+assemblies, select needed `include` sections and paginate: `limit` applies to each
+section, not the combined reply. MCP text and structured content carry the same
+envelope for client compatibility; consume either representation once.
+
 ## `inspect_assembly(component=None, include=None, limit=50, offset=0)`
 
 Read the root or a uniquely selected occurrence. By default returns paginated descendant occurrences, bodies, sketches, features and joints; `include` can also select `as_built_joints`. For a selected occurrence, its descendants are listed and the selected occurrence itself is excluded. Occurrence entries include parent path, repeated-definition count, grounding, root and immediate-parent transforms, and handles where available. Matrices use Fusion `Matrix3D.asArray` with cm translations. Body bounds are root-frame mm. Native definition sections are not a universal assembly dependency graph.
@@ -957,15 +964,19 @@ Returns: `ok`, `path`, `bytes_written`, and `format` for the mesh formats.
 
 **Check `bytes_written`.** Missing or empty output is reported as an error rather than a successful export.
 
-## `import_geometry(format, path)`
+## `import_geometry(format, path, target_component=None)`
 
-Formats: `step`, `iges`, `sat`, `smt`, `f3d`. Note `stl`, `3mf`, and `obj` are exportable but **not** importable.
+Imports into the active design, at root when `target_component` is omitted. Otherwise select a unique component name, occurrence name or occurrence path. Shared/referenced definitions refuse edits. Formats: `step`, `iges`, `sat`, `smt`, `f3d`. For a separate F3D document use raw `execute` with `importToNewDocument` (below).
 
-Counts are deltas measured on the root component only, so bodies landing in sub-components are not counted.
+`stl`, `3mf`, and `obj` are not supported for import by this tool. An explicit `"root"` is not a special target selector; omit `target_component` for the root component.
 
-Errors: `invalid_path`, `invalid_input`, `file_not_found` (checked inside Fusion, not locally).
+`path` must be absolute and identify an existing file accessible to Fusion. Counts are deltas of direct bodies and occurrences in the target component; bodies inside added subcomponents are not included in `bodies_added`.
 
-Returns: `ok`, `format`, `path`, `bodies_added`, `occurrences_added`.
+Returns `ok`, `format`, `path`, `source_sha256`, `target_component`, `target_occurrence_path`, `coordinate_frame`, `target_to_root_transform_cm`, `fusion_length_unit`, `display_length_unit`, `bodies_added`, `occurrences_added`, and `imported_objects`. Object identities include handles where available; an entry can report an `identity_error` even after import succeeds.
+
+Errors include `invalid_path`, `invalid_input`, `file_not_found` (checked inside Fusion), target selection errors, `referenced_component_edit_unsupported`, `shared_component_edit_unsupported`, `import_options_failed`, and `import_no_objects`.
+
+For a separate document from an F3D archive, use raw `execute` with Fusion's `app.importManager.createFusionArchiveImportOptions(path)` followed by `app.importManager.importToNewDocument(options)`. This differs from this tool's import into the active design. See Autodesk's [ImportManager documentation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/core_ImportManager.htm) and [Fusion archive options](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/core_ImportManager_createFusionArchiveImportOptions.htm).
 
 ## `find_api(query, kind=None, namespace=None, limit=5)` / `find_pattern(query, limit=5)` / `find_gotcha(query, limit=5)` / `find_tool(query, limit=5)`
 

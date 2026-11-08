@@ -43,7 +43,10 @@ def _run(adapter: FusionAdapter, script: str, label: str) -> Envelope:
         ok=parsed.get("ok") is not False,
         error=parsed.get("error"),
         result=parsed,
-        message=env.message,
+        # Successful inspection data is already complete in result. Retaining
+        # its JSON stdout here doubles every handle, transform and entity row.
+        # Keep failure stdout intact for diagnosis; raw execute is unaffected.
+        message="" if parsed["ok"] else env.message,
     )
 
 

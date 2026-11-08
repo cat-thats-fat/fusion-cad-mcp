@@ -161,6 +161,35 @@ def test_wrapper_requests_read_only():
 
 
 @pytest.mark.parametrize(
+    "upstream",
+    [
+        Envelope(ok=False, error="fusion_error", message="upstream failure", traceback="details"),
+        Envelope(ok=True, message='{"ok":false,"error":"body_not_found","candidates":[]}'),
+        Envelope(ok=True, message="not JSON"),
+        Envelope(ok=True, message=""),
+    ],
+)
+def test_inspection_compaction_preserves_failure_diagnostics(upstream):
+    class Adapter:
+        def execute_script(self, script, *, read_only=False):
+            assert read_only is True
+            return upstream
+
+    result = inspection.inspect_assembly(Adapter())
+    assert result.ok is False
+    assert result.message == upstream.message
+    if not upstream.ok:
+        assert result is upstream
+    elif upstream.message.startswith("{"):
+        assert result.error == "body_not_found"
+        assert result.result == json.loads(upstream.message)
+    else:
+        assert result.error == "inspect_assembly_parse_failed"
+        assert result.state["execution_outcome"] == "unknown"
+        assert result.state["model_may_have_changed"] is False
+
+
+@pytest.mark.parametrize(
     "filters", [{"unknown": 1}, {"normal": [0, 0, 0]}, {"radius": float("nan")}, {"length": 2}]
 )
 def test_rejects_bad_filters(filters):

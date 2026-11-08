@@ -69,6 +69,10 @@ Availability depends on the Fusion API version. Full reference with signatures, 
 
 The capability upgrade has a [verification report](docs/prebenchmark-validation.md), [implementation plan](docs/prebenchmark-plan.md), and [test review](docs/prebenchmark-test-review.md). Its disposable Fusion fixtures cover the stated enclosure, boss, cutout, assembly and sweep workflows; results are not proof for arbitrary designs. An intermittent Autodesk empty-stdout issue remains unresolved, so inspect an uncertain write before retrying. The earlier modernization has separate [historical evidence](docs/validation.md) and a [test-by-test review ledger](tests/audit/README.md). Historical modeling recipes retain version-specific observations and some retired API examples; use the current tools and Autodesk API documentation when adapting them.
 
+The initial [field feedback and follow-up](docs/field-feedback.md) records working
+inspection flows, corrected import guidance and reduced duplicate inspection
+output. That pass did not exercise detailed redesign or export reliability.
+
 ## Assembly and enclosure workflow
 
 Start with `doc_state`, then use `inspect_assembly` and `inspect_feature` to inspect the current design. Assembly inspection includes a paginated occurrence hierarchy by default; selecting an occurrence lists its descendants. Create a component with `create_component`, or use `insert_component` for a shared occurrence or independent copy. Place it with `place_component`, then confirm its root-frame pose and bounds. Use occurrence-qualified names when names repeat.
@@ -95,6 +99,11 @@ A failed write may have partially changed the design. Check `state`, any `rollba
 ```
 
 The same envelope is sent as JSON text and MCP `structuredContent`; MCP `isError` is true when `ok` is false. Screenshot images remain native MCP image blocks.
+
+Successful `inspect_assembly`, `inspect_feature` and `query_geometry` replies
+leave `message` empty and retain the complete payload in `result`, avoiding a
+second JSON dump inside the envelope. Consumers should read `result` for these
+tools. Error diagnostics and raw `execute` stdout are unchanged.
 
 **`ok: true` does not always mean the thing happened.** Fusion has several operations that decline silently, and the tools surface that rather than hiding it:
 
@@ -125,6 +134,11 @@ fusion-cad-mcp corpus build --i-accept-autodesk-terms
 ```
 
 That crawls at 1 request/second into `~/.fusion-cad/corpus/`, which is where the server looks first. Set `FUSION_CAD_CORPUS_DIR` to keep it elsewhere. Everything else works without it.
+
+If Autodesk's own MCP is also connected, its `fusion_mcp_read` tool can query
+`apiDocumentation` without this corpus. Specify `apiCategory` and a narrow
+`searchPattern`. This is a separate documentation route, not an automatic
+fallback inside `find_api`.
 
 ## The agent skill
 
