@@ -95,7 +95,19 @@
       "evidence": {
         "overlap_volume_mm3": 50,
         "rotation_detected": true,
-        "grounded_move_refused": true
+        "grounded_move_refused": true,
+        "pinned_bounds_mm": {
+          "min": [
+            122.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            132.0,
+            10.0,
+            1.0
+          ]
+        }
       }
     },
     {
@@ -186,7 +198,7 @@
       "name": "component_export_f3d",
       "status": "passed",
       "evidence": {
-        "bytes": 62907
+        "bytes": 62726
       }
     },
     {
@@ -207,7 +219,7 @@
       "name": "component_export_3mf",
       "status": "passed",
       "evidence": {
-        "bytes": 18161
+        "bytes": 18159
       }
     },
     {

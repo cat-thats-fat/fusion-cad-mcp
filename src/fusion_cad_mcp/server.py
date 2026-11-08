@@ -676,13 +676,13 @@ def move_component(
 
 @mcp.tool()
 def ground_component(name: str) -> dict:
-    """Set the ground flag on an occurrence (lock its world position)."""
+    """Pin an occurrence at its current world pose. Release Ground To Parent before adding a pin."""
     return asm.ground_component(_get_adapter(), name).to_dict()
 
 
 @mcp.tool()
 def unground_component(name: str) -> dict:
-    """Clear the ground flag on an occurrence."""
+    """Clear Pin and Ground To Parent on an occurrence."""
     return asm.unground_component(_get_adapter(), name).to_dict()
 
 

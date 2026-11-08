@@ -244,7 +244,6 @@ def move_component(
 
 
 def build_ground_component(name: str, grounded: bool) -> str:
-    flag = "True" if grounded else "False"
     return f"""\
 {_header()}{_FIND_OCC_HELPER}
 
@@ -255,15 +254,34 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    occ, error = _select_occurrence(root, {json.dumps(name)})
+    occ, error = _select_occurrence(root, {name!r})
     if error:
         print(json.dumps(error)); return
 
-    occ.isGrounded = {flag}
-    if hasattr(occ, 'isGroundToParent') and occ.isGroundToParent != {flag}:
-        occ.isGroundToParent = {flag}
-    print(json.dumps({{"ok": True, "component": {json.dumps(name)}, "isGrounded": occ.isGrounded,
-                       "isGroundToParent": getattr(occ, 'isGroundToParent', None)}}))
+    pin = {grounded!r}
+    was_pinned = occ.isGrounded
+    was_parent_grounded = getattr(occ, 'isGroundToParent', None)
+    if pin and was_parent_grounded:
+        print(json.dumps({{"ok": False, "error": "occurrence_grounded_to_parent", "component": {name!r}}})); return
+
+    # Pin preserves the current pose. Ground To Parent resets the insertion pose.
+    before = list(occ.transform2.asArray()) if pin else None
+    if was_pinned != pin:
+        occ.isGrounded = pin
+    if not pin and was_parent_grounded:
+        occ.isGroundToParent = False
+
+    pinned = occ.isGrounded
+    parent_grounded = getattr(occ, 'isGroundToParent', None)
+    result = {{"ok": True, "component": {name!r}, "isGrounded": pinned, "isGroundToParent": parent_grounded}}
+    if pin:
+        after = list(occ.transform2.asArray())
+        if any(abs(a - b) > 1e-7 for a, b in zip(before, after)):
+            result.update(ok=False, error="pin_changed_transform", before_transform=before,
+                          after_transform=after, model_may_have_changed=True)
+    if result['ok'] and (pinned != pin or parent_grounded):
+        result.update(ok=False, error="grounding_change_not_achieved")
+    print(json.dumps(result))
 """
 
 

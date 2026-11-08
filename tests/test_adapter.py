@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
@@ -246,3 +249,112 @@ def test_sse_resumes_by_get_and_does_not_replay_post(resume_status):
                 adapter.execute_script("def run(ctx): pass")
     assert stub.methods.count("tools/call") == 1
     assert stub.methods.count("GET") == 1
+
+
+@pytest.mark.parametrize("stall", ["heartbeats", "partial_drip", "partial_then_silent", "json_drip", "resume"])
+def test_sse_deadline_releases_lock_and_connection_on_stalled_stream(stall):
+    calls = []
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *args):
+            pass
+
+        def respond(self, status, body=b"", headers=None):
+            self.send_response(status)
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_DELETE(self):
+            calls.append({"method": "DELETE"})
+            self.respond(204)
+
+        def do_GET(self):
+            calls.append({"method": "GET", "last_event_id": self.headers.get("Last-Event-ID")})
+            self.stream_stall("heartbeats")
+
+        def stream_stall(self, kind):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json" if kind == "json_drip" else "text/event-stream")
+            self.end_headers()
+            try:
+                if kind == "partial_then_silent":
+                    self.wfile.write(b"data: incomplete")
+                    self.wfile.flush()
+                    time.sleep(1.5)
+                elif kind == "resume":
+                    self.wfile.write(b"id: resume-point\ndata:\n\n")
+                    self.wfile.flush()
+                    time.sleep(0.28)
+                else:
+                    chunk = {"heartbeats": b": heartbeat\n\n", "partial_drip": b"x", "json_drip": b" "}[kind]
+                    # A finite producer guarantees that the pre-fix test does not hang.
+                    end = time.monotonic() + 1.5
+                    while time.monotonic() < end:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                        time.sleep(0.03)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
+            self.close_connection = True
+
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            calls.append(payload)
+            method = payload["method"]
+            if method == "tools/call" and sum(c["method"] == method for c in calls) == 1:
+                self.stream_stall(stall)
+                return
+            if method in {"notifications/initialized", "notifications/cancelled"}:
+                self.respond(202)
+                return
+            result = {
+                "initialize": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}}},
+                "tools/list": {"tools": [_TOOL_DEFINITION]},
+                "tools/call": _TOOL_RESULT,
+            }[method]
+            body = json.dumps({"jsonrpc": "2.0", "id": payload["id"], "result": result}).encode()
+            headers = {"Content-Type": "application/json"}
+            if method == "initialize":
+                headers["Mcp-Session-Id"] = "fixture-session"
+            self.respond(200, body, headers)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    adapter = FusionAdapter(url=f"http://127.0.0.1:{server.server_port}/mcp", timeout=0.45)
+    worker = None
+    try:
+        adapter.list_tools()
+        started = time.monotonic()
+        with pytest.raises(AdapterError, match="timed out.*outcome is unknown"):
+            adapter.execute_script("def run(ctx): pass")
+        assert time.monotonic() - started < (0.65 if stall == "resume" else 1.1)
+        assert sum(c["method"] == "tools/call" for c in calls) == 1
+        if stall == "resume":
+            gets = [c for c in calls if c["method"] == "GET"]
+            assert gets == [{"method": "GET", "last_event_id": "resume-point"}]
+        # A separate thread must acquire the lock and use the same adapter/session.
+        result = []
+        worker = threading.Thread(target=lambda: result.append(adapter.execute_script("def run(ctx): pass")), daemon=True)
+        worker.start()
+        worker.join(2)
+        assert not worker.is_alive()
+        assert result and result[0].ok
+        assert sum(c["method"] == "tools/call" for c in calls) == 2
+        first_call = next(c for c in calls if c["method"] == "tools/call")
+        cancellation = next(c for c in calls if c["method"] == "notifications/cancelled")
+        assert cancellation["params"]["requestId"] == first_call["id"]
+    finally:
+        if worker is None or not worker.is_alive():
+            adapter.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+    assert calls[-1]["method"] == "DELETE"
+    assert adapter._client.is_closed

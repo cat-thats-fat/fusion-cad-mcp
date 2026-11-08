@@ -631,9 +631,9 @@ Returns `ok`, `component`, `translation_mm`, `rotation_axis`, `rotation_angle_de
 
 ## `ground_component(name)` / `unground_component(name)`
 
-Sets or clears the pin (`isGrounded`) and the ground-to-parent flag (`isGroundToParent`, where supported).
+`ground_component` pins the occurrence at its current world pose and verifies the pin and transform. Release Ground To Parent explicitly before adding a pin. `unground_component` clears both the pin and the ground-to-parent flag where supported.
 
-Errors: `invalid_input` (`name required`), `occurrence_not_found`.
+Errors include `invalid_input`, `occurrence_not_found`, `occurrence_ambiguous`, `occurrence_grounded_to_parent`, `grounding_change_not_achieved`, and `pin_changed_transform`.
 
 Returns `ok`, `component`, and the read-back values `isGrounded` and `isGroundToParent`.
 

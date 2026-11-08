@@ -97,7 +97,7 @@
   "tests/test_assembly.py::test_ground_emits_true_flag": {
     "disposition": "improve",
     "evidence": "static generated source or syntax only",
-    "rationale": "Replaced by observing the actual pin and parent flag writes on the selected instance."
+    "rationale": "Replaced by a test that observes the selected occurrence being pinned in place and prohibits a Ground To Parent write."
   },
   "tests/test_assembly.py::test_unground_emits_false_flag": {
     "disposition": "improve",
@@ -107,12 +107,47 @@
   "tests/test_assembly.py::test_ground_tool_writes_selected_occurrence[ground]": {
     "disposition": "improve",
     "evidence": "generated Python executed with local Fusion API doubles",
-    "rationale": "The selected instance acquires both flags; an occurrence of the same component is unaffected."
+    "rationale": "Replaced by the pin read-back and pose tests. Autodesk distinguishes pinning at the current world pose from grounding to the parent, which resets the insertion pose."
   },
   "tests/test_assembly.py::test_ground_tool_writes_selected_occurrence[unground]": {
     "disposition": "improve",
     "evidence": "generated Python executed with local Fusion API doubles",
-    "rationale": "The selected instance starts parent-grounded only and becomes movable; the other instance retains both flags."
+    "rationale": "Replaced with cases for parent-grounded and pinned plus parent-grounded starting states."
+  },
+  "tests/test_assembly.py::test_ground_pins_selected_occurrence_in_place[pinned]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks the selected occurrence acquires a pin at its moved pose and a sibling occurrence is unaffected. The double rejects any Ground To Parent setter call."
+  },
+  "tests/test_assembly.py::test_ground_pins_selected_occurrence_in_place[ignored]": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks an ignored pin setter fails the pin read-back."
+  },
+  "tests/test_assembly.py::test_ground_pins_selected_occurrence_in_place[moved]": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks an unexpected pose change fails the move check even when the pin is set, and reports both transforms."
+  },
+  "tests/test_assembly.py::test_ground_pins_selected_occurrence_in_place[parent_grounded]": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks a parent-grounded occurrence is refused before writing either flag."
+  },
+  "tests/test_assembly.py::test_ground_pins_selected_occurrence_in_place[both_grounded]": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks an occurrence with both flags set is refused. Ground To Parent can override an existing pin."
+  },
+  "tests/test_assembly.py::test_unground_clears_both_flags_on_selected_occurrence[False]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks a parent-grounded occurrence releases its ground and a sibling occurrence retains both flags."
+  },
+  "tests/test_assembly.py::test_unground_clears_both_flags_on_selected_occurrence[True]": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks an occurrence with both flags set releases both, and a sibling occurrence retains both flags."
   },
   "tests/test_assembly.py::test_rigid_group_requires_at_least_2_components": {
     "disposition": "improve",

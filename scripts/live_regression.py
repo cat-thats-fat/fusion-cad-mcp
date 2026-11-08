@@ -277,13 +277,40 @@ class Fixture:
                 rotation_origin_mm=[125, 5, 0],
             )
         )
-        checked(assembly.ground_component(self.adapter, "Board:2"))
+        before_pin = checked(
+            assembly.move_component(self.adapter, "Board:2", translation_mm=[2, 0, 0])
+        )["after_transform"]
+        bounds_before = checked(verify.bounding_box(self.adapter, "Board:2 / PCB"))["bodies"][0][
+            "bbox_mm"
+        ]
+        assert bounds_before == {"min": [122.0, 0.0, 0.0], "max": [132.0, 10.0, 1.0]}
+        pinned = checked(assembly.ground_component(self.adapter, "Board:2"))
+        assert pinned["isGrounded"] is True and pinned["isGroundToParent"] is False
+        after_pin = self.script("""
+            root=adsk.fusion.Design.cast(app.activeProduct).rootComponent
+            occ=root.occurrences.itemByName('Board:2')
+            print(json.dumps({'transform':list(occ.transform2.asArray())}))
+        """)["transform"]
+        bounds_after = checked(verify.bounding_box(self.adapter, "Board:2 / PCB"))["bodies"][0][
+            "bbox_mm"
+        ]
+        assert bounds_before == bounds_after
+        assert all(
+            math.isclose(a, b, abs_tol=1e-7) for a, b in zip(before_pin, after_pin, strict=True)
+        )
         refused = assembly.move_component(self.adapter, "Board:2", translation_mm=[1, 0, 0])
         assert not refused.ok and refused.error == "occurrence_grounded"
         checked(assembly.unground_component(self.adapter, "Board:2"))
+        reset = checked(assembly.move_component(self.adapter, "Board:2", translation_mm=[-2, 0, 0]))
+        assert reset["after_translation_mm"] == [120.0, 0.0, 0.0], reset
         self.record(
             "interference_rotation_and_grounding",
-            {"overlap_volume_mm3": 50, "rotation_detected": True, "grounded_move_refused": True},
+            {
+                "overlap_volume_mm3": 50,
+                "rotation_detected": True,
+                "grounded_move_refused": True,
+                "pinned_bounds_mm": bounds_after,
+            },
         )
         self.script("""
             design=adsk.fusion.Design.cast(app.activeProduct)

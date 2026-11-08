@@ -263,23 +263,71 @@ def test_move_rejects_bad_translation_length():
         asm.build_move_component("p", translation_mm=[10, 5])
 
 
-@pytest.mark.parametrize(
-    ("tool", "grounded"), [(asm.ground_component, True), (asm.unground_component, False)],
-    ids=["ground", "unground"],
-)
-def test_ground_tool_writes_selected_occurrence(monkeypatch, tool, grounded):
-    chosen = occurrence("Plate:1", isGrounded=False, isGroundToParent=not grounded)
-    other = occurrence("Plate:2", isGrounded=not grounded, isGroundToParent=not grounded)
-    root = root_with(occurrences=[other, chosen])
-    env = tool(ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root)), "Plate:1")
+@pytest.mark.parametrize("outcome", ["pinned", "ignored", "moved", "parent_grounded", "both_grounded"])
+def test_ground_pins_selected_occurrence_in_place(monkeypatch, outcome):
+    class PinOccurrence(MovableOccurrence):
+        def __init__(self):
+            super().__init__()
+            self._position = (12.2, 3, 0)
+            self._pinned = outcome == "both_grounded"
+            self.pin_writes = []
 
-    assert env.ok is True
-    assert env.result["isGrounded"] is grounded
-    assert env.result["isGroundToParent"] is grounded
-    assert chosen.isGrounded is grounded
-    assert chosen.isGroundToParent is grounded
-    assert other.isGrounded is not grounded
-    assert other.isGroundToParent is not grounded
+        @property
+        def isGroundToParent(self):
+            return outcome in {"parent_grounded", "both_grounded"}
+
+        @isGroundToParent.setter
+        def isGroundToParent(self, value):
+            raise AssertionError("Pin must not set Ground To Parent")
+
+        @property
+        def isGrounded(self):
+            return self._pinned
+
+        @isGrounded.setter
+        def isGrounded(self, value):
+            self.pin_writes.append(value)
+            if outcome != "ignored":
+                self._pinned = value
+            if outcome == "moved":
+                self._position = (12, 3, 0)
+
+    chosen = PinOccurrence()
+    before = chosen.transform2.asArray()
+    other = occurrence("Plate:2", component=chosen.component, isGrounded=False, isGroundToParent=False)
+    root = root_with(occurrences=[other, chosen])
+    env = asm.ground_component(ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root)), "Plate:1")
+
+    assert not other.isGrounded and not other.isGroundToParent
+    if outcome in {"parent_grounded", "both_grounded"}:
+        assert not env.ok and env.error == "occurrence_grounded_to_parent"
+        assert not chosen.pin_writes
+        return
+    assert chosen.pin_writes == [True]
+    assert env.result["isGroundToParent"] is False
+    if outcome == "pinned":
+        assert env.ok and env.result["isGrounded"]
+        assert chosen.transform2.asArray() == before
+    elif outcome == "ignored":
+        assert not env.ok and env.error == "grounding_change_not_achieved"
+        assert env.result["isGrounded"] is False
+    else:
+        assert not env.ok and env.error == "pin_changed_transform"
+        assert env.result["before_transform"] == before
+        assert env.result["after_transform"] == chosen.transform2.asArray()
+        assert env.result["model_may_have_changed"] is True
+
+
+@pytest.mark.parametrize("pinned", [False, True])
+def test_unground_clears_both_flags_on_selected_occurrence(monkeypatch, pinned):
+    chosen = occurrence("Plate:1", isGrounded=pinned, isGroundToParent=True)
+    other = occurrence("Plate:2", component=chosen.component, isGrounded=True, isGroundToParent=True)
+    root = root_with(occurrences=[other, chosen])
+    env = asm.unground_component(ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root)), "Plate:1")
+
+    assert env.ok and not env.result["isGrounded"] and not env.result["isGroundToParent"]
+    assert not chosen.isGrounded and not chosen.isGroundToParent
+    assert other.isGrounded and other.isGroundToParent
 
 
 def test_rigid_group_requires_at_least_2_components():

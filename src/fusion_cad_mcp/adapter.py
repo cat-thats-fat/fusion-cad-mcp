@@ -33,6 +33,32 @@ class _SessionExpired(AdapterError):
     """Fusion rejected a request because its session expired."""
 
 
+class _DeadlineStream(httpx.SyncByteStream):
+    """Check the deadline before SSE decoders can absorb comments or partial lines."""
+
+    def __init__(self, stream: httpx.SyncByteStream, deadline: float):
+        self.stream = stream
+        self.deadline = deadline
+
+    def __iter__(self):
+        iterator = iter(self.stream)
+        while True:
+            if time.monotonic() >= self.deadline:
+                raise httpx.ReadTimeout("Request deadline exceeded")
+            try:
+                chunk = next(iterator)
+            except StopIteration:
+                if time.monotonic() >= self.deadline:
+                    raise httpx.ReadTimeout("Request deadline exceeded") from None
+                return
+            if time.monotonic() >= self.deadline:
+                raise httpx.ReadTimeout("Request deadline exceeded")
+            yield chunk
+
+    def close(self) -> None:
+        self.stream.close()
+
+
 class FusionAdapter:
     """Synchronous HTTP MCP client to Fusion."""
 
@@ -118,6 +144,12 @@ class FusionAdapter:
     def _read_sse(
         self, response: httpx.Response, request_id: int, deadline: float,
     ) -> tuple[dict[str, Any] | None, str, int]:
+        response.stream = _DeadlineStream(response.stream, deadline)
+        return self._consume_sse(response, request_id, deadline)
+
+    def _consume_sse(
+        self, response: httpx.Response, request_id: int, deadline: float,
+    ) -> tuple[dict[str, Any] | None, str, int]:
         last_event_id = ""
         retry_ms = 0
         for event in EventSource(response).iter_sse():
@@ -148,6 +180,8 @@ class FusionAdapter:
                             raise ValueError("Fusion refused a reply on the SSE stream") from exc
                     continue
             return self._validate_reply(reply, request_id), last_event_id, retry_ms
+        if time.monotonic() >= deadline:
+            raise httpx.ReadTimeout("SSE request deadline exceeded")
         return None, last_event_id, retry_ms
 
     def _request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -175,7 +209,10 @@ class FusionAdapter:
                     self._session_id = response.headers.get("Mcp-Session-Id")
                 content_type = response.headers.get("content-type", "").partition(";")[0].strip().lower()
                 if content_type == "application/json":
+                    response.stream = _DeadlineStream(response.stream, deadline)
                     response.read()
+                    if time.monotonic() >= deadline:
+                        raise httpx.ReadTimeout("Request deadline exceeded")
                     return self._validate_reply(response.json(), request_id)
                 if content_type != "text/event-stream":
                     raise ValueError("expected a JSON or SSE response")

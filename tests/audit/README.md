@@ -5,8 +5,8 @@ including removed tests and materially distinct parameter cases. This is a
 snapshot of this modernization review, not a substitute for reviewing future
 tests.
 
-The baseline contains 388 test functions. The reviewed suite contains 369
-functions and collects 574 cases. An independent inventory compared Python AST
+The baseline contains 388 test functions. The reviewed suite contains 371
+functions and collects 584 cases. An independent inventory compared Python AST
 function names (including async functions) in the baseline and working tree
 against the ledgers: no functions were missing. Some entries describe individual
 parameter cases; `wheel_knowledge_smoke.py::main` describes an auxiliary package

@@ -448,5 +448,10 @@
     "disposition": "keep",
     "evidence": "unit behavior",
     "rationale": "Verifies the adapter is closed and cleared after ordinary and exceptional server exits."
+  },
+  "tests/test_adapter.py::test_sse_deadline_releases_lock_and_connection_on_stalled_stream": {
+    "disposition": "add",
+    "evidence": "local HTTP server (no Fusion)",
+    "rationale": "Checks real-socket heartbeat and partial SSE, JSON drips, a resumed GET sharing the original deadline, and silent read timeout; verifies cancellation, no replay, lock release, reuse and session cleanup."
   }
 }
