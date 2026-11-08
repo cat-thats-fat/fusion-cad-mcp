@@ -76,13 +76,14 @@ def test_resolve_rejects_malformed_ref():
 def test_build_create_sketch_xy():
     src = sk.build_create_sketch("xy", "outer")
     ast.parse(src)
-    assert "root.xYConstructionPlane" in src
+    assert "xYConstructionPlane" in src
     assert '"outer"' in src
 
 
-def test_build_create_sketch_rejects_bad_plane():
-    with pytest.raises(ValueError):
-        sk.build_create_sketch("diagonal", "outer")
+def test_build_create_sketch_accepts_named_plane():
+    src = sk.build_create_sketch("diagonal", "outer")
+    ast.parse(src)
+    assert 'owner.constructionPlanes.item(i).name == "diagonal"' in src
 
 
 def test_build_create_sketch_checks_name_collision():
@@ -247,7 +248,7 @@ class FakeAdapter:
 
 def test_create_sketch_short_circuits_on_bad_plane():
     a = FakeAdapter()
-    env = sk.create_sketch(a, "diagonal", "outer")
+    env = sk.create_sketch(a, "", "outer")
     assert env.ok is False
     assert env.error == "invalid_input"
     assert a.scripts == []

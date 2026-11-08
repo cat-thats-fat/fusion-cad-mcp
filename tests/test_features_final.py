@@ -28,9 +28,9 @@ def test_build_move_body_requires_something():
 
 
 def test_build_rib_parses():
-    src = f.build_rib("rib_sk", "2 mm", side="symmetric")
+    src = f.build_rib("rib_sk", "2 mm", side="symmetric", target_body="plate")
     ast.parse(src)
-    assert "Symmetric" in src
+    assert "isSymmetric" in src
     assert 'createByString("2 mm")' in src
 
 
@@ -39,18 +39,11 @@ def test_build_rib_rejects_unknown_side():
         f.build_rib("rib_sk", "2 mm", side="middle")
 
 
-def test_rib_returns_not_scriptable_without_calling_fusion():
-    # RibFeatures is a read-only collection in the current Fusion API (no
-    # createInput/add), so the tool must short-circuit with a structured error
-    # and never send a script to the adapter.
-    class _BoomAdapter:
-        def execute_script(self, script):
-            raise AssertionError("rib must not call Fusion")
-
-    env = f.rib(_BoomAdapter(), "rib_sk", "2 mm")
-    assert env.ok is False
-    assert env.error == "rib_not_scriptable"
-    assert "thin" in env.message.lower() or "extrude" in env.message.lower()
+def test_rib_requires_target_body():
+    env = f.rib(None, "rib_sk", "2 mm")
+    assert not env.ok
+    assert env.error == "invalid_input"
+    assert "target_body" in env.message
 
 
 def test_add_hole_simple_alias_still_works():

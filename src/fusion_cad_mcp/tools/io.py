@@ -1,30 +1,48 @@
-"""Group 7 / IO tools.
-
-export(format, body, path, ...)  — STL, 3MF, STEP, IGES, OBJ, F3D, SAT, SMT.
-import_geometry(format, path)    — STEP, IGES, SAT, SMT, F3D into the active doc.
-
-Path safety: tools reject relative paths, parent-dir tricks (".."), and
-Windows reserved names (CON, NUL, etc). Absolute paths only. Directories are
-auto-created (os.makedirs exist_ok=True) per the skill's gotcha catalog.
-"""
+"""Import and export local CAD files through the active Fusion design."""
 
 from __future__ import annotations
 
-import json
-import os
 import re
+from pathlib import PurePosixPath, PureWindowsPath
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
+from ..handles import emit_make_handle
+from ..resolver import RESOLVER_SCRIPT
 
-EXPORT_FORMATS = {"stl", "3mf", "step", "iges", "obj", "f3d", "sat", "smt"}
-IMPORT_FORMATS = {"step", "iges", "sat", "smt", "f3d"}
+_MESH_EXPORT_FACTORIES = {
+    "stl": "createSTLExportOptions",
+    "3mf": "createC3MFExportOptions",
+    "obj": "createOBJExportOptions",
+}
+_COMPONENT_EXPORT_FACTORIES = {
+    "step": "createSTEPExportOptions",
+    "iges": "createIGESExportOptions",
+    "f3d": "createFusionArchiveExportOptions",
+    "sat": "createSATExportOptions",
+    "smt": "createSMTExportOptions",
+}
+_IMPORT_FACTORIES = {
+    "step": "createSTEPImportOptions",
+    "iges": "createIGESImportOptions",
+    "sat": "createSATImportOptions",
+    "smt": "createSMTImportOptions",
+    "f3d": "createFusionArchiveImportOptions",
+}
+EXPORT_FORMATS = set(_MESH_EXPORT_FACTORIES) | set(_COMPONENT_EXPORT_FACTORIES)
+IMPORT_FORMATS = set(_IMPORT_FACTORIES)
 
-# STL refinement levels map to Fusion's MeshRefinementSettings enum
 STL_REFINEMENT = {
     "low": "MeshRefinementLow",
     "medium": "MeshRefinementMedium",
     "high": "MeshRefinementHigh",
+}
+_STL_UNITS = {
+    "mm": "MillimeterDistanceUnits",
+    "cm": "CentimeterDistanceUnits",
+    "m": "MeterDistanceUnits",
+    "inch": "InchDistanceUnits",
+    "in": "InchDistanceUnits",
 }
 
 _WIN_RESERVED = {
@@ -38,17 +56,18 @@ _WIN_RESERVED = {
 
 
 def _validate_path(path: str) -> tuple[bool, str | None]:
-    """Reject obviously dangerous or invalid paths. Returns (ok, error_message)."""
-    if not path or not isinstance(path, str):
-        return False, "path must be a non-empty string"
+    """Accept an absolute path for the platform on which Fusion is running."""
+    if not isinstance(path, str) or not path or "\0" in path:
+        return False, "path must be a non-empty string without NUL characters"
     if ".." in re.split(r"[\\/]", path):
         return False, "path contains '..' parent-dir reference"
-    if not os.path.isabs(path):
-        return False, f"path must be absolute, got {path!r}"
-    base = os.path.basename(path).lower()
-    base_no_ext = base.split(".")[0]
-    if base_no_ext in _WIN_RESERVED:
-        return False, f"path uses Windows reserved name {base_no_ext!r}"
+    if not (PureWindowsPath(path).is_absolute() or PurePosixPath(path).is_absolute()):
+        return False, "path must be absolute"
+    if path.endswith(("/", "\\")):
+        return False, "path must name a file"
+    base = re.split(r"[\\/]", path)[-1].lower().split(".")[0].rstrip(" ")
+    if base in _WIN_RESERVED:
+        return False, f"path uses Windows reserved name {base!r}"
     return True, None
 
 
@@ -57,23 +76,55 @@ def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
     if not env.ok:
         return env
     parsed = parse_stdout_json(env)
-    if parsed is None:
+    if parsed is None or "ok" not in parsed:
         return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
-    if parsed.get("ok") is False:
+    if parsed.get("ok") is not True:
         return Envelope(
             ok=False,
             error=parsed.get("error", f"{label}_failed"),
             message=env.message,
             result=parsed,
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    handles = [obj["handle"] for obj in parsed.get("imported_objects", []) if obj.get("handle")]
+    state = {"handles_added": handles} if handles else None
+    return Envelope(ok=True, message=env.message, result=parsed, state=state)
 
 
-def _header() -> str:
-    return "import adsk.core, adsk.fusion\nimport json, os\n"
+_SCRIPT_HEADER = """\
+import adsk.core
+import adsk.fusion
+import json
+import os
+"""
 
+_ACTIVE_DESIGN = """\
+    app = adsk.core.Application.get()
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if design is None:
+        print(json.dumps({"ok": False, "error": "no_active_design"}))
+        return
+    root = design.rootComponent
+"""
 
-# ---------- export ----------
+_PUBLISH_OBJ = """
+def _publish_obj(staged_path, path, sidecar):
+    # Preserve OBJ's relative material reference. Roll back the companion if
+    # publishing the main file fails, including when the destination is locked.
+    staged_dir = os.path.dirname(staged_path)
+    dest_sidecar = os.path.join(os.path.dirname(path), sidecar)
+    backup = os.path.join(staged_dir, ".previous-material")
+    if os.path.lexists(dest_sidecar):
+        shutil.copy2(dest_sidecar, backup, follow_symlinks=False)
+    os.replace(os.path.join(staged_dir, sidecar), dest_sidecar)
+    try:
+        os.replace(staged_path, path)
+    except OSError:
+        if os.path.lexists(backup):
+            os.replace(backup, dest_sidecar)
+        else:
+            os.unlink(dest_sidecar)
+        raise
+"""
 
 
 def build_export(
@@ -82,186 +133,114 @@ def build_export(
     path: str,
     refinement: str = "medium",
     units: str = "mm",
+    component: str | None = None,
 ) -> str:
     fmt = format.lower()
     if fmt not in EXPORT_FORMATS:
         raise ValueError(f"format must be one of {sorted(EXPORT_FORMATS)}, got {format!r}")
-    # path validated by caller; we still escape it into the script
+    if body is not None and component is not None:
+        raise ValueError("choose either body or component")
+    if body is not None and fmt not in _MESH_EXPORT_FACTORIES:
+        raise ValueError(f"{fmt} does not support body scope")
 
-    # Fusion ExportManager API names per format
-    if fmt == "stl":
+    scope_lookup = ""
+    scope_info = "'scope': 'root'"
+    geometry = "root"
+    if body is not None:
+        scope_lookup = f"""\
+    geometry, error = _select_body(root, {body!r})
+    if error:
+        print(json.dumps(error))
+        return
+"""
+        geometry = "geometry"
+        scope_info = f"'scope': 'body', 'body': {body!r}"
+    elif component is not None:
+        scope_lookup = f"""\
+    occurrence, error = _select_occurrence(root, {component!r})
+    if error:
+        print(json.dumps(error))
+        return
+"""
+        geometry = "occurrence" if fmt in _MESH_EXPORT_FACTORIES else "occurrence.component"
+        scope_info = "'scope': 'component', 'component': occurrence.fullPathName"
+
+    if fmt in _MESH_EXPORT_FACTORIES:
+        factory = _MESH_EXPORT_FACTORIES[fmt]
+        option_args = f"{geometry}, staged_path"
+    else:
+        factory = _COMPONENT_EXPORT_FACTORIES[fmt]
+        option_args = f"staged_path, {geometry}" if component is not None else "staged_path"
+
+    settings = ""
+    if fmt in {"stl", "obj"}:
         if refinement not in STL_REFINEMENT:
-            raise ValueError(
-                f"refinement must be one of {sorted(STL_REFINEMENT)} for STL, got {refinement!r}"
-            )
-        return _build_export_stl(body, path, refinement, units)
-    elif fmt == "3mf":
-        return _build_export_3mf(body, path)
-    elif fmt == "step":
-        return _build_export_simple("createSTEPExportOptions", path)
-    elif fmt == "iges":
-        return _build_export_simple("createIGESExportOptions", path)
-    elif fmt == "f3d":
-        return _build_export_simple("createFusionArchiveExportOptions", path)
-    elif fmt == "obj":
-        return _build_export_obj(body, path, refinement)
-    elif fmt == "sat":
-        return _build_export_simple("createSATExportOptions", path)
-    elif fmt == "smt":
-        return _build_export_simple("createSMTExportOptions", path)
-    raise AssertionError("unreachable")
+            raise ValueError(f"refinement must be one of {sorted(STL_REFINEMENT)} for {fmt}")
+        settings += f"        opts.meshRefinement = adsk.fusion.MeshRefinementSettings.{STL_REFINEMENT[refinement]}\n"
+        settings += "        opts.sendToPrintUtility = False\n"
+        scope_info += f", 'refinement': {refinement!r}"
+    if fmt == "stl":
+        if units not in _STL_UNITS:
+            raise ValueError(f"units must be one of {sorted(_STL_UNITS)} for STL")
+        settings += f"""\
+        if not hasattr(opts, "unitType"):
+            print(json.dumps({{"ok": False, "error": "export_units_unsupported"}}))
+            return
+        opts.unitType = adsk.fusion.DistanceUnits.{_STL_UNITS[units]}
+"""
+        scope_info += f", 'units': {units!r}"
 
-
-def _emit_find_body() -> str:
-    return """
-def _find_body(root, name):
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    return walk(root)
+    lookup_helpers = RESOLVER_SCRIPT if scope_lookup else ""
+    obj_support = "import shutil\n" + _PUBLISH_OBJ if fmt == "obj" else ""
+    if fmt == "obj":
+        publish = """\
+        sidecar = os.path.splitext(os.path.basename(path))[0] + ".mtl"
+        sidecars = [sidecar] if extras == {sidecar} and os.path.isfile(os.path.join(staging, sidecar)) else []
+        if extras and not sidecars:
+            print(json.dumps({"ok": False, "error": "export_unexpected_artifacts"}))
+            return
+        if sidecars:
+            _publish_obj(staged_path, path, sidecar)
+        else:
+            os.replace(staged_path, path)
+"""
+    else:
+        publish = """\
+        sidecars = []
+        if extras:
+            print(json.dumps({"ok": False, "error": "export_unexpected_artifacts"}))
+            return
+        os.replace(staged_path, path)
 """
 
-
-def _build_export_stl(body: str | None, path: str, refinement: str, units: str) -> str:
-    units_enum_map = {
-        "mm": "MillimeterDistanceUnits",
-        "cm": "CentimeterDistanceUnits",
-        "m": "MeterDistanceUnits",
-        "inch": "InchDistanceUnits",
-        "in": "InchDistanceUnits",
-    }
-    if units not in units_enum_map:
-        raise ValueError(f"units must be one of {sorted(units_enum_map)} for STL, got {units!r}")
-    units_enum = units_enum_map[units]
-    refinement_enum = STL_REFINEMENT[refinement]
-
-    body_block = ""
-    target_expr = "design.rootComponent"
-    if body:
-        body_block = _emit_find_body()
-        target_expr = "b"
-
-    return (
-        _header()
-        + body_block
-        + "\ndef run(_ctx):\n"
-        + "    app = adsk.core.Application.get()\n"
-        + "    design = adsk.fusion.Design.cast(app.activeProduct)\n"
-        + "    if design is None:\n"
-        + "        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return\n"
-        + "    root = design.rootComponent\n"
-        + (
-            f"    b = _find_body(root, {json.dumps(body)})\n"
-            f"    if b is None:\n"
-            f"        print(json.dumps({{'ok': False, 'error': 'body_not_found', 'name': {json.dumps(body)}}})); return\n"
-            if body
-            else ""
-        )
-        + f"    os.makedirs(os.path.dirname({json.dumps(path)}), exist_ok=True)\n"
-        + "    em = design.exportManager\n"
-        + f"    opts = em.createSTLExportOptions({target_expr}, {json.dumps(path)})\n"
-        + f"    opts.meshRefinement = adsk.fusion.MeshRefinementSettings.{refinement_enum}\n"
-        + "    opts.sendToPrintUtility = False\n"
-        + f"    opts.units = adsk.fusion.DistanceUnits.{units_enum}\n"
-        + "    em.execute(opts)\n"
-        + f"    size = os.path.getsize({json.dumps(path)}) if os.path.exists({json.dumps(path)}) else 0\n"
-        + f"    print(json.dumps({{'ok': True, 'format': 'stl', 'path': {json.dumps(path)},"
-        + f" 'bytes_written': size, 'refinement': {json.dumps(refinement)}, 'units': {json.dumps(units)}}}))\n"
-    )
-
-
-def _build_export_3mf(body: str | None, path: str) -> str:
-    body_block = ""
-    target_expr = "design.rootComponent"
-    if body:
-        body_block = _emit_find_body()
-        target_expr = "b"
-
-    return (
-        _header()
-        + body_block
-        + "\ndef run(_ctx):\n"
-        + "    app = adsk.core.Application.get()\n"
-        + "    design = adsk.fusion.Design.cast(app.activeProduct)\n"
-        + "    if design is None:\n"
-        + "        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return\n"
-        + "    root = design.rootComponent\n"
-        + (
-            f"    b = _find_body(root, {json.dumps(body)})\n"
-            f"    if b is None:\n"
-            f"        print(json.dumps({{'ok': False, 'error': 'body_not_found', 'name': {json.dumps(body)}}})); return\n"
-            if body
-            else ""
-        )
-        + f"    os.makedirs(os.path.dirname({json.dumps(path)}), exist_ok=True)\n"
-        + "    em = design.exportManager\n"
-        + f"    opts = em.createC3MFExportOptions({target_expr}, {json.dumps(path)})\n"
-        + "    em.execute(opts)\n"
-        + f"    size = os.path.getsize({json.dumps(path)}) if os.path.exists({json.dumps(path)}) else 0\n"
-        + f"    print(json.dumps({{'ok': True, 'format': '3mf', 'path': {json.dumps(path)}, 'bytes_written': size}}))\n"
-    )
-
-
-def _build_export_obj(body: str | None, path: str, refinement: str) -> str:
-    if refinement not in STL_REFINEMENT:
-        raise ValueError(
-            f"refinement must be one of {sorted(STL_REFINEMENT)} for OBJ, got {refinement!r}"
-        )
-    refinement_enum = STL_REFINEMENT[refinement]
-    body_block = ""
-    target_expr = "design.rootComponent"
-    if body:
-        body_block = _emit_find_body()
-        target_expr = "b"
-    return (
-        _header()
-        + body_block
-        + "\ndef run(_ctx):\n"
-        + "    app = adsk.core.Application.get()\n"
-        + "    design = adsk.fusion.Design.cast(app.activeProduct)\n"
-        + "    if design is None:\n"
-        + "        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return\n"
-        + "    root = design.rootComponent\n"
-        + (
-            f"    b = _find_body(root, {json.dumps(body)})\n"
-            f"    if b is None:\n"
-            f"        print(json.dumps({{'ok': False, 'error': 'body_not_found', 'name': {json.dumps(body)}}})); return\n"
-            if body
-            else ""
-        )
-        + f"    os.makedirs(os.path.dirname({json.dumps(path)}), exist_ok=True)\n"
-        + "    em = design.exportManager\n"
-        + f"    opts = em.createOBJExportOptions({target_expr}, {json.dumps(path)})\n"
-        + f"    opts.meshRefinement = adsk.fusion.MeshRefinementSettings.{refinement_enum}\n"
-        + "    em.execute(opts)\n"
-        + f"    size = os.path.getsize({json.dumps(path)}) if os.path.exists({json.dumps(path)}) else 0\n"
-        + f"    print(json.dumps({{'ok': True, 'format': 'obj', 'path': {json.dumps(path)}, 'bytes_written': size}}))\n"
-    )
-
-
-def _build_export_simple(opts_factory: str, path: str) -> str:
-    """For STEP/IGES/SAT/SMT/F3D — export the whole design (no body arg supported by these)."""
-    return (
-        _header()
-        + "\ndef run(_ctx):\n"
-        + "    app = adsk.core.Application.get()\n"
-        + "    design = adsk.fusion.Design.cast(app.activeProduct)\n"
-        + "    if design is None:\n"
-        + "        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return\n"
-        + f"    os.makedirs(os.path.dirname({json.dumps(path)}), exist_ok=True)\n"
-        + "    em = design.exportManager\n"
-        + f"    opts = em.{opts_factory}({json.dumps(path)})\n"
-        + "    em.execute(opts)\n"
-        + f"    size = os.path.getsize({json.dumps(path)}) if os.path.exists({json.dumps(path)}) else 0\n"
-        + f"    print(json.dumps({{'ok': True, 'path': {json.dumps(path)}, 'bytes_written': size}}))\n"
-    )
+    return f"""\
+{_SCRIPT_HEADER}import tempfile
+{obj_support}
+{lookup_helpers}
+def run(_ctx):
+{_ACTIVE_DESIGN}{scope_lookup}    path = {path!r}
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    em = design.exportManager
+    with tempfile.TemporaryDirectory(prefix=".fusion-export-", dir=parent) as staging:
+        staged_path = os.path.join(staging, os.path.basename(path))
+        opts = em.{factory}({option_args})
+        if opts is None:
+            print(json.dumps({{"ok": False, "error": "export_options_failed"}}))
+            return
+{settings}        if not em.execute(opts):
+            print(json.dumps({{"ok": False, "error": "export_failed"}}))
+            return
+        size = os.path.getsize(staged_path) if os.path.isfile(staged_path) else 0
+        if size == 0:
+            print(json.dumps({{"ok": False, "error": "export_empty"}}))
+            return
+        extras = set(os.listdir(staging)) - {{os.path.basename(path)}}
+{publish}    print(json.dumps({{
+        "ok": True, "format": {fmt!r}, "path": path, "bytes_written": size,
+        {scope_info}, "sidecars": [os.path.join(parent, name) for name in sidecars],
+    }}))
+""".strip()
 
 
 def export(
@@ -271,63 +250,124 @@ def export(
     body: str | None = None,
     refinement: str = "medium",
     units: str = "mm",
+    component: str | None = None,
 ) -> Envelope:
     ok, err = _validate_path(path)
     if not ok:
         return Envelope(ok=False, error="invalid_path", message=err or "")
     try:
-        script = build_export(format, body, path, refinement, units)
-    except ValueError as e:
-        return Envelope(ok=False, error="invalid_input", message=str(e))
+        script = build_export(format, body, path, refinement, units, component)
+    except ValueError as exc:
+        return Envelope(ok=False, error="invalid_input", message=str(exc))
     return _ok_runner(adapter, script, "export")
 
 
-# ---------- import_geometry ----------
-
-
-def build_import_geometry(format: str, path: str) -> str:
+def build_import_geometry(
+    format: str, path: str, target_component: str | None = None
+) -> str:
     fmt = format.lower()
     if fmt not in IMPORT_FORMATS:
         raise ValueError(f"format must be one of {sorted(IMPORT_FORMATS)}, got {format!r}")
+    factory = _IMPORT_FACTORIES[fmt]
+    occurrence_handle = emit_make_handle("occurrence", "entry['path'] + context_suffix", "item")
+    body_handle = emit_make_handle("body", "entry['path'] + context_suffix", "item")
+    select_target = ""
+    if target_component is not None:
+        select_target = f"""\
+    occurrence, error = _select_occurrence(root, {target_component!r})
+    if error:
+        print(json.dumps(error))
+        return
+    if occurrence.isReferencedComponent:
+        print(json.dumps({{"ok": False, "error": "referenced_component_edit_unsupported"}}))
+        return
+    target = occurrence.component
+    if root.allOccurrencesByComponent(target).count != 1:
+        print(json.dumps({{"ok": False, "error": "shared_component_edit_unsupported"}}))
+        return
+"""
 
-    factory = {
-        "step": "createSTEPImportOptions",
-        "iges": "createIGESImportOptions",
-        "sat": "createSATImportOptions",
-        "smt": "createSMTImportOptions",
-        "f3d": "createFusionArchiveImportOptions",
-    }[fmt]
+    return f"""\
+{_SCRIPT_HEADER}import hashlib
 
-    return (
-        _header()
-        + "\ndef run(_ctx):\n"
-        + "    app = adsk.core.Application.get()\n"
-        + "    design = adsk.fusion.Design.cast(app.activeProduct)\n"
-        + "    if design is None:\n"
-        + "        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return\n"
-        + f"    if not os.path.exists({json.dumps(path)}):\n"
-        + f"        print(json.dumps({{'ok': False, 'error': 'file_not_found', 'path': {json.dumps(path)}}})); return\n"
-        + "    im = app.importManager\n"
-        + f"    opts = im.{factory}({json.dumps(path)})\n"
-        + "    pre_bodies = design.rootComponent.bRepBodies.count\n"
-        + "    pre_occs = design.rootComponent.occurrences.count\n"
-        + "    im.importToTarget(opts, design.rootComponent)\n"
-        + "    print(json.dumps({\n"
-        + f"        'ok': True, 'format': {json.dumps(fmt)}, 'path': {json.dumps(path)},\n"
-        + "        'bodies_added': design.rootComponent.bRepBodies.count - pre_bodies,\n"
-        + "        'occurrences_added': design.rootComponent.occurrences.count - pre_occs,\n"
-        + "    }))\n"
-    )
+{RESOLVER_SCRIPT if select_target else ""}
+def _describe_imported(item, occurrence):
+    entry = {{"object_type": item.objectType, "name": getattr(item, "name", None)}}
+    if not item.objectType.endswith(("::Occurrence", "::BRepBody")):
+        return entry
+    if occurrence is not None and item.assemblyContext is None:
+        proxy = item.createForAssemblyContext(occurrence)
+        if proxy is None:
+            entry["identity_error"] = "proxy_unavailable"
+            return entry
+        item = proxy
+    context = item.assemblyContext
+    context_path = context.fullPathName if context is not None else None
+    context_suffix = ("|occ=" + context_path) if context_path else ""
+    if item.objectType.endswith("::Occurrence"):
+        entry["path"] = item.fullPathName
+        entry["handle"] = {occurrence_handle}
+    else:
+        entry["path"] = (context_path + " / " if context_path else "") + item.name
+        entry["handle"] = {body_handle}
+    return entry
+
+def run(_ctx):
+{_ACTIVE_DESIGN}    path = {path!r}
+    if not os.path.isfile(path):
+        print(json.dumps({{"ok": False, "error": "file_not_found", "path": path}}))
+        return
+    target = root
+    occurrence = None
+{select_target}    source_hash = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            source_hash.update(chunk)
+    im = app.importManager
+    opts = im.{factory}(path)
+    if opts is None:
+        print(json.dumps({{"ok": False, "error": "import_options_failed"}}))
+        return
+    pre_bodies = target.bRepBodies.count
+    pre_occs = target.occurrences.count
+    display_length_unit = design.unitsManager.defaultLengthUnits
+    target_transform = occurrence.transform2 if occurrence is not None else adsk.core.Matrix3D.create()
+    objects = im.importToTarget2(opts, target)
+    if objects is None or objects.count == 0:
+        print(json.dumps({{"ok": False, "error": "import_no_objects"}}))
+        return
+    imported = []
+    for index in range(objects.count):
+        item = objects.item(index)
+        try:
+            imported.append(_describe_imported(item, occurrence))
+        except (AttributeError, RuntimeError):
+            # Metadata can be unavailable for an entity even after import succeeds.
+            imported.append({{"object_type": item.objectType, "identity_error": "identity_unavailable"}})
+    print(json.dumps({{
+        "ok": True, "format": {fmt!r}, "path": path, "source_sha256": source_hash.hexdigest(),
+        "target_component": target.name,
+        "target_occurrence_path": occurrence.fullPathName if occurrence is not None else None,
+        "coordinate_frame": "target_component" if occurrence is not None else "root",
+        "target_to_root_transform_cm": list(target_transform.asArray()),
+        "fusion_length_unit": "cm", "display_length_unit": display_length_unit,
+        "bodies_added": target.bRepBodies.count - pre_bodies,
+        "occurrences_added": target.occurrences.count - pre_occs,
+        "imported_objects": imported,
+    }}))
+""".strip()
 
 
-def import_geometry(adapter: FusionAdapter, format: str, path: str) -> Envelope:
+def import_geometry(
+    adapter: FusionAdapter, format: str, path: str, target_component: str | None = None
+) -> Envelope:
     ok, err = _validate_path(path)
     if not ok:
         return Envelope(ok=False, error="invalid_path", message=err or "")
     try:
-        script = build_import_geometry(format, path)
-    except ValueError as e:
-        return Envelope(ok=False, error="invalid_input", message=str(e))
+        script = build_import_geometry(format, path, target_component)
+    except ValueError as exc:
+        return Envelope(ok=False, error="invalid_input", message=str(exc))
     return _ok_runner(adapter, script, "import_geometry")
 
 

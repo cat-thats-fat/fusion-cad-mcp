@@ -7,9 +7,8 @@ fillet_edges(edges[], radius)                — UI-selection-style; takes edge 
 chamfer_edges(edges[], distance, ...)        — UI-selection-style; takes edge handles
 project_to_sketch(sketch, entities[])        — project handles onto a named sketch
 
-These tools all use the handle resolver from handles.py. Component / sketch /
-mesh_body args still take by-name strings (we already address those); only the
-new entity references that didn't have name addressing use handles.
+Entity arguments use the handle resolver. Component and sketch selectors use
+names. Mesh ray searches return scoped mesh handles for collision checks.
 """
 
 from __future__ import annotations
@@ -19,7 +18,15 @@ import textwrap
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
-from ..handles import emit_resolve, emit_resolve_many, parse_handle
+from ..handles import (
+    emit_make_handle,
+    emit_resolve,
+    emit_resolve_many,
+    emit_scope_expr,
+    parse_handle,
+)
+from ..resolver import RESOLVER_SCRIPT
+from .sketch import SKETCH_RESOLVER_SCRIPT
 
 
 def _indent4(s: str) -> str:
@@ -101,11 +108,6 @@ def run(_ctx):
 
     {resolve_a}
     {resolve_b}
-    # Unwrap proxies: MeasureManager rejects BRepFaceProxy and friends.
-    _a_native = _a.nativeObject if hasattr(_a, 'nativeObject') and _a.nativeObject else _a
-    _b_native = _b.nativeObject if hasattr(_b, 'nativeObject') and _b.nativeObject else _b
-    _a = _a_native
-    _b = _b_native
     {measure_call}
     print(json.dumps({report}))
 """
@@ -138,27 +140,9 @@ def build_find_mesh_using_ray(
     ox, oy, oz = (v / 10.0 for v in origin_mm)
     dx, dy, dz = direction
 
-    if component_name:
-        # Walk occurrences recursively to find a sub-component by name
-        comp_resolver = (
-            f"    def _find_comp(comp, name):\n"
-            f"        if comp.name == name: return comp\n"
-            f"        for i in range(comp.occurrences.count):\n"
-            f"            occ = comp.occurrences.item(i)\n"
-            f"            if occ.component is None: continue\n"
-            f"            r = _find_comp(occ.component, name)\n"
-            f"            if r: return r\n"
-            f"        return None\n"
-            f"    target = _find_comp(root, {json.dumps(component_name)})\n"
-            f"    if target is None:\n"
-            f"        print(json.dumps({{'ok': False, 'error': 'component_not_found',"
-            f" 'name': {json.dumps(component_name)}}})); return\n"
-        )
-    else:
-        comp_resolver = "    target = root\n"
-
     return f"""\
 {_header()}
+{RESOLVER_SCRIPT}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -166,28 +150,42 @@ def run(_ctx):
     if design is None:
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
-{comp_resolver}
+    selector = {component_name!r}
+    scope = None
+    if selector:
+        occ, error = _select_occurrence(root, selector)
+        if error and error['error'] == 'occurrence_ambiguous':
+            error['error'] = 'component_ambiguous'
+            print(json.dumps(error)); return
+        if selector == root.name and occ is not None:
+            print(json.dumps({{'ok': False, 'error': 'component_ambiguous', 'name': selector,
+                              'matches': [root.name, occ.fullPathName]}})); return
+        if selector != root.name:
+            if error:
+                error['error'] = 'component_not_found'
+                print(json.dumps(error)); return
+            scope = occ.fullPathName
+
     origin = adsk.core.Point3D.create(float({ox}), float({oy}), float({oz}))
     direction_vec = adsk.core.Vector3D.create(float({dx}), float({dy}), float({dz}))
 
-    meshes = target.findMeshUsingRay(origin, direction_vec)
-    if meshes is None:
-        print(json.dumps({{"ok": True, "meshes_found": 0, "names": []}}))
-        return
-
-    # Return may be ObjectCollection, list, or MeshBodyVector (SWIG sequence). All support len() + [i].
-    try:
-        n = len(meshes)
-    except TypeError:
-        n = meshes.count if not callable(getattr(meshes, 'count', None)) else 0
+    # Cast in root coordinates so proxy meshes and the ray share a frame.
+    meshes, _hit_points = root.findMeshUsingRay(origin, direction_vec)
     names = []
-    for i in range(n):
-        item = meshes[i] if hasattr(meshes, '__getitem__') else meshes.item(i)
-        names.append(item.name)
+    mesh_handles = []
+    for mesh in meshes:
+        occ = mesh.assemblyContext
+        occ_path = occ.fullPathName if occ is not None else None
+        if scope is not None and not (occ_path == scope or (occ_path and occ_path.startswith(scope + '+'))):
+            continue
+        names.append(mesh.name)
+        path = (occ_path + ' / ' + mesh.name + '|occ=' + occ_path if occ_path else mesh.name)
+        mesh_handles.append({emit_make_handle("mesh_body", "path", "mesh")})
     print(json.dumps({{
         "ok": True,
-        "meshes_found": n,
+        "meshes_found": len(names),
         "names": names,
+        "mesh_handles": mesh_handles,
     }}))
 """
 
@@ -219,6 +217,12 @@ def build_ray_collision_with_mesh(
         raise ValueError("direction must be [dx, dy, dz]")
     ox, oy, oz = (v / 10.0 for v in origin_mm)
     dx, dy, dz = direction
+    kind = parse_handle(mesh_handle)["kind"]
+    if kind not in {"mesh_body", "body"}:
+        raise ValueError("mesh_handle must be a mesh_body handle")
+    # Older callers supplied mesh tokens using the generic body prefix.
+    if kind == "body":
+        mesh_handle = "mesh_body:" + mesh_handle.split(":", 1)[1]
     resolve = _indent4(emit_resolve(mesh_handle, var="_mesh"))
 
     return f"""\
@@ -234,14 +238,7 @@ def run(_ctx):
     direction_vec = adsk.core.Vector3D.create({dx}, {dy}, {dz})
 
     points = _mesh.calculateCollisionsWithRay(origin, direction_vec)
-    if points is None:
-        print(json.dumps({{"ok": True, "collisions": 0, "points_mm": []}}))
-        return
-
-    pts_mm = []
-    for i in range(points.count):
-        p = points.item(i)
-        pts_mm.append([p.x * 10.0, p.y * 10.0, p.z * 10.0])
+    pts_mm = [[p.x * 10.0, p.y * 10.0, p.z * 10.0] for p in points]
     print(json.dumps({{
         "ok": True,
         "collisions": len(pts_mm),
@@ -272,6 +269,8 @@ def build_fillet_edges(
 ) -> str:
     if not edge_handles:
         raise ValueError("edge_handles must be non-empty")
+    if any(parse_handle(handle)['kind'] != 'edge' for handle in edge_handles):
+        raise ValueError("edge_handles must contain only edge handles")
     if not radius:
         raise ValueError("radius expression required")
     resolve = _indent4(emit_resolve_many(edge_handles, collection_var="_resolved_edges"))
@@ -335,6 +334,8 @@ def build_chamfer_edges(
 ) -> str:
     if not edge_handles:
         raise ValueError("edge_handles must be non-empty")
+    if any(parse_handle(handle)['kind'] != 'edge' for handle in edge_handles):
+        raise ValueError("edge_handles must contain only edge handles")
     if kind not in CHAMFER_KINDS:
         raise ValueError(f"kind must be one of {sorted(CHAMFER_KINDS)}, got {kind!r}")
     if kind == "two_dist" and not distance2:
@@ -418,6 +419,7 @@ def build_project_to_sketch(sketch_name: str, entity_handles: list[str]) -> str:
     resolve = _indent4(emit_resolve_many(entity_handles, collection_var="_to_project"))
     return f"""\
 {_header()}
+{SKETCH_RESOLVER_SCRIPT}
 def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
@@ -425,26 +427,26 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    sk = None
-    for i in range(root.sketches.count):
-        s = root.sketches.item(i)
-        if s.name == {json.dumps(sketch_name)}:
-            sk = s; break
-    if sk is None:
-        print(json.dumps({{"ok": False, "error": "sketch_not_found", "name": {json.dumps(sketch_name)}}})); return
+    sk, owner, error = _select_sketch(root, {json.dumps(sketch_name)})
+    if error:
+        print(json.dumps(error)); return
+    if owner != root:
+        for i in range(root.allOccurrences.count):
+            occ = root.allOccurrences.item(i)
+            if occ.component == owner:
+                sk = sk.createForAssemblyContext(occ)
+                break
+        if sk is None:
+            print(json.dumps({{"ok": False, "error": "sketch_proxy_unavailable", "name": {json.dumps(sketch_name)}}})); return
 
     {resolve}
-    projected_total = 0
-    for ent in _to_project:
-        result = sk.project(ent)
-        if result is not None:
-            projected_total += result.count
+    result = sk.project2(_to_project, True)
 
     print(json.dumps({{
         "ok": True,
         "sketch": {json.dumps(sketch_name)},
         "entities_projected": len(_to_project),
-        "curves_added": projected_total,
+        "curves_added": len(result) if result is not None else 0,
     }}))
 """
 
@@ -510,32 +512,27 @@ def build_list_body_entities(
             cond = (
                 "abs(sp.x - ep_.x) < 1e-6 and abs(sp.y - ep_.y) < 1e-6 and abs(sp.z - ep_.z) > 1e-6"
             )
-        edge_filter_block = f"            if not ({cond}):\n                continue\n"
+        edge_filter_block = (
+            "            if adsk.core.Line3D.cast(e.geometry) is None:\n"
+            "                continue\n"
+            "            sp = e.startVertex.geometry\n"
+            "            ep_ = e.endVertex.geometry\n"
+            f"            if not ({cond}):\n"
+            "                continue\n"
+        )
 
     if min_edge_length_mm is not None:
         if min_edge_length_mm < 0:
             raise ValueError("min_edge_length_mm must be >= 0")
         edge_filter_block += (
-            f"            if (((sp.x - ep_.x)**2 + (sp.y - ep_.y)**2 + (sp.z - ep_.z)**2) ** 0.5) < {min_edge_length_mm / 10.0}:\n"
+            f"            if e.length < {min_edge_length_mm / 10.0}:\n"
             f"                continue\n"
         )
 
     return f"""\
 {_header()}
 
-def _find_body(root, name):
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    return walk(root)
-
+{RESOLVER_SCRIPT}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -544,10 +541,14 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    body = _find_body(root, {json.dumps(body_name)})
-    if body is None:
-        print(json.dumps({{"ok": False, "error": "body_not_found", "name": {json.dumps(body_name)}}})); return
+    selector = {body_name!r}
+    body, error = _select_body(root, selector)
+    if error:
+        print(json.dumps(error)); return
 
+    _occ = getattr(body, "assemblyContext", None)
+    _occ_suffix = ("|occ=" + _occ.fullPathName) if _occ else ""
+    _scope_suffix = {emit_scope_expr()}
     faces = []
     edges = []
     vertices = []
@@ -557,19 +558,17 @@ def run(_ctx):
             f = body.faces.item(i)
 {face_filter_block}            faces.append({{
                 'index': i,
-                'handle': 'face:' + {json.dumps(body_name)} + '/face[' + str(i) + ']:' + f.entityToken,
+                'handle': 'face:' + selector + '/face[' + str(i) + ']' + _occ_suffix + _scope_suffix + ':' + f.entityToken,
                 'pointOnFace_mm': [f.pointOnFace.x * 10.0, f.pointOnFace.y * 10.0, f.pointOnFace.z * 10.0],
             }})
 
     if {do_edges}:
         for i in range(body.edges.count):
             e = body.edges.item(i)
-            sp = e.startVertex.geometry
-            ep_ = e.endVertex.geometry
 {edge_filter_block}            edges.append({{
                 'index': i,
-                'handle': 'edge:' + {json.dumps(body_name)} + '/edge[' + str(i) + ']:' + e.entityToken,
-                'length_mm': (((sp.x - ep_.x)**2 + (sp.y - ep_.y)**2 + (sp.z - ep_.z)**2) ** 0.5) * 10.0,
+                'handle': 'edge:' + selector + '/edge[' + str(i) + ']' + _occ_suffix + _scope_suffix + ':' + e.entityToken,
+                'length_mm': e.length * 10.0,
             }})
 
     if {do_verts}:
@@ -577,13 +576,13 @@ def run(_ctx):
             v = body.vertices.item(i)
             vertices.append({{
                 'index': i,
-                'handle': 'vertex:' + {json.dumps(body_name)} + '/vertex[' + str(i) + ']:' + v.entityToken,
+                'handle': 'vertex:' + selector + '/vertex[' + str(i) + ']' + _occ_suffix + _scope_suffix + ':' + v.entityToken,
                 'position_mm': [v.geometry.x * 10.0, v.geometry.y * 10.0, v.geometry.z * 10.0],
             }})
 
     print(json.dumps({{
         "ok": True,
-        "body": {json.dumps(body_name)},
+        "body": selector,
         "face_count": len(faces),
         "edge_count": len(edges),
         "vertex_count": len(vertices),

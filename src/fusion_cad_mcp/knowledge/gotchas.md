@@ -1091,11 +1091,11 @@ The older `add*ChamferEdges` methods on the input object no longer exist. Argume
 
 Note this also means chamfer supports tangent chaining, which the previous single-call form did not expose.
 
-## Ribs are not scriptable (2026-07-18)
+## Rib API availability varies by Fusion version (2026-07-18)
 
-`RibFeatures` is a read-only collection in 2704.1.23. It has `item`, `itemByName`, and `count`, but no `createInput` and no `add`. There is no way to create a rib from the API.
+In 2704.1.23 the inspected `RibFeatures` collection lacked `createInput` and `add`. The tool checks those capabilities at runtime and returns `rib_not_scriptable` when absent; this was also observed on 2705.1.30.
 
-Do not spend time debugging this; it is not a signature problem. Model the rib as a thin extrude instead: sketch the rib cross-section as a closed profile and extrude it with `operation='join'`. That is parametric, survives rebuilds, and gives you direct control over the wall thickness that the rib feature would have inferred.
+When the capability is absent, model the rib as a thin extrude instead: sketch the rib cross-section as a closed profile and extrude it with `operation='join'`. That is parametric, survives rebuilds, and gives you direct control over the wall thickness that the rib feature would have inferred.
 
 Worth re-testing on future Fusion releases, since a read-only collection suggests the feature is exposed but not yet writable.
 
@@ -1125,6 +1125,8 @@ The second axis must not be the same entity as the first, or Fusion rejects the 
 **General lesson: count entities before and after any feature that replicates geometry.** Position and volume checks pass clean here.
 
 ## Hole placement picks a face, and "tallest" is the wrong heuristic (2026-07-18)
+
+**Current tool behavior:** `add_hole` accepts an explicit planar face handle and point, or selects an upward planar face containing XY nearest the supplied Z. It rejects ambiguity and child-component bodies, and limits participants to the selected body. The notes below describe the older placement pitfall.
 
 Positioning a hole by world XY requires choosing a face to place the sketch point on. Selecting the highest `+Z` face in the body is the obvious approach and it breaks on any stepped part: a hole aimed at a lower step gets placed on the plane of the taller one, floating in mid-air above its intended target.
 

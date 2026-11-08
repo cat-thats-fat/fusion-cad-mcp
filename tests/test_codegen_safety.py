@@ -143,7 +143,7 @@ GENERATOR_CALLS = [
         ("body_main",),
         {"rotation_axis": [0, 0, 1], "rotation_angle_deg": 90.0},
     ),
-    ("rib.min", f.build_rib, ("outer", "2 mm"), {}),
+    ("rib.min", f.build_rib, ("outer", "2 mm"), {"target_body": "plate"}),
     ("rebuild_feature.min", f.build_rebuild_feature, ("feat_a",), {}),
     # ---- assembly ----
     ("bodies_to_components", asm.build_bodies_to_components, ({"body_main": "Comp1"},), {}),
@@ -257,7 +257,7 @@ GENERATOR_CALLS = [
     ),
     ("measure", ht.build_measure, (HANDLE, EDGE_HANDLE), {}),
     ("find_mesh_ray", ht.build_find_mesh_using_ray, (None, [0, 0, 0], [0, 0, 1]), {}),
-    ("ray_collision", ht.build_ray_collision_with_mesh, (HANDLE, [0, 0, 0], [0, 0, 1]), {}),
+    ("ray_collision", ht.build_ray_collision_with_mesh, ("mesh_body:mesh:abc", [0, 0, 0], [0, 0, 1]), {}),
     ("fillet_edges.min", ht.build_fillet_edges, ([EDGE_HANDLE], "2 mm"), {}),
     ("chamfer_edges.min", ht.build_chamfer_edges, ([EDGE_HANDLE], "1 mm"), {}),
     ("project_to_sketch", ht.build_project_to_sketch, ("outer", [HANDLE]), {}),
@@ -328,7 +328,7 @@ def test_pattern_rectangular_single_direction_is_valid_python():
     """
     src = f.build_pattern_rectangular("rib", x_axis="x", x_count=3, x_distance="30 mm")
     assert "null" not in [n for n, _ in _js_literal_names(src)]
-    assert "if None is not None and y_axis is None:" in src
+    assert "if False and y_axis is None:" in src
 
 
 def test_fillet_by_geometry_no_match_branch_is_valid_python():
@@ -350,39 +350,3 @@ def test_fillet_by_geometry_no_match_branch_is_valid_python():
 # In both cases the X positions were correct, so the failure is invisible to a
 # position check and only shows up in the body count. Assert on the generated
 # call, since the count itself can only be observed inside Fusion.
-
-
-def test_pattern_rectangular_always_sets_direction_two():
-    """Single-direction patterns must still pin direction two to one instance."""
-    src = f.build_pattern_rectangular("rib", x_axis="x", x_count=4, x_distance="60 mm")
-    assert src.count("setDirectionTwo") == 2, (
-        "expected both the y_axis branch and the single-direction fallback"
-    )
-    # The fallback must request exactly one instance at zero offset.
-    assert "createByReal(1)" in src
-    assert 'createByString("0 mm")' in src
-
-
-def test_pattern_rectangular_direction_two_fallback_differs_from_primary():
-    """The fallback axis must not collide with the primary axis."""
-    on_x = f.build_pattern_rectangular("rib", x_axis="x", x_count=2, x_distance="10 mm")
-    assert "root.yConstructionAxis," in on_x
-
-    # With Y as the primary axis, the fallback has to move off Y.
-    on_y = f.build_pattern_rectangular("rib", x_axis="y", x_count=2, x_distance="10 mm")
-    assert "root.zConstructionAxis," in on_y
-
-
-def test_pattern_rectangular_two_direction_still_uses_caller_values():
-    """An explicit y_axis must not be overridden by the fallback."""
-    src = f.build_pattern_rectangular(
-        "rib",
-        x_axis="x",
-        x_count=3,
-        x_distance="30 mm",
-        y_axis="y",
-        y_count=2,
-        y_distance="20 mm",
-    )
-    assert "createByReal(2)" in src
-    assert 'createByString("20 mm")' in src

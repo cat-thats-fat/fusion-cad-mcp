@@ -1,0 +1,452 @@
+{
+  "tests/test_adapter.py::test_handshake_uses_negotiated_protocol_and_optional_session": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Negotiates a different version, checks required headers on every later exchange, and compares stateful DELETE with stateless shutdown."
+  },
+  "tests/test_adapter.py::test_unsupported_protocol_fails_before_discovery_and_cleans_up": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "An unsupported negotiation fails before initialization notification and closes the provisional session."
+  },
+  "tests/test_adapter.py::test_list_tools_pages_and_enforces_schema_before_calling_fusion": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Checks pagination cursor and discovery of both pages, and proves invalid arguments and absent tools never dispatch."
+  },
+  "tests/test_adapter.py::test_invalid_tool_schema_stops_before_dispatch": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Rejects malformed required schema shape before any tool call is sent."
+  },
+  "tests/test_adapter.py::test_expired_session_retries_only_after_rediscovery": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Checks exactly two handshakes, renewed tool discovery, omitted stale header at reinitialize, and unique request IDs."
+  },
+  "tests/test_adapter.py::test_other_http_errors_do_not_replay_tools": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Parameterized rejection statuses perform one POST; server failure reports an unknown outcome."
+  },
+  "tests/test_adapter.py::test_404_without_session_does_not_replay_tools": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "A stateless 404 performs a single POST and surfaces the rejection."
+  },
+  "tests/test_adapter.py::test_read_timeout_reports_uncertain_outcome_and_never_replays": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "A read timeout reports uncertainty and sends one cancellation tied to the original request ID, with no repeat POST."
+  },
+  "tests/test_adapter.py::test_sse_handles_notifications_and_stops_at_the_response": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Streams CRLF and multiline data through a closable body, verifies list-change invalidation, and fails if reading continues beyond the matching result."
+  },
+  "tests/test_adapter.py::test_sse_resumes_by_get_and_does_not_replay_post": {
+    "disposition": "keep",
+    "evidence": "mock HTTP transport",
+    "rationale": "Exercises Last-Event-ID resume, negotiated headers, and the unknown-outcome behavior on a missing resume session without redispatch."
+  },
+  "tests/test_envelope.py::test_success_envelope_parses_stdout": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks stdout newline fidelity and success state for legacy JSON text."
+  },
+  "tests/test_envelope.py::test_fusion_reports_failure_with_traceback": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks the nested Fusion failure, exact diagnostic message, and preserved traceback."
+  },
+  "tests/test_envelope.py::test_jsonrpc_transport_error": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Checks the RPC error code in addition to the human-readable message."
+  },
+  "tests/test_envelope.py::test_empty_content_is_structured_error": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks the stable error for an empty tool result without structured content."
+  },
+  "tests/test_envelope.py::test_inner_not_json_falls_back_to_message": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Replaced by test_native_plain_text_success_is_preserved: MCP text need not contain JSON."
+  },
+  "tests/test_envelope.py::test_native_plain_text_success_is_preserved": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "A successful native MCP plain text response retains its message and success state."
+  },
+  "tests/test_envelope.py::test_parse_stdout_json_extracts_dict": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks extraction of specific values from JSON stdout."
+  },
+  "tests/test_envelope.py::test_parse_stdout_json_returns_none_for_non_json": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Replaced by test_parse_stdout_json_rejects_non_object_or_failed_result, which also rejects JSON arrays and failed envelopes."
+  },
+  "tests/test_envelope.py::test_parse_stdout_json_rejects_non_object_or_failed_result": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks the stdout parser accepts successful object results only."
+  },
+  "tests/test_envelope.py::test_envelope_to_dict_drops_nones": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Asserts the exact compact output shape without absent optional fields."
+  },
+  "tests/test_envelope.py::test_envelope_to_dict_keeps_ok_false": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Ensures a false success flag and associated diagnostic survive serialization."
+  },
+  "tests/test_envelope.py::test_image_content_parses_into_image_field": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks backwards-compatible single-image field and MIME key translation."
+  },
+  "tests/test_envelope.py::test_mcp_is_error_takes_precedence_over_inner_success": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "An explicit MCP failure cannot be converted to success by a contradictory legacy payload."
+  },
+  "tests/test_envelope.py::test_mcp_error_plain_text_is_preserved": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Reports an MCP tool failure while retaining the readable diagnostic when no JSON object exists."
+  },
+  "tests/test_envelope.py::test_structured_content_takes_precedence_and_retains_all_images_in_order": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks precedence over duplicate compatibility text and preservation of image order."
+  },
+  "tests/test_envelope.py::test_structured_content_does_not_require_a_text_copy": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "An empty content array is valid when a structured object is present."
+  },
+  "tests/test_envelope.py::test_text_before_image_preserves_both_without_structured_content": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks mixed caption and native image content in the absence of structured content."
+  },
+  "tests/test_visualize.py::test_screenshot_invalid_direction_short_circuits": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "A fake adapter fails on any dispatch, proving invalid input is rejected before touching Fusion."
+  },
+  "tests/test_visualize.py::test_screenshot_passes_through_image_envelope": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Checks every screenshot argument sent to the adapter and identity of the returned envelope."
+  },
+  "tests/test_visualize.py::test_screenshot_omits_width_height_when_none": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Uses a valid image response and checks successful capture with exact defaults and omitted dimensions."
+  },
+  "tests/test_visualize.py::test_screenshot_rejects_success_without_an_image": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "A successful upstream result without any image reports a local error while retaining its message."
+  },
+  "tests/test_visualize.py::test_build_set_view_top_uses_enum": {
+    "disposition": "improve",
+    "evidence": "script emulation",
+    "rationale": "Replaced by test_set_view_uses_camera_copy_and_obeys_fit. Executes the camera getter, orientation assignment, setter, fit, and refresh."
+  },
+  "tests/test_visualize.py::test_build_set_view_current_skips_orient": {
+    "disposition": "improve",
+    "evidence": "script emulation",
+    "rationale": "Replaced by test_set_view_uses_camera_copy_and_obeys_fit. Asserts current view performs fit and refresh without touching camera."
+  },
+  "tests/test_visualize.py::test_build_set_view_no_fit": {
+    "disposition": "improve",
+    "evidence": "script emulation",
+    "rationale": "Replaced by test_set_view_uses_camera_copy_and_obeys_fit. Asserts orientation is applied and fit is skipped."
+  },
+  "tests/test_visualize.py::test_set_view_uses_camera_copy_and_obeys_fit": {
+    "disposition": "keep",
+    "evidence": "script emulation",
+    "rationale": "Executes generated code with a viewport exposing only a camera property; detects nonexistent viewport orientation assignments."
+  },
+  "tests/test_visualize.py::test_set_view_invalid_direction_short_circuits": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "A failing fake adapter proves invalid input does not run a Fusion script."
+  },
+  "tests/test_visualize.py::test_set_view_parses_stdout_response": {
+    "disposition": "improve",
+    "evidence": "unit behavior and script emulation",
+    "rationale": "Success now tested by test_set_view_uses_camera_copy_and_obeys_fit; failures tested by test_set_view_rejects_unsuccessful_stdout."
+  },
+  "tests/test_visualize.py::test_set_view_rejects_unsuccessful_stdout": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Verifies invalid stdout and an inner failure are both surfaced, even with outer success."
+  },
+  "tests/test_visualize.py::test_compare_invalid_direction_short_circuits": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks validation error and absence of any adapter calls."
+  },
+  "tests/test_visualize.py::test_compare_invalid_marker_position_short_circuits": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Out-of-bounds marker checks timeline count once and performs no writes or captures."
+  },
+  "tests/test_visualize.py::test_compare_returns_both_images_and_marker_positions": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Tracks the simulated marker and asserts each capture runs at the exact expected position, along with image order."
+  },
+  "tests/test_visualize.py::test_compare_restores_marker_on_before_screenshot_failure": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Checks the full sequence and restored marker value, not merely whether a restore request appeared."
+  },
+  "tests/test_visualize.py::test_compare_surfaces_restore_marker_failed_distinctly": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Checks explicit restoration target and proves no after capture occurs if restoration fails."
+  },
+  "tests/test_visualize.py::test_compare_marker_position_zero_is_valid": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Checks the first capture is actually made at marker zero before returning to the original position."
+  },
+  "tests/test_visualize.py::test_compare_restores_after_screenshot_transport_timeout": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "A timeout returns a phase-specific diagnostic and restoration reaches the original marker."
+  },
+  "tests/test_visualize.py::test_compare_restores_even_when_unexpected_exception_propagates": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "An unexpected exception propagates while the restoration finally block still resets simulated state."
+  },
+  "tests/test_visualize.py::test_compare_rejects_unverified_inner_restoration": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Rejects an inner failure, incorrect position, and malformed stdout even when Fusion reports outer success. Keeps both failure diagnostics."
+  },
+  "tests/test_io.py::test_path_rejects_relative": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Folded into test_invalid_paths_are_rejected with exact failure class and no dependence on the local platform."
+  },
+  "tests/test_io.py::test_path_rejects_parent_dir": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Folded into test_invalid_paths_are_rejected with both Windows and POSIX separators."
+  },
+  "tests/test_io.py::test_path_rejects_windows_reserved": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Folded into test_invalid_paths_are_rejected with CON plus an uppercase LPT basename and no extension."
+  },
+  "tests/test_io.py::test_path_accepts_normal_absolute_path": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Replaced by test_absolute_paths_are_accepted_on_either_host with Windows drive, UNC, and POSIX cases."
+  },
+  "tests/test_io.py::test_path_rejects_empty": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Folded into test_invalid_paths_are_rejected with a meaningful diagnostic check."
+  },
+  "tests/test_io.py::test_export_stl_emits_mesh_refinement_and_units": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_stl_export_applies_refinement_and_units_to_native_body, which verifies properties actually assigned to option object and output publication."
+  },
+  "tests/test_io.py::test_export_stl_without_body_targets_root_component": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_export_uses_correct_native_factory_and_scope, asserting the actual option call receives the root component."
+  },
+  "tests/test_io.py::test_export_stl_rejects_unknown_refinement": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Replaced by test_export_rejects_invalid_inputs_without_dispatch, checking the public wrapper and zero dispatch."
+  },
+  "tests/test_io.py::test_export_stl_rejects_unknown_units": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Replaced by test_export_rejects_invalid_inputs_without_dispatch, checking the public wrapper and zero dispatch."
+  },
+  "tests/test_io.py::test_export_3mf_uses_c3mf_options": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_export_uses_correct_native_factory_and_scope, which verifies the native factory and target object."
+  },
+  "tests/test_io.py::test_export_step_uses_simple_factory": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_export_uses_correct_native_factory_and_scope, which verifies native argument order and component geometry scope."
+  },
+  "tests/test_io.py::test_export_iges_factory": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_export_uses_correct_native_factory_and_scope, which verifies the requested factory and native arguments."
+  },
+  "tests/test_io.py::test_export_f3d_factory": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_export_uses_correct_native_factory_and_scope, which verifies the requested factory and native arguments."
+  },
+  "tests/test_io.py::test_export_obj_with_body": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Replaced by test_obj_preserves_material_sidecar, which executes the exported body selection, refinement, and companion publication."
+  },
+  "tests/test_io.py::test_export_unknown_format_rejected": {
+    "disposition": "delete",
+    "evidence": "duplicate validation",
+    "rationale": "test_export_rejects_invalid_inputs_without_dispatch covers unknown format through the normal wrapper entry point and checks zero dispatch."
+  },
+  "tests/test_io.py::test_export_makedirs_present": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "test_stl_export_applies_refinement_and_units_to_native_body writes into a missing parent directory and checks only the final file remains."
+  },
+  "tests/test_io.py::test_import_step": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "test_import_uses_native_format_and_root_default exercises actual native call ordering, target, and returned object counts."
+  },
+  "tests/test_io.py::test_import_iges": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "test_import_uses_native_format_and_root_default checks the factory called and target used."
+  },
+  "tests/test_io.py::test_import_rejects_stl": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "test_import_unknown_format_short_circuits checks the wrapper rejects STL before any dispatch."
+  },
+  "tests/test_io.py::test_import_checks_file_exists": {
+    "disposition": "improve",
+    "evidence": "script emulation and filesystem",
+    "rationale": "test_import_missing_file_never_invokes_native_importer runs against a missing path and asserts no import API calls."
+  },
+  "tests/test_io.py::test_export_short_circuits_on_relative_path": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Folded into test_export_rejects_invalid_inputs_without_dispatch with other invalid inputs."
+  },
+  "tests/test_io.py::test_export_short_circuits_on_unknown_format": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Folded into test_export_rejects_invalid_inputs_without_dispatch, which also asserts zero dispatch."
+  },
+  "tests/test_io.py::test_import_geometry_short_circuits_on_unknown_format": {
+    "disposition": "improve",
+    "evidence": "unit behavior",
+    "rationale": "Replaced by test_import_unknown_format_short_circuits, which also asserts zero dispatch."
+  },
+  "tests/test_io.py::test_invalid_paths_are_rejected": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks portable errors for relative, traversal, reserved-name, empty, and directory paths."
+  },
+  "tests/test_io.py::test_absolute_paths_are_accepted_on_either_host": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks valid absolute drive, UNC, and POSIX paths."
+  },
+  "tests/test_io.py::test_stl_export_applies_refinement_and_units_to_native_body": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Executes generated source with Unicode and quoted paths, verifies target, native options, nonempty publication, and staging cleanup."
+  },
+  "tests/test_io.py::test_export_uses_correct_native_factory_and_scope": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Exercises root and scoped targets across all listed export formats, comparing actual API arguments and output bytes."
+  },
+  "tests/test_io.py::test_failed_export_preserves_existing_destination": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Checks false execution, missing staged file, and empty staged file leave pre-existing output and no staging artifacts."
+  },
+  "tests/test_io.py::test_obj_preserves_material_sidecar": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Checks OBJ material reference, companion file, mesh refinement, and metadata survive staging and publication."
+  },
+  "tests/test_io.py::test_obj_restores_material_if_main_publish_fails": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Forces the primary rename to fail and verifies the old material file is restored."
+  },
+  "tests/test_io.py::test_unsupported_body_scope_never_dispatches": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Body scope is refused for every component-only format before any generated script executes."
+  },
+  "tests/test_io.py::test_export_rejects_invalid_inputs_without_dispatch": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Checks public wrapper errors and zero dispatch for invalid path, format, mesh settings, and contradictory selectors."
+  },
+  "tests/test_io.py::test_export_rejects_ambiguous_body_without_writing_file": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Two same-named instances produce a useful ambiguity result, zero export API calls, and no output."
+  },
+  "tests/test_io.py::test_import_uses_native_format_and_root_default": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Exercises every import factory with a file, verifies root target and observes body and occurrence counts change."
+  },
+  "tests/test_io.py::test_scoped_import_reports_source_and_assembly_context": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Checks target component, unchanged root counts, source digest, unit/frame transform, and occurrence-qualified output handles."
+  },
+  "tests/test_io.py::test_import_rejects_unsafe_component_edits": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Reference and shared-definition targets are refused without calling the importer."
+  },
+  "tests/test_io.py::test_import_fails_if_fusion_reports_no_objects": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "Null or empty native import return fails with root state unchanged."
+  },
+  "tests/test_io.py::test_import_missing_file_never_invokes_native_importer": {
+    "disposition": "keep",
+    "evidence": "script emulation and filesystem",
+    "rationale": "The missing input path surfaces a specific error and never reaches the importer."
+  },
+  "tests/test_io.py::test_import_unknown_format_short_circuits": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Both unrecognized and mesh-only import formats are refused before dispatch."
+  },
+  "tests/test_server.py::test_screenshot_wire_reply_contains_native_images_and_compact_metadata": {
+    "disposition": "keep",
+    "evidence": "in-memory MCP protocol integration",
+    "rationale": "Calls registered screenshot through ClientSession and checks ordered native images with byte-free structured and text metadata."
+  },
+  "tests/test_server.py::test_compare_wire_reply_links_before_and_after_native_images": {
+    "disposition": "keep",
+    "evidence": "in-memory MCP protocol integration",
+    "rationale": "Calls registered comparison through ClientSession and checks before and after references map to native image blocks."
+  },
+  "tests/test_server.py::test_screenshot_wire_failure_is_a_tool_error": {
+    "disposition": "keep",
+    "evidence": "in-memory MCP protocol integration",
+    "rationale": "A registered validation failure is serialized as MCP isError with structured diagnostics and no image."
+  },
+  "tests/test_server.py::test_main_closes_adapter_when_server_exits": {
+    "disposition": "keep",
+    "evidence": "unit behavior",
+    "rationale": "Verifies the adapter is closed and cleared after ordinary and exceptional server exits."
+  }
+}

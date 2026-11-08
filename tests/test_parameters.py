@@ -1,150 +1,151 @@
-"""Tier 1a snapshot tests + Tier 1c validation tests for parameter tools."""
+"""Parameter validation and generated script behavior against a local collection."""
 
-from __future__ import annotations
+from types import SimpleNamespace
+from unittest.mock import Mock
 
-import ast
-import json
+import pytest
 
-from fusion_cad_mcp.envelope import Envelope
 from fusion_cad_mcp.tools import parameters as p
-
-# ---------- generator snapshots (Tier 1a) ----------
-
-
-def test_build_add_is_valid_python():
-    src = p.build_add([{"name": "length", "expression": "100 mm", "units": "mm", "comment": ""}])
-    tree = ast.parse(src)
-    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run"]
-    assert len(funcs) == 1
-    assert len(funcs[0].args.args) == 1
+from tests._assembly_fakes import NoScriptAdapter, ScriptAdapter
 
 
-def test_build_add_embeds_defs_as_json():
-    defs = [{"name": "width", "expression": "50 mm", "units": "mm", "comment": "the width"}]
-    src = p.build_add(defs)
-    # The exact JSON encoding must appear in the script literal
-    assert json.dumps(defs) in src
+class Parameters:
+    def __init__(self):
+        self.items = {}
+        self.add_calls = []
+
+    def itemByName(self, name):
+        return self.items.get(name)
+
+    def item(self, index):
+        return list(self.items.values())[index]
+
+    @property
+    def count(self):
+        return len(self.items)
+
+    def add(self, name, value_input, units, comment):
+        self.add_calls.append((name, value_input, units, comment))
+        self.items[name] = SimpleNamespace(
+            name=name, expression=value_input.expression, value=1.25, unit=units, comment=comment
+        )
 
 
-def test_build_add_uses_itemByName_for_idempotency():
-    src = p.build_add([{"name": "h", "expression": "20 mm"}])
-    assert "itemByName" in src
-    assert "params.add(" in src
-
-
-def test_build_update_is_valid_python():
-    src = p.build_update("length", "120 mm")
-    ast.parse(src)
-    assert '"length"' in src
-    assert '"120 mm"' in src
-
-
-def test_build_update_quotes_safely():
-    """Names and expressions containing quotes must round-trip without breaking the script."""
-    src = p.build_update("tricky_name", "thickness * 2.0 + 0 mm")
-    # Should parse fine
-    ast.parse(src)
-
-
-def test_build_list_is_valid_python():
-    src = p.build_list()
-    ast.parse(src)
-    assert "userParameters" in src
-
-
-# ---------- validation gates (Tier 1c) ----------
-
-
-def test_reserved_math_name_is_rejected():
-    """pi/sin/sqrt as param names is a footgun; we block at generation."""
-    for bad in ("pi", "e", "sin", "cos", "sqrt", "log"):
-        ok, err = p._validate_param_defs([{"name": bad, "expression": "1 mm"}])
-        assert ok is False, f"{bad!r} should have been rejected"
-        assert err and bad in err
-
-
-def test_empty_defs_rejected():
-    ok, err = p._validate_param_defs([])
-    assert ok is False
-
-
-def test_missing_expression_rejected():
-    ok, err = p._validate_param_defs([{"name": "length"}])
-    assert ok is False
-    assert err and "expression" in err
-
-
-def test_numeric_leading_name_rejected():
-    ok, err = p._validate_param_defs([{"name": "2bad", "expression": "1 mm"}])
-    assert ok is False
-
-
-def test_valid_def_passes():
-    ok, _ = p._validate_param_defs(
-        [{"name": "length", "expression": "100 mm", "units": "mm", "comment": ""}]
+def _adapter(monkeypatch, params):
+    return ScriptAdapter(
+        monkeypatch,
+        SimpleNamespace(userParameters=params),
+        core={"ValueInput": SimpleNamespace(
+            createByString=lambda expression: SimpleNamespace(expression=expression)
+        )},
     )
-    assert ok is True
 
 
-# ---------- run wrappers with mock adapter ----------
+def test_add_parameters_preserves_existing_and_round_trips_definitions(monkeypatch):
+    params = Parameters()
+    params.items["length"] = SimpleNamespace(expression="12 mm")
+    adapter = _adapter(monkeypatch, params)
+    note = 'quoted "note" \\ with Ω and a newline\n'
+    defs = [
+        {"name": "length", "expression": "100 mm"},
+        {"name": "width", "expression": "20 mm", "units": "mm", "comment": note},
+        {"name": "height", "expression": "15 mm", "units": None, "comment": None,
+         "extra": {"flag": True}},
+    ]
+
+    result = p.add_parameters(adapter, defs)
+    repeated = p.add_parameters(adapter, defs)
+
+    assert result.ok is True
+    assert result.result["added"] == [
+        {"name": "width", "expression": "20 mm"}, {"name": "height", "expression": "15 mm"},
+    ]
+    assert result.result["skipped"] == [{"name": "length", "current_expression": "12 mm"}]
+    assert result.result["total_params"] == 3
+    assert [(name, value.expression, units, comment)
+            for name, value, units, comment in params.add_calls] == [
+        ("width", "20 mm", "mm", note), ("height", "15 mm", "", ""),
+    ]
+    assert repeated.ok is True
+    assert repeated.result["added"] == []
+    assert repeated.result["skipped"] == [
+        {"name": "length", "current_expression": "12 mm"},
+        {"name": "width", "current_expression": "20 mm"},
+        {"name": "height", "current_expression": "15 mm"},
+    ]
+    assert params.items["length"].expression == "12 mm"
 
 
-class FakeAdapter:
-    def __init__(self, message: str = '{"ok": true, "added": [], "skipped": []}'):
-        self.scripts: list[str] = []
-        self.message = message
+def test_build_update_quotes_safely(monkeypatch):
+    params = Parameters()
+    # These sentinel strings check the script boundary. The double does not
+    # evaluate expressions or validate the Fusion parameter naming grammar.
+    name, expr = 'parameter"\\name', 'text "quote" \\ Ω\n'
+    param = SimpleNamespace(expression="100 mm", value=12)
+    params.items[name] = param
 
-    def execute_script(self, script: str) -> Envelope:
-        self.scripts.append(script)
-        return Envelope(ok=True, message=self.message)
+    env = p.update_parameter(_adapter(monkeypatch, params), name, expr)
+
+    assert env.ok is True
+    assert env.result == {"ok": True, "name": name, "before": "100 mm", "after": expr, "value": 12}
+    assert param.expression == expr
 
 
-def test_add_parameters_short_circuits_on_bad_def():
-    a = FakeAdapter()
-    env = p.add_parameters(a, [{"name": "pi", "expression": "3.14"}])
+@pytest.mark.parametrize("bad", ["pi", "e", "sin", "cos", "sqrt", "log"])
+def test_reserved_math_name_is_rejected(bad):
+    env = p.add_parameters(NoScriptAdapter(), [{"name": bad, "expression": "1 mm"}])
+    assert env.error == "invalid_defs"
+    assert f"{bad!r} is a reserved math identifier" in env.message
+
+
+@pytest.mark.parametrize(
+    ("defs", "message"),
+    [
+        ([], "defs must be non-empty"),
+        ([{"name": "length"}], "defs[0].expression"),
+        ([{"name": "2bad", "expression": "1 mm"}], "start with a letter or underscore"),
+        ([{"name": "width", "expression": "1 mm", "comment": True}], "defs[0].comment"),
+    ],
+    ids=["empty", "missing_expression", "leading_digit", "invalid_comment"],
+)
+def test_add_parameters_short_circuits_on_bad_def(defs, message):
+    env = p.add_parameters(NoScriptAdapter(), defs)
     assert env.ok is False
     assert env.error == "invalid_defs"
-    assert a.scripts == [], "no Fusion call should happen when validation fails"
-
-
-def test_add_parameters_passes_through_on_success():
-    a = FakeAdapter(
-        message=json.dumps({"ok": True, "added": [{"name": "h"}], "skipped": [], "total_params": 1})
-    )
-    env = p.add_parameters(a, [{"name": "h", "expression": "20 mm"}])
-    assert env.ok is True
-    assert env.result is not None
-    assert env.result["added"] == [{"name": "h"}]
+    assert message in env.message
 
 
 def test_update_parameter_rejects_empty_name():
-    a = FakeAdapter()
-    env = p.update_parameter(a, "", "100 mm")
+    env = p.update_parameter(NoScriptAdapter(), "", "100 mm")
     assert env.ok is False
     assert env.error == "invalid_name"
-    assert a.scripts == []
 
 
-def test_update_parameter_returns_param_not_found_from_fusion():
-    a = FakeAdapter(
-        message=json.dumps({"ok": False, "error": "param_not_found", "name": "missing"})
-    )
-    env = p.update_parameter(a, "missing", "100 mm")
+def test_update_parameter_returns_param_not_found_from_script(monkeypatch):
+    params = Parameters()
+    params.itemByName = Mock(return_value=None)
+    env = p.update_parameter(_adapter(monkeypatch, params), "missing", "100 mm")
+
     assert env.ok is False
     assert env.error == "param_not_found"
+    assert env.result == {"ok": False, "error": "param_not_found", "name": "missing"}
+    params.itemByName.assert_called_once_with("missing")
 
 
-def test_list_parameters_parses_param_list():
-    payload = {
-        "ok": True,
-        "count": 2,
-        "parameters": [
-            {"name": "length", "expression": "100 mm", "value": 10.0, "units": "mm", "comment": ""},
-            {"name": "width", "expression": "50 mm", "value": 5.0, "units": "mm", "comment": ""},
-        ],
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = p.list_parameters(a)
+def test_list_parameters_reads_collection_fields(monkeypatch):
+    params = Parameters()
+    params.items["width"] = SimpleNamespace(
+        name="width", expression="50 mm", value=5, unit="mm", comment="outer"
+    )
+    params.items["count"] = SimpleNamespace(
+        name="count", expression="3", value=3, unit="", comment=""
+    )
+
+    env = p.list_parameters(_adapter(monkeypatch, params))
+
     assert env.ok is True
-    assert env.result is not None
     assert env.result["count"] == 2
+    assert env.result["parameters"] == [
+        {"name": "width", "expression": "50 mm", "value": 5, "units": "mm", "comment": "outer"},
+        {"name": "count", "expression": "3", "value": 3, "units": "", "comment": ""},
+    ]

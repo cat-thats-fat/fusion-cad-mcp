@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import ast
 import json
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from fusion_cad_mcp.envelope import Envelope
 from fusion_cad_mcp.tools import features as f
+from tests._assembly_fakes import Collection, ScriptAdapter, point, root_with
 
 # ---------- extrude ----------
 
@@ -16,14 +19,14 @@ from fusion_cad_mcp.tools import features as f
 def test_build_extrude_distance_emits_setDistanceExtent():
     src = f.build_extrude("outer", 0, "new_body", "distance", "thickness")
     ast.parse(src)
-    assert "setDistanceExtent(False" in src
+    assert "PositiveExtentDirection" in src
     assert 'createByString("thickness")' in src
     assert "NewBodyFeatureOperation" in src
 
 
 def test_build_extrude_distance_negative_direction():
     src = f.build_extrude("outer", 0, "cut", "distance", "5 mm", direction="negative")
-    assert "setDistanceExtent(True" in src
+    assert "NegativeExtentDirection" in src
     assert "CutFeatureOperation" in src
 
 
@@ -47,7 +50,7 @@ def test_build_extrude_all_negative():
 def test_build_extrude_participants_wires_find_body():
     src = f.build_extrude("outer", 0, "cut", "all_negative", participants=["plate", "rib"])
     ast.parse(src)
-    assert "_find_body" in src  # helper present
+    assert "_select_body" in src
     assert '"plate"' in src
     assert '"rib"' in src
     assert "participantBodies" in src
@@ -89,10 +92,32 @@ def test_build_fillet_y_parallel():
     assert "abs(sp.x - ep.x) < 1e-6 and abs(sp.z - ep.z) < 1e-6 and abs(sp.y - ep.y) > 1e-6" in src
 
 
-def test_build_fillet_any_parallel_skips_axis_filter():
-    src = f.build_fillet_edges_by_geometry("plate", "1 mm", parallel_to="any")
-    # axis_check is True, so we should see "if True and"
-    assert "if True and" in src
+def test_build_fillet_any_parallel_skips_axis_filter(monkeypatch):
+    diagonal = SimpleNamespace(
+        startVertex=SimpleNamespace(geometry=point()),
+        endVertex=SimpleNamespace(geometry=point(1, 1, 1)),
+    )
+    body = SimpleNamespace(name="plate", edges=Collection([diagonal]))
+    edge_set = Mock()
+    fillets = SimpleNamespace(
+        createInput=lambda: SimpleNamespace(addConstantRadiusEdgeSet=edge_set),
+        add=lambda _: SimpleNamespace(name="Fillet"),
+    )
+    root = root_with(bodies=[body], features=SimpleNamespace(filletFeatures=fillets))
+    adapter = ScriptAdapter(
+        monkeypatch,
+        SimpleNamespace(rootComponent=root),
+        core={
+            "ObjectCollection": SimpleNamespace(create=Collection),
+            "ValueInput": SimpleNamespace(createByString=lambda value: value),
+        },
+    )
+
+    env = f.fillet_edges_by_geometry(adapter, "plate", "1 mm", parallel_to="any")
+
+    assert env.ok and env.result["edges_filleted"] == 1
+    edge_set.assert_called_once()
+    assert edge_set.call_args.args[0].items == [diagonal]
 
 
 def test_build_fillet_min_length_filter():
@@ -269,283 +294,45 @@ def test_fillet_surfaces_no_edges_matched_error():
 # ---------- rebuild_feature ----------
 
 
-def test_build_rebuild_feature_parses():
-    src = f.build_rebuild_feature("dispense_hole_cut")
-    import ast
-
-    ast.parse(src)
-    assert 'FEATURE_NAME = "dispense_hole_cut"' in src
-    assert "COMP_HINT = None" in src
 
 
-def test_build_rebuild_feature_with_component_hint():
-    src = f.build_rebuild_feature("dispense_hole_cut", component_name="body")
-    assert 'COMP_HINT = "body"' in src
 
 
-def test_build_rebuild_walks_components():
-    src = f.build_rebuild_feature("x")
-    assert "_find_feature_anywhere" in src
-    assert "occurrences.item(j)" in src
 
 
-def test_build_rebuild_captures_extent_and_start():
-    src = f.build_rebuild_feature("x")
-    # Must read both extent and start so we can recreate
-    assert "DistanceExtentDefinition" in src
-    assert "OffsetStartDefinition" in src
-    assert "ProfilePlaneStartDefinition" in src
 
 
-def test_build_rebuild_captures_participant_bodies():
-    src = f.build_rebuild_feature("x")
-    assert "participantBodies" in src
-    assert "participant_body_names" in src
 
 
-def test_build_rebuild_matches_profile_by_area():
-    src = f.build_rebuild_feature("x")
-    # areaProperties is a METHOD; the property form raised AttributeError and
-    # silently disabled area matching (areas were always None).
-    assert "areaProperties().area" in src
-    assert "areaProperties.area" not in src
-    assert "best_diff" in src
 
 
-def test_rebuild_returns_old_and_new_health():
-    payload = {
-        "ok": True,
-        "feature_name": "dispense_hole_cut",
-        "feature_class": "ExtrudeFeature",
-        "component": "body",
-        "old_health": 1,
-        "old_message": "The profile reference is lost and this feature is using cached geometry.",
-        "new_health": 0,
-        "captured": {
-            "class": "ExtrudeFeature",
-            "operation": 2,
-            "sketch_name": "dispense_hole",
-            "extent_kind": "distance",
-            "extent_distance_expr": "floor_thk - slot_chamber_d - slot_narrow_d",
-            "start_kind": "offset",
-            "start_offset_expr": "slot_chamber_d + slot_narrow_d",
-            "profile_count": 1,
-        },
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "dispense_hole_cut")
-    assert env.ok is True
-    assert env.result["old_health"] == 1
-    assert env.result["new_health"] == 0
-    assert env.result["captured"]["extent_kind"] == "distance"
 
 
-def test_rebuild_returns_structured_error_for_fillet():
-    payload = {
-        "ok": False,
-        "error": "not_supported_for_rebuild",
-        "feature_class": "FilletFeature",
-        "feature_name": "Fillet3",
-        "component": "body",
-        "supported": ["ExtrudeFeature"],
-        "old_health": 2,
-        "recommendation": "For FilletFeature/ChamferFeature: suppress instead (gotcha G11). For others: delete and re-create with the appropriate add_* tool.",
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "Fillet3")
-    assert env.ok is False
-    assert env.error == "not_supported_for_rebuild"
-    assert "FilletFeature" in env.result["feature_class"]
-    assert "suppress" in env.result["recommendation"].lower()
 
 
-def test_rebuild_warns_when_delete_succeeded_but_recreate_failed():
-    payload = {
-        "ok": False,
-        "error": "sketch_not_found",
-        "feature_name": "dispense_hole_cut",
-        "name": "dispense_hole",
-        "captured": {"sketch_name": "dispense_hole", "operation": 2},
-        "WARNING": "Feature was deleted but re-creation failed. Use Fusion's undo to restore, then handle this rebuild manually.",
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "dispense_hole_cut")
-    assert env.ok is False
-    assert env.error == "sketch_not_found"
-    assert "undo" in env.result["WARNING"].lower()
 
 
-def test_rebuild_surfaces_feature_not_found():
-    payload = {"ok": False, "error": "feature_not_found", "name": "nope"}
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "nope")
-    assert env.ok is False
-    assert env.error == "feature_not_found"
 
 
 # ---------- rebuild_feature review fixes (multi-profile, preflight) ----------
 
 
-def test_build_rebuild_always_emits_profile_areas_list():
-    """Single-profile case must store profile_areas as a 1-element LIST,
-    not a singular profile_area. Recreate iterates the list uniformly so
-    multi-profile rebuilds work."""
-    src = f.build_rebuild_feature("x")
-    # Capture path: single-profile branch stores list
-    assert 'info["profile_areas"] = [prof.areaProperties().area]' in src
-    # The old singular field must NOT appear anywhere
-    assert 'profile_area"]' not in src or 'profile_areas"]' in src  # only plural
 
 
-def test_build_rebuild_wraps_profile_getter():
-    """Regression: on a stale feature whose sketch curves were deleted, the
-    ExtrudeFeature.profile getter itself raises InternalValidationError. The
-    capture must catch it and mark the feature unrebuildable so preflight
-    preserves it (instead of the whole script crashing)."""
-    src = f.build_rebuild_feature("x")
-    assert "profile_unreadable" in src
-    # the getter access must sit inside a try block
-    assert "        prof = ft.profile" in src
 
 
-def test_build_rebuild_preflight_checks_profiles_exist():
-    """Regression: a sketch that resolves but has 0 profiles used to pass
-    preflight, so deleteMe() ran and recreation then failed, destroying the
-    feature. Preflight must check profiles.count before the delete."""
-    src = f.build_rebuild_feature("x")
-    pre = src[src.index("def _preflight_check") : src.index("def _recreate_extrude")]
-    assert "sketch_has_no_profiles" in pre
-    assert "profiles.count == 0" in pre
 
 
-def test_build_rebuild_recreates_with_object_collection_for_multi_profile():
-    src = f.build_rebuild_feature("x")
-    # Recreate path should build an ObjectCollection when matched_profiles>1
-    assert "ObjectCollection.create()" in src
-    assert "len(matched_profiles) == 1" in src or "len(matched_profiles)==1" in src
 
 
-def test_build_rebuild_uses_n_to_n_area_matching():
-    src = f.build_rebuild_feature("x")
-    # Should track which current-sketch profiles are already used so
-    # N targets match N distinct profiles, not all the same one.
-    assert "used_indices" in src
 
 
-def test_build_rebuild_preflight_runs_before_delete():
-    """Unsupported extent/start/two-sided shapes must be detected BEFORE
-    deleteMe() so the original feature is preserved on bail."""
-    src = f.build_rebuild_feature("x")
-    # The preflight helper must exist and be called in run() before deleteMe
-    assert "_preflight_check" in src
-    idx_pre = src.find("preflight = _preflight_check")
-    idx_del = src.find("ft.deleteMe()")
-    assert idx_pre != -1, "_preflight_check call missing in run()"
-    assert idx_del != -1, "deleteMe() call missing"
-    assert idx_pre < idx_del, "preflight must run BEFORE deleteMe"
 
 
-def test_build_rebuild_preflight_returns_original_preserved_note():
-    src = f.build_rebuild_feature("x")
-    assert "Original feature preserved" in src
 
 
-def test_rebuild_preflight_short_circuits_unsupported_extent():
-    payload = {
-        "ok": False,
-        "error": "unsupported_extent_type",
-        "extent_class": "ThroughAllExtentDefinition",
-        "feature_name": "weird_cut",
-        "component": "body",
-        "captured": {"unsupported_extent": "ThroughAllExtentDefinition"},
-        "note": "Original feature preserved. Rebuild not attempted because the captured state is not currently supported for automatic recreation.",
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "weird_cut")
-    assert env.ok is False
-    assert env.error == "unsupported_extent_type"
-    assert "preserved" in env.result["note"].lower()
 
 
-def test_rebuild_succeeds_for_multi_profile_extrude():
-    payload = {
-        "ok": True,
-        "feature_name": "multi_pocket",
-        "feature_class": "ExtrudeFeature",
-        "component": "body",
-        "old_health": 1,
-        "old_message": "cached geometry",
-        "new_health": 0,
-        "captured": {
-            "class": "ExtrudeFeature",
-            "operation": 2,
-            "sketch_name": "pocket_outlines",
-            "profile_count": 3,
-            "profile_areas": [12.5, 8.7, 4.2],
-            "extent_kind": "distance",
-            "extent_distance_expr": "5 mm",
-            "start_kind": "profile_plane",
-        },
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "multi_pocket")
-    assert env.ok is True
-    assert env.result["captured"]["profile_count"] == 3
-    assert env.result["captured"]["profile_areas"] == [12.5, 8.7, 4.2]
 
 
 # ---------- rebuild_feature duplicate-sketch-name resolution ----------
-
-
-def test_build_rebuild_captures_sketch_owner_component():
-    """Capture must record the parent component of the sketch so recreate can
-    resolve the correct sketch when the name is duplicated across components."""
-    src = f.build_rebuild_feature("x")
-    assert "sketch_owner_component" in src
-    assert "parentSketch.parentComponent.name" in src
-
-
-def test_build_rebuild_uses_resolver_with_owner_hint():
-    """Recreate must pass the captured owner to _resolve_sketch so duplicate
-    sketch names don't silently bind to the wrong sketch."""
-    src = f.build_rebuild_feature("x")
-    assert "_resolve_sketch" in src
-    assert 'captured.get("sketch_owner_component")' in src
-
-
-def test_build_rebuild_preflight_resolves_sketch_before_delete():
-    """Sketch ambiguity must be detected BEFORE deleteMe() — otherwise the
-    original feature is lost even though we can't rebuild."""
-    src = f.build_rebuild_feature("x")
-    # Within _preflight_check, _resolve_sketch must be called and ambiguous
-    # results must short-circuit. The preflight call site already runs before
-    # deleteMe() per the prior fix; verify the resolver is part of preflight.
-    pre_start = src.find("def _preflight_check")
-    pre_end = src.find("def _recreate_extrude")
-    assert pre_start != -1 and pre_end != -1 and pre_start < pre_end
-    pre_body = src[pre_start:pre_end]
-    assert "_resolve_sketch" in pre_body
-    assert "sketch_name_ambiguous" in pre_body
-
-
-def test_rebuild_surfaces_sketch_name_ambiguous_from_preflight():
-    payload = {
-        "ok": False,
-        "error": "sketch_name_ambiguous",
-        "name": "outline",
-        "matches": [
-            {"component": "body", "sketch": "outline"},
-            {"component": "lid", "sketch": "outline"},
-        ],
-        "hint": "Original sketch's owner component could not be matched uniquely. Captured owner: None",
-        "feature_name": "outline_cut",
-        "component": "body",
-        "captured": {"sketch_name": "outline", "sketch_owner_component": None},
-        "note": "Original feature preserved. Rebuild not attempted because the captured state is not currently supported for automatic recreation.",
-    }
-    a = FakeAdapter(message=json.dumps(payload))
-    env = f.rebuild_feature(a, "outline_cut")
-    assert env.ok is False
-    assert env.error == "sketch_name_ambiguous"
-    assert "preserved" in env.result["note"].lower()
-    assert len(env.result["matches"]) == 2

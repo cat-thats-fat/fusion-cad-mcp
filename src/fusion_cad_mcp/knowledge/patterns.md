@@ -1,6 +1,6 @@
 # Fusion MCP Patterns
 
-Copy-ready Python for `fusion_mcp_execute` scripts. Every snippet assumes the standard `run()` wrapper:
+Historical Python recipes for `fusion_mcp_execute` scripts. Some examples retain retired APIs such as `ExtrudeFeatureInput.setDistanceExtent` and `ConstructionPlaneInput.setByDistanceOnPath`. These are version-specific records, not proof of compatibility with the installed build. Prefer the current named tools and check Autodesk's current API documentation before adapting a recipe. Every snippet assumes the standard `run()` wrapper:
 
 ```python
 import adsk.core, adsk.fusion

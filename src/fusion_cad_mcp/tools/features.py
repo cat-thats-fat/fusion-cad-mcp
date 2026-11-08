@@ -16,9 +16,13 @@ Addressing model (until V2 Section 5a handles land):
 from __future__ import annotations
 
 import json
+import textwrap
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
+from ..handles import emit_resolve, parse_handle
+from ..resolver import RESOLVER_SCRIPT
+from .sketch import SKETCH_RESOLVER_SCRIPT
 
 # ---------- shared helpers ----------
 
@@ -155,10 +159,11 @@ def build_extrude(
 
     # extent setter
     if extent_kind == "distance":
-        is_negative = "True" if direction == "negative" else "False"
+        direction_enum = "NegativeExtentDirection" if direction == "negative" else "PositiveExtentDirection"
         extent_setter = (
-            f"ext_in.setDistanceExtent({is_negative}, "
-            f"adsk.core.ValueInput.createByString({json.dumps(expression)}))"
+            f"ext_in.setOneSideExtent(adsk.fusion.DistanceExtentDefinition.create("
+            f"adsk.core.ValueInput.createByString({json.dumps(expression)})), "
+            f"adsk.fusion.ExtentDirections.{direction_enum})"
         )
     elif extent_kind == "symmetric":
         is_full = "True" if is_full_length else "False"
@@ -175,14 +180,15 @@ def build_extrude(
     parts_block = ""
     parts_helper = ""
     if participants:
-        parts_helper = _FIND_BODY_HELPER
+        parts_helper = ""
         parts_block = "\n".join(
             [
                 "    _parts = []",
                 *[
-                    f"    _b = _find_body(root, {json.dumps(p)})"
-                    + f"\n    if _b is None: print(json.dumps({{'ok': False, 'error': 'participant_not_found', 'name': {json.dumps(p)}}})); return"
-                    + "\n    _parts.append(_b)"
+                    f"    _b, _error = _select_body(root, {json.dumps(p, ensure_ascii=False)})"
+                    + "\n    if _error: print(json.dumps(_error)); return"
+                    + "\n    if _b.parentComponent != owner: print(json.dumps({'ok': False, 'error': 'participant_wrong_component'})); return"
+                    + "\n    _parts.append(_b.nativeObject or _b)"
                     for p in participants
                 ],
                 "    ext_in.participantBodies = _parts",
@@ -194,7 +200,7 @@ def build_extrude(
         name_block = f"    feat.name = {json.dumps(name)}\n"
 
     return f"""\
-{_emit_header()}{parts_helper}
+{_emit_header()}{SKETCH_RESOLVER_SCRIPT}{parts_helper}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -203,22 +209,17 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    sk = None
-    for i in range(root.sketches.count):
-        s = root.sketches.item(i)
-        if s.name == {json.dumps(sketch)}:
-            sk = s
-            break
-    if sk is None:
-        print(json.dumps({{"ok": False, "error": "sketch_not_found", "name": {json.dumps(sketch)}}})); return
+    sk, owner, error = _select_sketch(root, {sketch!r})
+    if error:
+        print(json.dumps(error)); return
     if {profile_index} < 0 or {profile_index} >= sk.profiles.count:
         print(json.dumps({{"ok": False, "error": "profile_index_out_of_range",
                            "got": {profile_index}, "count": sk.profiles.count}})); return
 
-    ext_in = root.features.extrudeFeatures.createInput(sk.profiles.item({profile_index}), {op_expr})
+    ext_in = owner.features.extrudeFeatures.createInput(sk.profiles.item({profile_index}), {op_expr})
     {extent_setter}
 {parts_block}
-    feat = root.features.extrudeFeatures.add(ext_in)
+    feat = owner.features.extrudeFeatures.add(ext_in)
 {name_block}    body_names = [feat.bodies.item(i).name for i in range(feat.bodies.count)] if feat.bodies.count > 0 else []
     print(json.dumps({{
         "ok": True,
@@ -633,7 +634,7 @@ def run(_ctx):
     y_axis = {y_axis_expr}
     if x_axis is None:
         print(json.dumps({{"ok": False, "error": "x_axis_not_found", "axis": {json.dumps(x_axis)}}})); return
-    if {repr(y_axis)} is not None and y_axis is None:
+    if {y_axis is not None!r} and y_axis is None:
         print(json.dumps({{"ok": False, "error": "y_axis_not_found", "axis": {repr(y_axis)}}})); return
 
     items = adsk.core.ObjectCollection.create()
@@ -665,7 +666,7 @@ def run(_ctx):
         "ok": True,
         "feature_name": feat.name,
         "x_count": {x_count},
-        "y_count": {y_count} if {repr(y_axis)} is not None else 1,
+        "y_count": {y_count} if {y_axis is not None!r} else 1,
     }}))
 """
 
@@ -1188,26 +1189,22 @@ RIB_SIDES = {"left", "right", "symmetric"}
 
 
 def build_rib(
-    sketch: str,
-    thickness: str,
-    side: str = "symmetric",
-    extend_profile: bool = True,
-    name: str | None = None,
+    sketch: str, thickness: str, side: str = "symmetric", extend_profile: bool = True,
+    name: str | None = None, target_body: str | None = None, is_flipped: bool = False,
 ) -> str:
     if not thickness:
         raise ValueError("thickness expression required")
     if side not in RIB_SIDES:
         raise ValueError(f"side must be one of {sorted(RIB_SIDES)}, got {side!r}")
-    side_enum = {
-        "left": "Left",
-        "right": "Right",
-        "symmetric": "Symmetric",
-    }[side]
-    extend = "True" if extend_profile else "False"
+    if side != "symmetric" or not extend_profile:
+        raise ValueError("Only symmetric ribs extending to the next face are supported")
+    if not target_body:
+        raise ValueError("target_body is required for a rib")
+    if not isinstance(is_flipped, bool):
+        raise ValueError("is_flipped must be a bool")
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
-
     return f"""\
-{_emit_header()}
+{_emit_header()}{RESOLVER_SCRIPT}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -1215,56 +1212,50 @@ def run(_ctx):
     if design is None:
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
-
-    sk = None
-    for i in range(root.sketches.count):
-        s = root.sketches.item(i)
-        if s.name == {json.dumps(sketch)}:
-            sk = s; break
+    ribs = root.features.ribFeatures
+    if not hasattr(ribs, 'createInput') or not hasattr(ribs, 'add'):
+        print(json.dumps({{"ok": False, "error": "rib_not_scriptable"}})); return
+    sk = root.sketches.itemByName({json.dumps(sketch)})
     if sk is None:
-        print(json.dumps({{"ok": False, "error": "sketch_not_found", "name": {json.dumps(sketch)}}})); return
-
-    curves = adsk.core.ObjectCollection.create()
-    for i in range(sk.sketchCurves.count):
-        curves.add(sk.sketchCurves.item(i))
-
-    rib_in = root.features.ribFeatures.createInput(
-        curves,
-        adsk.core.ValueInput.createByString({json.dumps(thickness)}),
-        {extend},
-    )
-    rib_in.wallLocation = adsk.fusion.ThinExtrudeWallLocation.{side_enum}
-    feat = root.features.ribFeatures.add(rib_in)
-{name_block}    print(json.dumps({{
-        "ok": True,
-        "feature_name": feat.name,
-        "thickness": {json.dumps(thickness)},
-        "side": {json.dumps(side)},
-    }}))
+        print(json.dumps({{"ok": False, "error": "sketch_not_found"}})); return
+    body, error = _select_body(root, {target_body!r})
+    if error:
+        print(json.dumps(error)); return
+    if body.parentComponent != root:
+        print(json.dumps({{"ok": False, "error": "rib_component_unsupported"}})); return
+    curves = [sk.sketchCurves.item(i) for i in range(sk.sketchCurves.count)]
+    if not curves:
+        print(json.dumps({{"ok": False, "error": "no_sketch_curves"}})); return
+    rib_in = ribs.createInput(curves, adsk.core.ValueInput.createByString({json.dumps(thickness)}), body)
+    if rib_in is None:
+        print(json.dumps({{"ok": False, "error": "rib_input_failed"}})); return
+    rib_in.isSymmetric = True
+    rib_in.isFlipped = {is_flipped!r}
+    if not rib_in.setToNextExtent():
+        print(json.dumps({{"ok": False, "error": "rib_extent_failed"}})); return
+    feat = ribs.add(rib_in)
+    if feat is None:
+        print(json.dumps({{"ok": False, "error": "rib_creation_failed"}})); return
+{name_block}    health = feat.healthState
+    if health != adsk.fusion.FeatureHealthStates.HealthyFeatureHealthState:
+        print(json.dumps({{"ok": False, "error": "rib_feature_unhealthy",
+                           "feature_name": feat.name, "health_state": int(health),
+                           "health_message": feat.errorOrWarningMessage,
+                           "model_may_have_changed": True}})); return
+    print(json.dumps({{"ok": True, "feature_name": feat.name, "thickness": {json.dumps(thickness)}, "side": "symmetric"}}))
 """
 
 
 def rib(
-    adapter: FusionAdapter,
-    sketch: str,
-    thickness: str,
-    side: str = "symmetric",
-    extend_profile: bool = True,
-    name: str | None = None,
+    adapter: FusionAdapter, sketch: str, thickness: str, side: str = "symmetric",
+    extend_profile: bool = True, name: str | None = None, target_body: str | None = None,
+    is_flipped: bool = False,
 ) -> Envelope:
-    # RibFeatures is read-only (item/itemByName/count, no createInput or add), so
-    # ribs cannot be scripted. Return a structured error instead of crashing.
-    return Envelope(
-        ok=False,
-        error="rib_not_scriptable",
-        message=(
-            "Fusion's API exposes RibFeatures as a read-only collection (no "
-            "createInput/add), so rib creation is not scriptable in this Fusion "
-            "version. Model the rib as a thin extrude instead: sketch a closed "
-            "profile for the rib cross-section and use extrude with "
-            "operation='join'."
-        ),
-    )
+    try:
+        script = build_rib(sketch, thickness, side, extend_profile, name, target_body, is_flipped)
+    except ValueError as e:
+        return Envelope(ok=False, error="invalid_input", message=str(e))
+    return _ok_runner(adapter, script, "rib")
 
 
 # ---------- add_hole (simple, counterbore, countersink) ----------
@@ -1284,6 +1275,7 @@ def build_add_hole(
     extent_kind: str = "all",
     depth_expression: str | None = None,
     name: str | None = None,
+    face_handle: str | None = None,
 ) -> str:
     if len(position_mm) != 3:
         raise ValueError("position_mm must be [x, y, z] in mm")
@@ -1300,36 +1292,44 @@ def build_add_hole(
     if kind == "countersink" and not (csink_diameter and csink_angle):
         raise ValueError("kind=countersink requires csink_diameter + csink_angle")
 
-    target_x, target_y, _target_z = position_mm
+    target_x, target_y, target_z = position_mm
+    token = None
+    if face_handle is not None:
+        parsed_handle = parse_handle(face_handle)
+        if parsed_handle["kind"] != "face":
+            raise ValueError("face_handle must be a face handle")
+        token = parsed_handle["token"]
     name_block = f"    feat.name = {json.dumps(name)}\n" if name else ""
 
+    resolve_face = textwrap.indent(emit_resolve(face_handle, var="face"), "        ") if face_handle else ""
+
     if extent_kind == "all":
-        extent_setter = "hole_in.setAllExtent(adsk.fusion.ExtentDirections.NegativeExtentDirection)"
+        extent_setter = "hole_in.setAllExtent(adsk.fusion.ExtentDirections.PositiveExtentDirection)"
     else:
         extent_setter = f"hole_in.setDistanceExtent(adsk.core.ValueInput.createByString({json.dumps(depth_expression)}))"
 
     if kind == "simple":
         input_create = (
-            f"hole_in = root.features.holeFeatures.createSimpleInput("
+            f"hole_in = body.parentComponent.features.holeFeatures.createSimpleInput("
             f"adsk.core.ValueInput.createByString({json.dumps(diameter)}))"
         )
     elif kind == "counterbore":
         input_create = (
-            f"hole_in = root.features.holeFeatures.createCounterboreInput(\n"
+            f"hole_in = body.parentComponent.features.holeFeatures.createCounterboreInput(\n"
             f"        adsk.core.ValueInput.createByString({json.dumps(diameter)}),\n"
             f"        adsk.core.ValueInput.createByString({json.dumps(cbore_diameter)}),\n"
             f"        adsk.core.ValueInput.createByString({json.dumps(cbore_depth)}))"
         )
     else:  # countersink
         input_create = (
-            f"hole_in = root.features.holeFeatures.createCountersinkInput(\n"
+            f"hole_in = body.parentComponent.features.holeFeatures.createCountersinkInput(\n"
             f"        adsk.core.ValueInput.createByString({json.dumps(diameter)}),\n"
             f"        adsk.core.ValueInput.createByString({json.dumps(csink_diameter)}),\n"
             f"        adsk.core.ValueInput.createByString({json.dumps(csink_angle)}))"
         )
 
     return f"""\
-{_emit_header()}{_FIND_BODY_HELPER}
+{_emit_header()}{RESOLVER_SCRIPT}
 P = adsk.core.Point3D.create
 
 def run(_ctx):
@@ -1339,59 +1339,52 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    body = _find_body(root, {json.dumps(body)})
-    if body is None:
-        print(json.dumps({{"ok": False, "error": "body_not_found", "name": {json.dumps(body)}}})); return
+    body, error = _select_body(root, {body!r})
+    if error:
+        print(json.dumps(error)); return
+    if body.parentComponent != root:
+        print(json.dumps({{"ok": False, "error": "hole_component_unsupported"}})); return
 
-    # Highest +Z face whose XY extent contains the position, falling back to the
-    # tallest +Z face. Tallest-always starts holes aimed at a lower step in
-    # mid-air above it.
-    _tx = {target_x / 10}
-    _ty = {target_y / 10}
-    top_face = None
-    top_z = -1e18
-    containing_face = None
-    containing_z = -1e18
-    for i in range(body.faces.count):
-        f = body.faces.item(i)
-        ok, n = f.evaluator.getNormalAtPoint(f.pointOnFace)
-        if not (ok and abs(n.z - 1.0) < 1e-3):
-            continue
-        if f.pointOnFace.z > top_z:
-            top_face = f
-            top_z = f.pointOnFace.z
-        fb = f.boundingBox
-        if (fb.minPoint.x - 1e-6 <= _tx <= fb.maxPoint.x + 1e-6
-                and fb.minPoint.y - 1e-6 <= _ty <= fb.maxPoint.y + 1e-6
-                and f.pointOnFace.z > containing_z):
-            containing_face = f
-            containing_z = f.pointOnFace.z
-    position_on_face = containing_face is not None
-    if containing_face is not None:
-        top_face = containing_face
-        top_z = containing_z
-    if top_face is None:
-        print(json.dumps({{"ok": False, "error": "no_top_face_found"}})); return
-
-    helper = root.sketches.add(top_face)
-    helper.name = '_hole_position_helper'
-    helper.isComputeDeferred = True
-    world_pt = P(_tx, _ty, top_z)
-    sk_pt = helper.sketchPoints.add(helper.modelToSketchSpace(world_pt))
-    helper.isComputeDeferred = False
+    point = P({target_x / 10}, {target_y / 10}, {target_z / 10})
+    face = None
+    face_token = {repr(token)}
+    if face_token is not None:
+{resolve_face}        if face.body != body:
+            print(json.dumps({{"ok": False, "error": "face_wrong_body"}})); return
+        if adsk.core.Plane.cast(face.geometry) is None or not face.isPointOnFace(point):
+            print(json.dumps({{"ok": False, "error": "point_not_on_planar_face"}})); return
+    else:
+        # Preserve the top-face convenience, while requiring the point's XY to
+        # be within the actual trimmed face, not just its bounding box.
+        candidates = []
+        for i in range(body.faces.count):
+            f = body.faces.item(i)
+            if adsk.core.Plane.cast(f.geometry) is None: continue
+            ok, normal = f.evaluator.getNormalAtPoint(f.pointOnFace)
+            if not ok or abs(normal.z - 1.0) > 1e-3: continue
+            projected = P(point.x, point.y, f.pointOnFace.z)
+            if f.isPointOnFace(projected):
+                candidates.append((abs(projected.z - point.z), f, projected))
+        candidates.sort(key=lambda entry: entry[0])
+        if not candidates:
+            print(json.dumps({{"ok": False, "error": "no_top_face_at_position"}})); return
+        if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 1e-7:
+            print(json.dumps({{"ok": False, "error": "face_ambiguous"}})); return
+        _, face, point = candidates[0]
 
     {input_create}
-    hole_in.setPositionBySketchPoint(sk_pt)
+    if not hole_in.setPositionByPoint(face, point):
+        print(json.dumps({{"ok": False, "error": "hole_position_failed"}})); return
     {extent_setter}
-    feat = root.features.holeFeatures.add(hole_in)
+    hole_in.participantBodies = [body]
+    feat = body.parentComponent.features.holeFeatures.add(hole_in)
 {name_block}    print(json.dumps({{
         "ok": True,
         "feature_name": feat.name,
         "kind": {json.dumps(kind)},
         "diameter": {json.dumps(diameter)},
         "position_mm": {json.dumps(position_mm)},
-        "face_plane_z_mm": round(top_z * 10, 4),
-        "position_on_face": position_on_face,
+        "actual_position_mm": [point.x * 10, point.y * 10, point.z * 10],
     }}))
 """
 
@@ -1409,6 +1402,7 @@ def add_hole(
     extent_kind: str = "all",
     depth_expression: str | None = None,
     name: str | None = None,
+    face_handle: str | None = None,
 ) -> Envelope:
     try:
         script = build_add_hole(
@@ -1423,6 +1417,7 @@ def add_hole(
             extent_kind,
             depth_expression,
             name,
+            face_handle,
         )
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
@@ -1438,413 +1433,14 @@ add_hole_simple = add_hole
 
 
 def build_rebuild_feature(feature_name: str, component_name: str | None = None) -> str:
-    """Rebuild a feature whose downstream references are stale (G10) by
-    capturing its inputs, deleting it, and re-creating from the current sketch.
-
-    Supported feature types: ExtrudeFeature (with Distance extent, +
-    ProfilePlaneStart or OffsetStart). Most common G10 case.
-
-    For other feature types (fillet, chamfer, hole, revolve, etc.) returns a
-    structured `not_supported_for_rebuild` error with the feature class so the
-    caller can fall back to: (a) suppress and let the user repair interactively
-    (G11), or (b) delete + manually re-create with the appropriate tool.
-
-    Walks root + every sub-component to find the feature. Pass component_name
-    to disambiguate when the same feature name exists in multiple components.
-    """
-    feat_n = json.dumps(feature_name)
-    cn = "None" if component_name is None else json.dumps(component_name)
+    """Refuse destructive recreation until dependent references can be preserved."""
     return f"""\
-import adsk.core
-import adsk.fusion
 import json
 
-FEATURE_NAME = {feat_n}
-COMP_HINT = {cn}
-
-
-def _find_feature_anywhere(comp, name):
-    for i in range(comp.features.count):
-        ft = comp.features.item(i)
-        if ft.name == name:
-            return ft, comp
-    for j in range(comp.occurrences.count):
-        occ = comp.occurrences.item(j)
-        if occ.component is not None:
-            f, c = _find_feature_anywhere(occ.component, name)
-            if f is not None:
-                return f, c
-    return None, None
-
-
-def _find_hinted(root, hint):
-    if hint is None:
-        return _find_feature_anywhere(root, FEATURE_NAME)
-    def search(comp):
-        if comp.name == hint:
-            for i in range(comp.features.count):
-                ft = comp.features.item(i)
-                if ft.name == FEATURE_NAME:
-                    return ft, comp
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                f, c = search(occ.component)
-                if f is not None:
-                    return f, c
-        return None, None
-    f, c = search(root)
-    return (f, c) if f is not None else _find_feature_anywhere(root, FEATURE_NAME)
-
-
-# Resolve a sketch by name. Returns (sketch, owner_component_name, ambiguity),
-# where ambiguity is a list of {{"component", "sketch"}} when the name matches
-# more than one sketch in scope. comp_hint None searches the whole tree; a hint
-# matching 0 falls through to global.
-def _find_all_sketches(comp, name):
-    out = []
-    for i in range(comp.sketches.count):
-        sk = comp.sketches.item(i)
-        if sk.name == name:
-            out.append((sk, comp.name))
-    for j in range(comp.occurrences.count):
-        occ = comp.occurrences.item(j)
-        if occ.component is not None:
-            out.extend(_find_all_sketches(occ.component, name))
-    return out
-
-
-def _resolve_sketch(root, name, comp_hint):
-    if comp_hint is not None:
-        hinted = [(s, c) for s, c in _find_all_sketches(root, name) if c == comp_hint]
-        if len(hinted) == 1:
-            return hinted[0][0], hinted[0][1], None
-        if len(hinted) > 1:
-            return None, None, [{{"component": c, "sketch": s.name}} for s, c in hinted]
-    all_m = _find_all_sketches(root, name)
-    if len(all_m) == 0:
-        return None, None, None
-    if len(all_m) == 1:
-        return all_m[0][0], all_m[0][1], None
-    return None, None, [{{"component": c, "sketch": s.name}} for s, c in all_m]
-
-
-def _capture_extrude(ft):
-    # Capture ExtrudeFeature inputs for re-creation. Unhandled extents/starts set
-    # unsupported_extent / unsupported_start. profile_areas is always a list so
-    # recreate rebuilds N profiles uniformly; the sketch's parent component is
-    # captured to disambiguate names shared across components.
-    info = {{"class": "ExtrudeFeature"}}
-    info["operation"] = ft.operation  # int enum
-    # .profile raises InternalValidationError once the sketch curves are deleted.
-    # Treat as unrebuildable so preflight preserves the original feature.
-    try:
-        prof = ft.profile
-    except Exception as e:
-        info["unsupported"] = "profile_unreadable: " + str(e)
-        return info
-    if hasattr(prof, "parentSketch"):
-        info["sketch_name"] = prof.parentSketch.name
-        try:
-            info["sketch_owner_component"] = prof.parentSketch.parentComponent.name
-        except Exception:
-            info["sketch_owner_component"] = None
-        info["profile_count"] = 1
-        try:
-            # areaProperties is a method; the property form returns None areas and
-            # matching always falls back.
-            info["profile_areas"] = [prof.areaProperties().area]
-        except Exception:
-            info["profile_areas"] = [None]
-    else:
-        # ObjectCollection of profiles
-        try:
-            n = prof.count
-            info["profile_count"] = n
-            sketches = set()
-            owners = set()
-            areas = []
-            for k in range(n):
-                p = prof.item(k)
-                if hasattr(p, "parentSketch"):
-                    sketches.add(p.parentSketch.name)
-                    try:
-                        owners.add(p.parentSketch.parentComponent.name)
-                    except Exception:
-                        pass
-                try:
-                    areas.append(p.areaProperties().area)
-                except Exception:
-                    areas.append(None)
-            info["sketch_name"] = list(sketches)[0] if len(sketches) == 1 else None
-            info["sketch_owner_component"] = list(owners)[0] if len(owners) == 1 else None
-            info["profile_areas"] = areas
-            if info["sketch_name"] is None:
-                info["unsupported"] = "multi_sketch_profiles"
-        except Exception as e:
-            info["unsupported"] = f"profile_read_failed: {{e}}"
-    # Extent
-    try:
-        ext = ft.extentOne
-        ext_cls = ext.classType().split("::")[-1]
-        info["extent_class"] = ext_cls
-        if ext_cls == "DistanceExtentDefinition":
-            info["extent_kind"] = "distance"
-            info["extent_distance_expr"] = ext.distance.expression
-            try:
-                info["extent_is_flipped"] = bool(ext.isFlipped)
-            except Exception:
-                info["extent_is_flipped"] = False
-        else:
-            info["unsupported_extent"] = ext_cls
-    except Exception as e:
-        info["extent_read_error"] = str(e)
-    # Start
-    try:
-        st = ft.startExtent
-        st_cls = st.classType().split("::")[-1]
-        info["start_class"] = st_cls
-        if st_cls == "ProfilePlaneStartDefinition":
-            info["start_kind"] = "profile_plane"
-        elif st_cls == "OffsetStartDefinition":
-            info["start_kind"] = "offset"
-            info["start_offset_expr"] = st.offset.expression
-        else:
-            info["unsupported_start"] = st_cls
-    except Exception as e:
-        info["start_read_error"] = str(e)
-    # Participant bodies (relevant for Cut/Join/Intersect)
-    body_names = []
-    try:
-        pb = ft.participantBodies
-        if pb is not None:
-            for b in pb:
-                body_names.append(b.name)
-    except Exception:
-        pass
-    info["participant_body_names"] = body_names
-    # Two-sided?
-    try:
-        info["has_extent_two"] = ft.extentTwo is not None
-    except Exception:
-        info["has_extent_two"] = False
-    return info
-
-
-def _preflight_check(captured):
-    # Non-None error dict when the captured state is unrebuildable. Must run
-    # before deleteMe() or a known-bad shape is deleted and never recreated.
-    if "unsupported" in captured:
-        return {{"error": "unsupported_profile_shape", "detail": captured["unsupported"]}}
-    if "unsupported_extent" in captured:
-        return {{"error": "unsupported_extent_type",
-                 "extent_class": captured["unsupported_extent"]}}
-    if "unsupported_start" in captured:
-        return {{"error": "unsupported_start_type",
-                 "start_class": captured["unsupported_start"]}}
-    if captured.get("has_extent_two"):
-        return {{"error": "two_sided_extrude_not_supported"}}
-    if not captured.get("sketch_name"):
-        return {{"error": "sketch_name_unknown"}}
-    # Resolve before delete so duplicate-name ambiguity bails before the
-    # original feature is destroyed.
-    app = adsk.core.Application.get()
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    sk_name = captured["sketch_name"]
-    owner_hint = captured.get("sketch_owner_component")
-    sk, _owner, ambig = _resolve_sketch(design.rootComponent, sk_name, owner_hint)
-    if ambig is not None:
-        return {{
-            "error": "sketch_name_ambiguous", "name": sk_name,
-            "matches": ambig,
-            "hint": ("Original sketch's owner component could not be matched uniquely. "
-                     "Captured owner: " + str(owner_hint)),
-        }}
-    if sk is None:
-        return {{"error": "sketch_not_found", "name": sk_name}}
-    # A resolved sketch with no closed profiles passes preflight, then fails
-    # recreation after deleteMe() has destroyed the feature. Check here.
-    if sk.profiles.count == 0:
-        return {{"error": "sketch_has_no_profiles", "name": sk_name}}
-    return None
-
-
-def _recreate_extrude(comp, captured, old_name):
-    # Re-create an extrude feature in `comp` from the captured input dict.
-    # Returns (new_feature, error_dict). Assumes _preflight_check already ran.
-    sk_name = captured["sketch_name"]
-    app = adsk.core.Application.get()
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    # Captured owner component as the hint so duplicate sketch names across
-    # components still bind to the right one.
-    owner_hint = captured.get("sketch_owner_component")
-    sk, owner, ambig = _resolve_sketch(design.rootComponent, sk_name, owner_hint)
-    if ambig is not None:
-        return None, {{
-            "error": "sketch_name_ambiguous", "name": sk_name,
-            "matches": ambig,
-            "hint": ("Original sketch's owner component could not be matched uniquely. "
-                     "Captured owner: " + str(owner_hint)),
-        }}
-    if sk is None:
-        return None, {{"error": "sketch_not_found", "name": sk_name}}
-    if sk.profiles.count == 0:
-        return None, {{"error": "sketch_has_no_profiles", "sketch": sk_name}}
-
-    # Match N original profiles to N current profiles by area-closest.
-    # For single-profile feature, profile_areas has 1 entry.
-    target_areas = captured.get("profile_areas") or []
-    matched_profiles = []
-    used_indices = set()
-    if target_areas:
-        for ta in target_areas:
-            best_idx = None
-            best_diff = 1e18
-            for k in range(sk.profiles.count):
-                if k in used_indices:
-                    continue
-                try:
-                    a = sk.profiles.item(k).areaProperties().area
-                except Exception:
-                    continue
-                if ta is None:
-                    diff = 0  # any profile acceptable
-                else:
-                    diff = abs(a - ta)
-                if diff < best_diff:
-                    best_diff = diff
-                    best_idx = k
-            if best_idx is not None:
-                matched_profiles.append(sk.profiles.item(best_idx))
-                used_indices.add(best_idx)
-    if not matched_profiles:
-        # Fallback: pick profile 0 (single-profile case where capture failed)
-        matched_profiles = [sk.profiles.item(0)]
-
-    # Build input. createInput accepts either a single Profile or an
-    # ObjectCollection of Profiles.
-    ext = comp.features.extrudeFeatures
-    if len(matched_profiles) == 1:
-        einput = ext.createInput(matched_profiles[0], captured["operation"])
-    else:
-        oc = adsk.core.ObjectCollection.create()
-        for p in matched_profiles:
-            oc.add(p)
-        einput = ext.createInput(oc, captured["operation"])
-
-    if captured.get("start_kind") == "offset":
-        offset_def = adsk.fusion.OffsetStartDefinition.create(
-            adsk.core.ValueInput.createByString(captured["start_offset_expr"]))
-        einput.startExtent = offset_def
-    einput.setDistanceExtent(
-        captured.get("extent_is_flipped", False),
-        adsk.core.ValueInput.createByString(captured["extent_distance_expr"]),
-    )
-    pb_names = captured.get("participant_body_names") or []
-    if pb_names:
-        bodies = []
-        for nm in pb_names:
-            b = comp.bRepBodies.itemByName(nm)
-            if b is not None:
-                bodies.append(b)
-        if bodies:
-            einput.participantBodies = bodies
-    new_feat = ext.add(einput)
-    if old_name:
-        new_feat.name = old_name
-    return new_feat, None
-
-
 def run(_ctx):
-    app = adsk.core.Application.get()
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    if design is None:
-        print(json.dumps({{"ok": False, "error": "no_active_design"}}))
-        return
-    ft, comp = _find_hinted(design.rootComponent, COMP_HINT)
-    if ft is None:
-        print(json.dumps({{"ok": False, "error": "feature_not_found", "name": FEATURE_NAME}}))
-        return
-    try:
-        cls = ft.classType().split("::")[-1]
-    except Exception:
-        cls = "?"
-    old_name = ft.name
-    try:
-        old_health = int(ft.healthState)
-    except Exception:
-        old_health = -1
-    try:
-        old_msg = ft.errorOrWarningMessage or ""
-    except Exception:
-        old_msg = ""
-
-    if cls != "ExtrudeFeature":
-        print(json.dumps({{
-            "ok": False,
-            "error": "not_supported_for_rebuild",
-            "feature_class": cls,
-            "feature_name": old_name,
-            "component": comp.name,
-            "supported": ["ExtrudeFeature"],
-            "old_health": old_health,
-            "recommendation": (
-                "For FilletFeature/ChamferFeature: suppress instead (gotcha G11). "
-                "For others: delete and re-create with the appropriate add_* tool."
-            ),
-        }}))
-        return
-
-    captured = _capture_extrude(ft)
-    # PRE-FLIGHT: bail BEFORE destructive delete for known-unrebuildable shapes.
-    preflight = _preflight_check(captured)
-    if preflight is not None:
-        preflight["ok"] = False
-        preflight["feature_name"] = old_name
-        preflight["component"] = comp.name
-        preflight["captured"] = captured
-        preflight["note"] = (
-            "Original feature preserved. Rebuild not attempted because the captured "
-            "state is not currently supported for automatic recreation."
-        )
-        print(json.dumps(preflight))
-        return
-
-    # Try to delete + recreate
-    try:
-        ft.deleteMe()
-    except Exception as e:
-        print(json.dumps({{
-            "ok": False, "error": "delete_failed", "detail": str(e), "captured": captured,
-        }}))
-        return
-    new_feat, err = _recreate_extrude(comp, captured, old_name)
-    if err is not None:
-        # Deleted but not re-created: surface clearly.
-        err["ok"] = False
-        err["feature_name"] = old_name
-        err["captured"] = captured
-        err["WARNING"] = (
-            "Feature was deleted but re-creation failed. Use Fusion's undo to restore, "
-            "then handle this rebuild manually."
-        )
-        print(json.dumps(err))
-        return
-    design.computeAll()
-    try:
-        new_health = int(new_feat.healthState)
-    except Exception:
-        new_health = -1
-    print(json.dumps({{
-        "ok": True,
-        "feature_name": new_feat.name,
-        "feature_class": cls,
-        "component": comp.name,
-        "old_health": old_health,
-        "old_message": old_msg[:300],
-        "new_health": new_health,
-        "captured": captured,
-    }}))
+    print(json.dumps({{"ok": False, "error": "safe_rebuild_unavailable",
+        "feature_name": {json.dumps(feature_name)}, "component": {repr(component_name)},
+        "detail": "Automatic recreation cannot safely preserve the feature and its dependent references."}}))
 """
 
 

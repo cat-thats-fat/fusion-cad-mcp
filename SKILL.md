@@ -71,13 +71,13 @@ The server can also search these for you without loading them: `find_tool`, `fin
 
 Full catalog in `gotchas.md`. These bite first.
 
-**Sub-components are mostly invisible.** Most sketch tools resolve sketches in the **root component only**, and there is no parameter to reach a sketch inside a component. `extrude`, `revolve`, and `project_to_sketch` all behave this way. Features are the same for `mirror_feature` and both pattern tools.
+**Assembly scope matters.** Sketch operations can resolve occurrence-qualified names; ambiguous names and edits to shared component definitions are refused. Not every feature tool supports child components. Verify the owning component and use explicit occurrence paths where supported.
 
 **Internal units are centimeters.** Tools convert for you at the boundary, so you pass and receive mm. Raw scripts do not: `Point3D.create` takes cm, and `parameter.value` returns cm. Use `ValueInput.createByString("30 mm")` and let Fusion convert.
 
 **Edge length is chord distance, not arc length.** The geometric fillet and chamfer filters measure straight-line distance between endpoints, so a closed circular edge measures 0 and is never selected, and arcs are under-measured.
 
-**`add_hole` is world-Z locked.** It drills a `+Z`-facing face, prefers the one containing your XY, and **ignores the Z you pass**. Rotate the body and there is no `+Z` face at all. Check `position_on_face` in the response.
+**`add_hole` targets one body.** Provide a face handle and a point on that planar face, or omit the handle to select the nearest upward planar face containing the XY point. The Z coordinate selects among candidate faces. Child-component bodies are currently refused; inspect `actual_position_mm`.
 
 **Undo is atomic on the whole prior call.** A script that added parameters *and* geometry loses both, silently. Prefer targeted deletion.
 
@@ -85,7 +85,7 @@ Full catalog in `gotchas.md`. These bite first.
 
 **Joint limits and drives report in internal units** (radians, centimeters), not what you passed in.
 
-**`rib` is not scriptable.** `RibFeatures` is read-only in the current API. The tool returns `rib_not_scriptable` rather than crashing. Model a rib as a thin extrude with `operation="join"`.
+**`rib` checks API capability.** If the installed Fusion API lacks the required methods, it returns `rib_not_scriptable`. Model a rib as a thin join-extrude when unavailable. `rebuild_feature` currently refuses with `safe_rebuild_unavailable` rather than deleting a feature.
 
 **Screenshots are the weakest check you have.** Keep width at or below roughly 400 px or the base64 blows the tool-result token limit. Use them to show a human, not to verify geometry.
 

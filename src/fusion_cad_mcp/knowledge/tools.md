@@ -1,8 +1,8 @@
 # Fusion MCP tool reference
 
-Complete reference for the 75 typed tools exposed by `fusion-cad-mcp`. Every signature, enum, return key, and error code here was read out of the server source and verified against a live Fusion build, not inferred.
+Reference for the 75 typed tools exposed by `fusion-cad-mcp`. Capabilities vary by Fusion version; verify results in the active design.
 
-74 of the 75 are usable. `rib` is registered but permanently returns `rib_not_scriptable`, because the Fusion API exposes `RibFeatures` as a read-only collection. It is documented in Group 5 along with the workaround.
+`rib` checks whether the required Fusion API methods are available. `rebuild_feature` currently refuses safely without modifying the design.
 
 `SKILL.md` is the operating manual and tells you *which* tool to reach for. This file tells you *exactly* how to call it. Load this when you need a signature, an enum, or an error code.
 
@@ -43,7 +43,7 @@ Two traps worth internalizing:
 
 The server uses two ways to name things, and mixing them up is the most common source of confusion.
 
-**Name-addressed.** Bodies, sketches, components, occurrences, joints, features, construction geometry. You pass a plain string: `"main_body"`, `"outer"`, `"Hinge:1"`. Lookup is exact and case-sensitive, first-match-wins, with no ambiguity detection. Duplicate names silently resolve to whichever the traversal hits first.
+**Name-addressed.** Bodies, sketches, components, occurrences, joints, features, construction geometry. You pass a plain string: `"main_body"`, `"outer"`, `"Hinge:1"`. Lookup behavior varies by tool. Updated body and sketch resolvers detect ambiguous names and support occurrence-qualified names; older tools may still use first-match lookup.
 
 **Handle-addressed.** Faces, edges, vertices, sketch points. These have no stable name, so they are addressed by an opaque handle:
 
@@ -52,7 +52,7 @@ kind:path:token
 ```
 
 - `kind` is one of: `sketch, profile, body, face, edge, vertex, feature, component, occurrence, param, joint, ucs, plane, axis, point`
-- `path` is human-readable debug decoration (`main_body/face[3]`). It is *not* used for resolution.
+- `path` identifies the entity and may include occurrence and document scope metadata used during resolution.
 - `token` is Fusion's `entityToken` and is the actual resolver key.
 
 `list_body_entities` is the bridge: give it a body name, get back handles for its faces, edges, and vertices. That is the only way to reach sub-entity geometry.
@@ -199,12 +199,7 @@ No arguments. Returns `ok`, `count`, `parameters`, each entry `{name, expression
 
 # Group 3: Sketch geometry
 
-**The single biggest gotcha in this group:** most sketch tools look up sketches in the **root component only**. A sketch inside a sub-component is invisible to them and returns `sketch_not_found`, with no `component_name` parameter to fix it.
-
-| Lookup behavior | Tools |
-|---|---|
-| Root component only | `create_sketch`, `add_line`, `add_rectangle`, `add_circle`, `add_ellipse`, `add_arc`, `add_spline`, `add_polygon`, `add_geometric_constraint`, `add_dimension`, `assert_profiles` |
-| Recursive, ambiguity-aware, accepts `component_name` | `probe_sketch_dimensions`, `edit_sketch_dimension` |
+Sketch geometry tools resolve occurrence-qualified sketch names and reject ambiguity or edits to shared component definitions. `probe_sketch_dimensions` and `edit_sketch_dimension` have their own `component_name` hint.
 
 Shared errors across the group: `no_active_design`, `sketch_not_found`, `<tool>_parse_failed`.
 
@@ -230,11 +225,11 @@ Points are `[x, y]` in mm. Z is always 0, since these are 2D sketch coordinates.
 
 Indices are positional into the live collection and shift when geometry is deleted. Ref errors all surface as `invalid_input`: `malformed entity ref`, `<ref>: index must be an int`, `<ref>: unknown sub-entity`, `<ref>: unknown entity kind`.
 
-## `create_sketch(plane, name)`
+## `create_sketch(plane, name, component=None)`
 
-`plane` is `xy`, `xz`, or `yz`, case-insensitive. Root component only.
+`plane` accepts a principal plane or a named plane. `component` selects an occurrence; omitted selects root. Ambiguous selections and shared-definition edits are refused.
 
-Errors: `invalid_input` (`plane must be one of xy / xz / yz`), `sketch_name_taken`.
+Errors include `invalid_input`, `sketch_name_taken`, and `plane_not_found_or_ambiguous`.
 
 Returns: `ok`, `sketch_name`, `plane` (lowercased), `handle`, formatted as `sketch:<name>:<token>`.
 
@@ -443,9 +438,9 @@ Returns: `ok`, `deleted`, a list of `"<collection>/<name>"` strings.
 
 Shared behavior across this group:
 
-- **Sketches resolve in the root component only** for `extrude` and `revolve`. A sketch inside a sub-component returns `sketch_not_found` and there is no parameter to reach it. `rebuild_feature` is the one exception; it walks the whole tree.
+- `extrude` and `revolve` resolve sketches with occurrence-aware selection; ambiguous or unsupported shared-definition edits are refused.
 - **Features resolve in the root component only** for `mirror_feature`, `pattern_rectangular`, and `pattern_circular`. These look up a *feature* name first and fall back to a *body* name searched tree-wide, so a feature in a sub-component yields `target_not_found` unless a body happens to share the name.
-- **Bodies resolve tree-wide**, first match wins, no ambiguity detection.
+- Body selection behavior varies by tool; updated selectors reject ambiguous names.
 - `name` always renames *after* creation, so the returned `feature_name` is your name.
 - Plane and axis arguments accept the principal names (`xy`/`xz`/`yz`, `x`/`y`/`z`, lowercased) or the exact case-sensitive name of root construction geometry.
 
@@ -514,30 +509,11 @@ Returns: `ok`, `feature_name`, `edges_chamfered`, `kind`. Note it echoes `kind`,
 
 **Chamfer has no tangent-chain option**, unlike fillet. It is hardcoded off.
 
-## `add_hole(body, position_mm, diameter, kind="simple", cbore_diameter=None, cbore_depth=None, csink_diameter=None, csink_angle=None, extent_kind="all", depth_expression=None, name=None)`
+## `add_hole(body, position_mm, diameter, kind="simple", cbore_diameter=None, cbore_depth=None, csink_diameter=None, csink_angle=None, extent_kind="all", depth_expression=None, name=None, face_handle=None)`
 
-| `kind` | Requires |
-|---|---|
-| `"simple"` | `diameter` |
-| `"counterbore"` | `cbore_diameter` + `cbore_depth` |
-| `"countersink"` | `csink_diameter` + `csink_angle` |
+Creates a simple, counterbore, or countersink hole on a root-component body. Counterbores require diameter and depth; countersinks require diameter and angle. Distance extent requires `depth_expression`.
 
-`extent_kind` is `"all"` (drills downward through everything) or `"distance"` (requires `depth_expression`).
-
-**Face selection.** The hole is placed on a `+Z`-facing face, chosen as: the highest `+Z` face whose bounding box contains your XY, falling back to the tallest `+Z` face overall. Two things follow:
-
-- **`position_mm[2]` is ignored.** The Z comes from the chosen face. Pass it for readability; it does nothing.
-- **The body must have a `+Z` face.** Rotate the body and you get `no_top_face_found`. This is world-Z locked.
-
-Check `position_on_face` in the response. `false` means your XY was not inside any `+Z` face and the fallback was used, so the hole is probably misplaced. Compare `face_plane_z_mm` against the step you meant to drill.
-
-Containment is a bounding-box test, so a target inside the bbox of a non-rectangular face but outside its real boundary still reports `true`.
-
-Errors: `invalid_input` (per-kind requirement messages), `body_not_found`, `no_top_face_found`.
-
-Returns: `ok`, `feature_name`, `kind`, `diameter`, `position_mm` (echo, including the ignored Z), `face_plane_z_mm`, `position_on_face`.
-
-**Side effect:** every call leaves a sketch named `_hole_position_helper` in the design, and the hole is parametrically bound to it. Deleting that sketch breaks the hole.
+With `face_handle`, the supplied 3D point must lie on that body's planar face. Without it, the tool selects the nearest upward planar face containing the XY point, using Z to select between levels. It refuses ambiguity or a missing face and scopes participant bodies to the selected body. Child-component bodies return `hole_component_unsupported`. The result includes `actual_position_mm`.
 
 ## `shell(body, thickness, face_normals_to_remove=None, direction="inside", name=None)`
 
@@ -615,33 +591,17 @@ Returns: `ok`, `feature_name`, `body`.
 
 ## `rebuild_feature(feature_name, component_name=None)`
 
-Repairs a stale-reference extrude (see `gotchas.md` G10) by capturing its inputs, deleting it, and rebuilding from the current sketch. Walks the whole tree; `component_name` disambiguates, and a hint that matches nothing silently falls back to a global search.
+Returns `safe_rebuild_unavailable` without editing the design. Inspect the feature and repair it manually; earlier automatic delete-and-recreate behavior is disabled.
 
-**Only `ExtrudeFeature` is supported.** Anything else returns `not_supported_for_rebuild` without touching the model, and includes a `recommendation`: suppress fillets and chamfers (G11), delete and re-create everything else.
+## `rib(sketch, thickness, side="symmetric", extend_profile=True, name=None, target_body=None, is_flipped=False)`
 
-Also unsupported, all caught *before* the delete so the original survives: two-sided extrudes, non-distance extents, start definitions other than profile-plane or offset, an unreadable profile, an unknown or ambiguous sketch name, and a sketch with zero profiles.
-
-**The destructive window.** If the delete succeeds and recreation then fails, the feature is gone. That response carries an uppercase `WARNING` key and the fix is Fusion's undo. Preflight closes every known case, but treat the presence of `WARNING` as "the model needs manual attention".
-
-Profile matching is by closest area, greedily and without replacement.
-
-Errors: `feature_not_found`, `not_supported_for_rebuild`, `unsupported_profile_shape`, `unsupported_extent_type`, `unsupported_start_type`, `two_sided_extrude_not_supported`, `sketch_name_unknown`, `sketch_name_ambiguous`, `sketch_not_found`, `sketch_has_no_profiles`, `delete_failed`.
-
-Returns: `ok`, `feature_name`, `feature_class`, `component`, `old_health`, `old_message`, `new_health`, `captured`.
-
-**Compare `old_health` against `new_health`** to confirm the rebuild actually fixed anything. `-1` means the health read failed.
-
-## `rib(...)`: unavailable
-
-Always returns `rib_not_scriptable` and never contacts Fusion. `RibFeatures` is a read-only collection in the current API, with no `createInput` and no `add`, so ribs cannot be created by script at any argument combination.
-
-**Model a rib as a thin extrude instead**: sketch the cross-section as a closed profile and extrude with `operation="join"`.
+Requires a target body, symmetric side, and an extending profile. `is_flipped` reverses the in-plane extent direction, which depends on curve direction and sketch normal; select the direction toward the target. The tool checks for writable rib APIs and returns `rib_not_scriptable` when they are absent, as observed on Fusion 2705.1.30. On 2706.1.17 a flipped rib on a bracket produced the expected volume and healthy state; the unflipped direction produced a warning and unexpected geometry. Root-component bodies are supported; child bodies are refused. A non-healthy feature returns `rib_feature_unhealthy`, including health details and `model_may_have_changed: true`; inspect or undo the created feature. A thin join-extrude is an alternative.
 
 ---
 
 # Group 6: Assembly and joints
 
-Shared: components and joints are addressed by **name**, not by handle, except `create_joint`, which consumes two entity handles. Name lookup matches an occurrence name or a component name, first match wins.
+Shared: components and joints are addressed by **name**, except `create_joint`, which consumes entity handles. Updated occurrence selectors accept full occurrence paths and reject ambiguous matches. Check each tool for its component scope.
 
 Joint lookup is flat over the root component. **Joints owned by sub-components are not found.**
 
@@ -661,23 +621,21 @@ Returns: `ok`, `converted` (`[{from_body, to_component}]`), `total_components` (
 
 Same argument rules as `move_body`. Translation is relative to the occurrence's current transform.
 
-**Check `moved` in the response.** A joint solver can override or partially reject a move without raising, so success does not mean motion. Compare `before_translation_mm` against `after_translation_mm`.
+`moved` compares the full before and after transforms, including rotation. The tool returns `move_not_achieved` with the before, expected and observed transforms when the read-back differs from the requested transform.
 
-`moved` is a translation-only diff, so **a pure rotation reports `moved: false`** even when it worked.
+An occurrence with either grounding flag set returns `occurrence_grounded`. Use `unground_component` explicitly before moving it.
 
-**Side effect:** clears `isGroundToParent` on the target occurrence and does not restore it. Occurrences created by `bodies_to_components` default to ground-to-parent, and leaving it set makes the move silently revert. Note this is a different flag from `isGrounded`, which `ground_component` sets.
+Errors include `invalid_input`, `occurrence_not_found`, `occurrence_ambiguous`, `occurrence_grounded`, and `move_not_achieved`.
 
-Errors: `invalid_input`, `occurrence_not_found`.
-
-Returns: `ok`, `component`, `translation_mm`, `rotation_axis`, `rotation_angle_deg`, `before_translation_mm`, `after_translation_mm`, `moved`.
+Returns `ok`, `component`, `translation_mm`, `rotation_axis`, `rotation_angle_deg`, `before_translation_mm`, `after_translation_mm`, `before_transform`, `after_transform`, and `moved` on success.
 
 ## `ground_component(name)` / `unground_component(name)`
 
-Sets `isGrounded`, which is **not** the `isGroundToParent` flag that `move_component` clears.
+Sets or clears the pin (`isGrounded`) and the ground-to-parent flag (`isGroundToParent`, where supported).
 
 Errors: `invalid_input` (`name required`), `occurrence_not_found`.
 
-Returns: `ok`, `component`, `isGrounded` (read back).
+Returns `ok`, `component`, and the read-back values `isGrounded` and `isGroundToParent`.
 
 ## `create_rigid_group(component_names, name=None)`
 
@@ -817,7 +775,7 @@ Returns: `ok`, `body`, `face_count`, `edge_count`, `vertex_count`, `faces`, `edg
 
 **The point arrays are in centimeters**, the only mm-less coordinates in the tool surface.
 
-Entities inside occurrences are unwrapped to their native objects before measuring, so results are in **component space, not assembly space**.
+Occurrence-scoped handles preserve assembly context for measurement; use handles from the intended occurrence.
 
 Errors: `invalid_input` (bad `kind`, malformed handle), `handle_invalid`.
 
@@ -839,27 +797,27 @@ Returns: `ok`, `feature_name`, `edges_chamfered`, `kind`.
 
 ## `project_to_sketch(sketch, entity_handles)`
 
-Projects entities onto a named sketch, for cut-extrudes that reference body geometry.
+Projects linked entities onto a named sketch, for cut-extrudes that reference body geometry.
 
-**The sketch is looked up in the root component only**, so sketches inside sub-components are unreachable.
+The sketch resolver accepts occurrence-qualified names and rejects ambiguous or unsupported shared-definition edits.
 
 `entities_projected` counts handles submitted, not those that produced geometry. `curves_added` is the real output count, normally larger since one face yields several curves. **No handles are returned for the new curves.**
 
-Errors: `invalid_input` (`entity_handles must be non-empty`), `handle_invalid`, `sketch_not_found`.
+Errors include `invalid_input`, `handle_invalid`, `sketch_not_found`, `sketch_ambiguous`, `sketch_proxy_unavailable`, and `shared_component_edit_unsupported`.
 
 Returns: `ok`, `sketch`, `entities_projected`, `curves_added`.
 
 ## `find_mesh_using_ray(origin_mm, direction, component_name=None)`
 
-Casts a ray and returns intersected mesh bodies **by name only**: no handles, no hit points, no distances. `direction` is unitless and is not normalized. Scoped to the root component unless `component_name` is given; that lookup walks sub-components.
+Casts a ray and returns the intersected mesh bodies in hit order, with a scoped `mesh_body` handle for each name. The ray starts at `origin_mm` and uses a unitless `direction`. The search starts at the root component unless `component_name` selects a sub-component.
 
 Errors: `invalid_input` (`origin_mm must be [x, y, z] in mm`, `direction must be [dx, dy, dz]`), `component_not_found`.
 
-Returns: `ok`, `meshes_found`, `names`.
+Returns `ok`, `meshes_found`, `names`, and `mesh_handles`.
 
 ## `ray_collision_with_mesh(mesh_handle, origin_mm, direction)`
 
-Casts against one mesh and returns every intersection point in mm world coordinates. No ordering guarantee, no normals, no distances.
+Casts against one mesh and returns its intersection points in mm, nearest first. Use a `mesh_body` handle from `find_mesh_using_ray`. Legacy `body` handles are accepted when their tokens resolve to a mesh body.
 
 Errors: `invalid_input`, `handle_invalid`.
 

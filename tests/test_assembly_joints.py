@@ -1,225 +1,279 @@
-"""Joint by-name tools: set_joint_limits + drive_joint."""
+"""Joint script dispatch and read-back tested with local API doubles."""
 
-import ast
-import json
+import math
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
-from fusion_cad_mcp.envelope import Envelope
 from fusion_cad_mcp.tools import assembly as asm
+from tests._assembly_fakes import Collection, NoScriptAdapter, ScriptAdapter
 
 
 def test_set_joint_limits_requires_at_least_one_value():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="at least one"):
         asm.build_set_joint_limits("hinge")
 
 
-def test_set_joint_limits_min_only():
-    src = asm.build_set_joint_limits("hinge", min_value="-45 deg")
-    ast.parse(src)
-    # Limits live on jm.rotationLimits / jm.slideLimits (JointLimits objects),
-    # not on the JointMotion directly, and use isMinimumValueEnabled naming.
-    assert "lim.isMinimumValueEnabled = True" in src
-    assert "isMaximumValueEnabled = True" not in src
-    assert "isRestValueEnabled = True" not in src
-    assert "rotationLimits" in src
-    assert "slideLimits" in src
-    # Expressions must be evaluated via unitsManager; .realValue on a string
-    # ValueInput raises "Value does not contain a real" inside Fusion.
-    assert "evaluateExpression" in src
-    assert ".realValue" not in src
-    assert '"-45 deg"' in src
-
-
-def test_set_joint_limits_min_max_rest():
-    src = asm.build_set_joint_limits(
-        "hinge", min_value="-45 deg", max_value="45 deg", rest_value="0 deg"
+def _motion_adapter(monkeypatch, motion, evaluate, is_valid=lambda expr, units: True):
+    joint = SimpleNamespace(name="hinge", jointMotion=motion)
+    return ScriptAdapter(
+        monkeypatch,
+        SimpleNamespace(
+            rootComponent=SimpleNamespace(joints=Collection([joint])),
+            unitsManager=SimpleNamespace(evaluateExpression=evaluate, isValidExpression=is_valid),
+        ),
     )
-    ast.parse(src)
-    assert "lim.isMinimumValueEnabled = True" in src
-    assert "lim.isMaximumValueEnabled = True" in src
-    assert "lim.isRestValueEnabled = True" in src
-    # Response reads back what Fusion actually stored.
-    assert "min_value_internal" in src
+
+
+def test_set_joint_limits_min_only(monkeypatch):
+    limits = SimpleNamespace(
+        isMinimumValueEnabled=False, minimumValue=0,
+        isMaximumValueEnabled=True, maximumValue=1.5,
+        isRestValueEnabled=False, restValue=0.5,
+    )
+    evaluate = Mock(return_value=-math.pi / 4)
+    env = asm.set_joint_limits(
+        _motion_adapter(monkeypatch, SimpleNamespace(rotationLimits=limits), evaluate),
+        "hinge", min_value="-45 deg",
+    )
+
+    assert env.ok is True
+    evaluate.assert_called_once_with("-45 deg", "deg")
+    assert limits.minimumValue == -math.pi / 4
+    assert limits.isMinimumValueEnabled is True
+    assert limits.maximumValue == 1.5
+    assert limits.restValue == 0.5
+    assert env.result["applied"] == {
+        "min_enabled": True, "min_value_internal": -math.pi / 4,
+        "max_enabled": True, "max_value_internal": 1.5,
+        "rest_enabled": False, "rest_value_internal": None,
+    }
+
+
+def test_set_joint_limits_min_max_rest(monkeypatch):
+    limits = SimpleNamespace(
+        isMinimumValueEnabled=False, isMaximumValueEnabled=False, isRestValueEnabled=False
+    )
+    evaluate = Mock(side_effect=[-1.2, 0.8, 0.2])
+    env = asm.set_joint_limits(
+        _motion_adapter(monkeypatch, SimpleNamespace(slideLimits=limits), evaluate),
+        "hinge", min_value="-12 mm", max_value="8 mm", rest_value="2 mm",
+    )
+
+    assert env.ok is True
+    assert [call.args for call in evaluate.call_args_list] == [
+        ("-12 mm", "mm"), ("8 mm", "mm"), ("2 mm", "mm"),
+    ]
+    assert env.result["limits_kind"] == "slide"
+    assert env.result["applied"] == {
+        "min_enabled": True, "min_value_internal": -1.2,
+        "max_enabled": True, "max_value_internal": 0.8,
+        "rest_enabled": True, "rest_value_internal": 0.2,
+    }
+
+
+def test_set_joint_limits_preflights_later_invalid_expression(monkeypatch):
+    limits = SimpleNamespace(isMinimumValueEnabled=False, minimumValue=0)
+    evaluate = Mock(return_value=-1.2)
+    validate = Mock(side_effect=[True, False])
+    adapter = _motion_adapter(monkeypatch, SimpleNamespace(slideLimits=limits), evaluate, validate)
+
+    env = asm.set_joint_limits(adapter, "hinge", min_value="-12 mm", max_value="8 deg")
+
+    assert env.error == "expression_invalid" and env.result["expression"] == "8 deg"
+    assert vars(limits) == {"isMinimumValueEnabled": False, "minimumValue": 0}
+    evaluate.assert_called_once_with("-12 mm", "mm")
 
 
 def test_drive_joint_requires_value():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="value expression required"):
         asm.build_drive_joint("hinge", "")
 
 
-def test_drive_joint_tries_multiple_motion_attrs():
-    src = asm.build_drive_joint("hinge", "30 deg")
-    ast.parse(src)
-    assert "rotationValue" in src
-    assert "slideValue" in src
-    # Evaluated per attribute with matching measure (deg / mm), never realValue
-    # (filter comment lines: the generated code documents the dead API).
-    assert "evaluateExpression" in src
-    code_lines = [line for line in src.splitlines() if not line.strip().startswith("#")]
-    assert all(".realValue" not in line for line in code_lines)
-    assert '"30 deg"' in src
-    # Fusion silently clamps beyond-limit drives; response must expose it.
-    assert '"applied"' in src
+@pytest.mark.parametrize(
+    ("attr", "units", "expr", "requested"),
+    [("rotationValue", "deg", "30 deg", math.pi / 6), ("slideValue", "mm", "12 mm", 1.2)],
+    ids=["rotation", "slide"],
+)
+def test_drive_joint_uses_matching_units_and_readback(monkeypatch, attr, units, expr, requested):
+    class LimitedMotion:
+        def __init__(self):
+            self.writes = []
+            setattr(self, attr, 0.1)
+            self.writes.clear()
+
+        def __setattr__(self, name, value):
+            if name == attr:
+                self.writes.append(value)
+                value = min(value, 0.2)
+            super().__setattr__(name, value)
+
+    motion = LimitedMotion()
+    evaluate = Mock(return_value=requested)
+    env = asm.drive_joint(_motion_adapter(monkeypatch, motion, evaluate), "hinge", expr)
+
+    assert env.ok is True
+    evaluate.assert_called_once_with(expr, units)
+    assert motion.writes == [requested]
+    assert env.result["drove"] == attr
+    assert env.result["applied"] is False
+    assert env.result["requested_internal"] == requested
+    assert env.result["value_internal"] == 0.2
 
 
-# ---------- create_joint ----------
+def _h(kind, token):
+    return f"{kind}:body:{token}"
 
 
-def _h(kind, path="b", token="tok"):
-    return f"{kind}:{path}:{token}"
-
-
-def test_build_create_joint_rigid_face_face_parses():
-    src = asm.build_create_joint(_h("face", token="t1"), _h("face", token="t2"))
-    ast.parse(src)
-    assert "setAsRigidJointMotion" in src
-    assert "createByPlanarFace" in src
-    # Both resolve blocks present
-    assert '"t1"' in src
-    assert '"t2"' in src
-
-
-def test_build_create_joint_revolute_uses_axis_enum():
-    src = asm.build_create_joint(
-        _h("face", token="a"), _h("face", token="b"), motion_type="revolute", axis="z"
+def _joint_adapter(monkeypatch, *, kind="face", fail=None):
+    api_type = {"face": "BRepFace", "edge": "BRepEdge", "vertex": "BRepVertex", "point": "SketchPoint"}
+    entities = {
+        token: SimpleNamespace(objectType=f"adsk::fusion::{api_type[kind]}") for token in ("a", "b")
+    }
+    geometries = [object(), object()]
+    geometry = SimpleNamespace(
+        createByPlanarFace=Mock(
+            side_effect=geometries if fail != "non_planar" else [None, None],
+        ),
+        createByNonPlanarFace=Mock(side_effect=geometries),
+        createByCurve=Mock(side_effect=geometries),
+        createByPoint=Mock(side_effect=geometries),
     )
-    assert "setAsRevoluteJointMotion" in src
-    assert "ZAxisJointDirection" in src
-
-
-def test_build_create_joint_slider_x_axis():
-    src = asm.build_create_joint(
-        _h("edge", token="a"), _h("edge", token="b"), motion_type="slider", axis="x"
+    joint_input = SimpleNamespace(**{
+        f"setAs{motion}JointMotion": Mock()
+        for motion in ("Rigid", "Revolute", "Slider", "Cylindrical", "Ball")
+    })
+    joint = SimpleNamespace(name="Default", entityToken="joint-token")
+    joints = SimpleNamespace(
+        createInput=Mock(return_value=None if fail == "input_none" else joint_input),
+        add=Mock(
+            return_value=None if fail == "add_none" else joint,
+            side_effect=RuntimeError("JointInput rejected") if fail == "add_exception" else None,
+        ),
     )
-    assert "setAsSliderJointMotion" in src
-    assert "XAxisJointDirection" in src
-    # Edges use createByCurve with MiddleKeyPoint
-    assert "createByCurve" in src
-    assert "MiddleKeyPoint" in src
-
-
-def test_build_create_joint_cylindrical_y_axis():
-    src = asm.build_create_joint(
-        _h("face", token="a"), _h("face", token="b"), motion_type="cylindrical", axis="y"
+    directions = SimpleNamespace(**{f"{a}AxisJointDirection": object() for a in "XYZ"})
+    key_points = SimpleNamespace(CenterKeyPoint=object(), MiddleKeyPoint=object())
+    adapter = ScriptAdapter(
+        monkeypatch,
+        SimpleNamespace(
+            rootComponent=SimpleNamespace(joints=joints),
+            findEntityByToken=lambda token: [entities[token]],
+        ),
+        core={"ValueInput": SimpleNamespace(createByString=lambda value: ("expression", value))},
+        fusion={"JointGeometry": geometry, "JointDirections": directions,
+                "JointKeyPointTypes": key_points},
     )
-    assert "setAsCylindricalJointMotion" in src
-    assert "YAxisJointDirection" in src
-
-
-def test_build_create_joint_ball_uses_z_pitch_x_yaw():
-    src = asm.build_create_joint(
-        _h("vertex", token="a"), _h("vertex", token="b"), motion_type="ball", axis="z"
+    return SimpleNamespace(
+        adapter=adapter, geometry=geometry, entities=entities, geometries=geometries,
+        joints=joints, joint_input=joint_input, joint=joint, directions=directions,
+        key_points=key_points,
     )
-    assert "setAsBallJointMotion" in src
-    # Fusion only accepts pitch=Z, yaw=X; every other principal-axis combo
-    # raises "Invalid parameter pitchDirection/yawDirection" (verified live).
-    assert "ZAxisJointDirection" in src
-    assert "XAxisJointDirection" in src
-    assert "YAxisJointDirection" not in src
-    # Vertices use createByPoint
-    assert "createByPoint" in src
 
 
-def test_build_create_joint_point_kind_uses_sketch_point():
-    src = asm.build_create_joint(
-        _h("point", token="a"), _h("point", token="b"), motion_type="rigid"
+@pytest.mark.parametrize(
+    ("kind", "motion", "axis", "constructor", "key_point", "motion_axes"),
+    [
+        ("face", "rigid", "z", "createByPlanarFace", "CenterKeyPoint", ""),
+        ("face", "revolute", "z", "createByPlanarFace", "CenterKeyPoint", "Z"),
+        ("edge", "slider", "x", "createByCurve", "MiddleKeyPoint", "X"),
+        ("face", "cylindrical", "y", "createByPlanarFace", "CenterKeyPoint", "Y"),
+        ("vertex", "ball", "z", "createByPoint", None, "ZX"),
+        ("point", "rigid", "z", "createByPoint", None, ""),
+    ],
+    ids=["rigid_faces", "revolute_z", "slider_x", "cylindrical_y", "ball_pitch_yaw", "sketch_points"],
+)
+def test_create_joint_uses_entity_geometry_and_motion_dispatch(
+    monkeypatch, kind, motion, axis, constructor, key_point, motion_axes
+):
+    fake = _joint_adapter(monkeypatch, kind=kind)
+
+    env = asm.create_joint(fake.adapter, _h(kind, "a"), _h(kind, "b"), motion, axis)
+
+    assert env.ok is True
+    geometry_args = [call.args for call in getattr(fake.geometry, constructor).call_args_list]
+    extra = (None,) if kind == "face" else ()
+    if key_point:
+        extra += (getattr(fake.key_points, key_point),)
+    assert geometry_args == [(fake.entities[token], *extra) for token in ("a", "b")]
+    fake.joints.createInput.assert_called_once_with(*fake.geometries)
+    getattr(fake.joint_input, f"setAs{motion.title()}JointMotion").assert_called_once_with(
+        *(getattr(fake.directions, f"{a}AxisJointDirection") for a in motion_axes)
     )
-    assert "createBySketchPoint" in src
+    fake.joints.add.assert_called_once_with(fake.joint_input)
+    assert env.result["joint_token"] == "joint-token"
+    assert env.result["motion_type"] == motion
+    assert env.result["axis"] == axis
+    assert env.result["offset_mm"] is None
+    assert env.result["angle_deg"] is None
 
 
-def test_build_create_joint_offset_and_angle():
-    src = asm.build_create_joint(
-        _h("face", token="a"),
-        _h("face", token="b"),
-        motion_type="revolute",
-        axis="z",
-        offset_mm="9 mm",
-        angle_deg="0 deg",
+def test_create_joint_passes_offset_angle_and_renames(monkeypatch):
+    fake = _joint_adapter(monkeypatch)
+    env = asm.create_joint(
+        fake.adapter, _h("face", "a"), _h("face", "b"), motion_type="revolute",
+        offset_mm="9 mm", angle_deg="0 deg", name="hinge_main",
     )
-    assert 'joint_input.offset = adsk.core.ValueInput.createByString("9 mm")' in src
-    assert 'joint_input.angle = adsk.core.ValueInput.createByString("0 deg")' in src
+
+    assert env.ok is True
+    assert fake.joint_input.offset == ("expression", "9 mm")
+    assert fake.joint_input.angle == ("expression", "0 deg")
+    assert env.result["joint_name"] == fake.joint.name == "hinge_main"
 
 
-def test_build_create_joint_renames_when_name_given():
-    src = asm.build_create_joint(_h("face", token="a"), _h("face", token="b"), name="hinge_main")
-    assert 'joint.name = "hinge_main"' in src
+def test_create_joint_tries_non_planar_geometry_when_planar_returns_none(monkeypatch):
+    fake = _joint_adapter(monkeypatch, fail="non_planar")
+    env = asm.create_joint(fake.adapter, _h("face", "a"), _h("face", "b"))
+
+    assert env.ok is True
+    assert fake.geometry.createByPlanarFace.call_count == 2
+    assert [call.args for call in fake.geometry.createByNonPlanarFace.call_args_list] == [
+        (fake.entities[token], fake.key_points.CenterKeyPoint) for token in ("a", "b")
+    ]
+    fake.joints.createInput.assert_called_once_with(*fake.geometries)
 
 
 def test_build_create_joint_rejects_bad_motion_type():
-    with pytest.raises(ValueError):
-        asm.build_create_joint(_h("face", token="a"), _h("face", token="b"), motion_type="spring")
+    with pytest.raises(ValueError, match="motion_type must be"):
+        asm.build_create_joint(_h("face", "a"), _h("face", "b"), motion_type="spring")
 
 
 def test_build_create_joint_rejects_bad_axis():
-    with pytest.raises(ValueError):
-        asm.build_create_joint(_h("face", token="a"), _h("face", token="b"), axis="w")
+    with pytest.raises(ValueError, match="axis must be"):
+        asm.build_create_joint(_h("face", "a"), _h("face", "b"), axis="w")
 
 
-def test_build_create_joint_rejects_non_origin_handle_kind():
-    with pytest.raises(ValueError):
-        asm.build_create_joint(_h("body", token="a"), _h("face", token="b"))
-
-
-def test_create_joint_passes_through_payload():
-    class A:
-        def execute_script(self, s):
-            self.s = s
-            return Envelope(
-                ok=True,
-                message=json.dumps(
-                    {
-                        "ok": True,
-                        "joint_name": "Joint1",
-                        "joint_token": "abc",
-                        "motion_type": "revolute",
-                        "axis": "z",
-                        "offset_mm": "9 mm",
-                        "angle_deg": None,
-                    }
-                ),
-            )
-
-    a = A()
-    env = asm.create_joint(
-        a,
-        _h("face", token="t1"),
-        _h("face", token="t2"),
-        motion_type="revolute",
-        axis="z",
-        offset_mm="9 mm",
-    )
-    assert env.ok is True
-    assert env.result["joint_name"] == "Joint1"
-    assert env.result["offset_mm"] == "9 mm"
+@pytest.mark.parametrize("slot", [0, 1])
+def test_build_create_joint_rejects_non_origin_handle_kind(slot):
+    origins = [_h("face", "a"), _h("face", "b")]
+    origins[slot] = _h("body", "not-a-joint-origin")
+    which = ("one", "two")[slot]
+    with pytest.raises(ValueError, match=f"geometry_{which} kind 'body' unsupported"):
+        asm.build_create_joint(*origins)
 
 
 def test_create_joint_short_circuits_on_invalid_input():
-    class A:
-        def execute_script(self, s):
-            raise AssertionError("must not reach Fusion on validation failure")
-
-    env = asm.create_joint(A(), _h("face", token="a"), _h("face", token="b"), motion_type="spring")
+    env = asm.create_joint(
+        NoScriptAdapter(), _h("face", "a"), _h("face", "b"), motion_type="spring"
+    )
     assert env.ok is False
     assert env.error == "invalid_input"
 
 
-def test_create_joint_surfaces_joints_add_failed():
-    payload = {
-        "ok": False,
-        "error": "joints_add_failed",
-        "detail": "JointInput rejected by Fusion",
-        "motion_type": "revolute",
-        "axis": "z",
-    }
+@pytest.mark.parametrize(
+    ("fail", "error"),
+    [("input_none", "joint_input_failed"), ("add_none", "joints_add_failed"),
+     ("add_exception", "joints_add_failed")],
+)
+def test_create_joint_surfaces_rejected_input_or_add(monkeypatch, fail, error):
+    fake = _joint_adapter(monkeypatch, fail=fail)
+    env = asm.create_joint(fake.adapter, _h("face", "a"), _h("face", "b"), motion_type="revolute")
 
-    class A:
-        def execute_script(self, s):
-            return Envelope(ok=True, message=json.dumps(payload))
-
-    env = asm.create_joint(
-        A(), _h("face", token="a"), _h("face", token="b"), motion_type="revolute"
-    )
     assert env.ok is False
-    assert env.error == "joints_add_failed"
-    assert "rejected" in env.result["detail"]
+    assert env.error == error
+    if fail == "input_none":
+        fake.joints.add.assert_not_called()
+    else:
+        fake.joints.add.assert_called_once_with(fake.joint_input)
+    if fail == "add_exception":
+        assert env.result["detail"] == "JointInput rejected"

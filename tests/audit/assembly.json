@@ -1,0 +1,1022 @@
+{
+  "tests/test_assembly.py::test_bodies_to_components_parses_and_iterates_mapping": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Token checks could pass even if the loop never converts anything. Replaced by executing two distinct bodies, checking calls and names."
+  },
+  "tests/test_assembly.py::test_bodies_to_components_renames_component_and_restores_body_name": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Runs public conversion, observes both createComponent calls and restoration of body and component names. The double does not prove preservation of world position."
+  },
+  "tests/test_assembly.py::test_bodies_to_components_rejects_empty": {
+    "disposition": "delete",
+    "evidence": "direct input validation",
+    "rationale": "Duplicate of the public wrapper case, which also prohibits dispatch and checks the invalid_input diagnostic."
+  },
+  "tests/test_assembly.py::test_bodies_to_components_short_circuits_on_empty": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks exact wrapper error and validation detail with an adapter that raises if dispatched."
+  },
+  "tests/test_assembly.py::test_bodies_to_components_preflights_later_ambiguous_selector": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "An ambiguous second selector leaves every body unmodified, including the first valid one."
+  },
+  "tests/test_assembly.py::test_move_translation_only_converts_mm_to_cm": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Starts from a non-origin pose, captures the written transform, and checks reported mm values and the no-snapshot branch."
+  },
+  "tests/test_assembly.py::test_move_rotation_only_uses_radians": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks the actual rotation API receives pi/2 and an origin converted from mm. The matrix double does not simulate physical rotation."
+  },
+  "tests/test_assembly.py::test_move_component_breaks_ground_and_verifies_motion": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The old assertions looked for flag names and described ungrounding, which reverses the current contract. Replaced by grounded refusal and transform read-back cases."
+  },
+  "tests/test_assembly.py::test_move_rejects_grounded_occurrence_without_writing_transform[isGroundToParent]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A parent-grounded occurrence retains its flag and receives no transform or snapshot write."
+  },
+  "tests/test_assembly.py::test_move_rejects_grounded_occurrence_without_writing_transform[isGrounded]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A pinned occurrence retains its flag and receives no transform or snapshot write."
+  },
+  "tests/test_assembly.py::test_move_preserves_existing_pending_transforms": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "An existing pending snapshot blocks the move before writing or capturing any transform."
+  },
+  "tests/test_assembly.py::test_move_reverts_failed_transform_without_capturing_it": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "An unexpected transform read-back restores the original position and skips snapshot capture."
+  },
+  "tests/test_assembly.py::test_move_reports_snapshot_reverting_requested_transform[False]": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Capture retains a verified move and clears the pending state."
+  },
+  "tests/test_assembly.py::test_move_reports_snapshot_reverting_requested_transform[True]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A snapshot double changes the transform during capture. The script reports the mismatch and removes only the snapshot it created."
+  },
+  "tests/test_assembly.py::test_move_rejects_axis_without_angle": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the specific missing-angle diagnostic."
+  },
+  "tests/test_assembly.py::test_move_rejects_nothing": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the specific requirement for a translation or rotation."
+  },
+  "tests/test_assembly.py::test_move_rejects_bad_translation_length": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks three-coordinate input is required."
+  },
+  "tests/test_assembly.py::test_move_translation_only_emits_python_none_not_json_null": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Translation execution now asserts both optional rotation fields decode to None, catching an undefined null at runtime."
+  },
+  "tests/test_assembly.py::test_move_rotation_emits_concrete_list_not_repr_with_None": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Rotation execution already asserts the result preserves the actual axis and angle supplied."
+  },
+  "tests/test_assembly.py::test_ground_emits_true_flag": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced by observing the actual pin and parent flag writes on the selected instance."
+  },
+  "tests/test_assembly.py::test_unground_emits_false_flag": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced by ungrounding a parent-grounded, unpinned instance and confirming the read-back."
+  },
+  "tests/test_assembly.py::test_ground_tool_writes_selected_occurrence[ground]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "The selected instance acquires both flags; an occurrence of the same component is unaffected."
+  },
+  "tests/test_assembly.py::test_ground_tool_writes_selected_occurrence[unground]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "The selected instance starts parent-grounded only and becomes movable; the other instance retains both flags."
+  },
+  "tests/test_assembly.py::test_rigid_group_requires_at_least_2_components": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the specific minimum member count diagnostic."
+  },
+  "tests/test_assembly.py::test_rigid_group_parses": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced source checks for API names with actual calls and output on add success and API rejection."
+  },
+  "tests/test_assembly.py::test_rigid_group_passes_selected_occurrences[created]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks ordered exact instances, includeChildren, and assigned/read-back group name."
+  },
+  "tests/test_assembly.py::test_rigid_group_passes_selected_occurrences[rejected]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Injects an over-constraint error in add and verifies the structured result."
+  },
+  "tests/test_assembly.py::test_contact_set_requires_at_least_2_bodies": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the specific minimum body count diagnostic."
+  },
+  "tests/test_assembly.py::test_contact_set_parses": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced assertions that names appear in source with actual calls using distinct same-named occurrence bodies."
+  },
+  "tests/test_assembly.py::test_contact_set_uses_selected_occurrence_body": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks exact instance identity and order in the design contact-set collection call."
+  },
+  "tests/test_assembly.py::test_interference_requires_at_least_2": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the specific minimum entity count diagnostic."
+  },
+  "tests/test_assembly.py::test_interference_parses_and_reports_per_pair_volume": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Source presence could not establish that pair results were enumerated or converted. Replaced by executing the call and reading a pair."
+  },
+  "tests/test_assembly.py::test_interference_reports_per_pair_volume": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Verifies mixed body/occurrence inputs, coincident-face setting, and volume conversion from a returned pair. The double does not detect real intersections."
+  },
+  "tests/test_assembly.py::test_ground_requires_name": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks exact error and proves no script submission for a blank selector."
+  },
+  "tests/test_assembly_identity.py::test_occurrence_paths_and_ambiguity": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Checks exact object identity for qualified selectors and complete candidate paths for ambiguous body and occurrence names."
+  },
+  "tests/test_assembly_identity.py::test_context_handle_and_scripts_compile": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Broad syntax and forbidden-string assertions replaced by executing contextual measure scripts with native and already-contextual entities. Other generators run in their own tests."
+  },
+  "tests/test_assembly_identity.py::test_measure_restores_or_retains_selected_assembly_context[create_proxy]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks native resolution requests two specific nested occurrence proxies and measures those exact objects."
+  },
+  "tests/test_assembly_identity.py::test_measure_restores_or_retains_selected_assembly_context[use_existing_proxy]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks an already contextual entity is retained, while the other native entity is converted to its requested occurrence."
+  },
+  "tests/test_assembly_identity.py::test_measure_rejects_token_proxy_in_another_occurrence": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A token resolved in the wrong occurrence produces occurrence_mismatch before resolving the second handle."
+  },
+  "tests/test_assembly_identity.py::test_scoped_handle_rejects_other_or_duplicate_documents_and_token_matches": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Split distinct document and token failures into separate cases and asserted lookup is suppressed on document rejection."
+  },
+  "tests/test_assembly_identity.py::test_scoped_handle_rejects_other_or_duplicate_documents_and_token_matches[creation-document_scope_mismatch]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "A different creation ID is rejected before token lookup, even with the same file ID."
+  },
+  "tests/test_assembly_identity.py::test_scoped_handle_rejects_other_or_duplicate_documents_and_token_matches[file-document_scope_mismatch]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "A different saved file ID is rejected before token lookup, even with the same creation ID."
+  },
+  "tests/test_assembly_identity.py::test_scoped_handle_rejects_other_or_duplicate_documents_and_token_matches[duplicate_doc-document_scope_ambiguous_or_unavailable]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Duplicate open documents with the same scope are rejected before token lookup."
+  },
+  "tests/test_assembly_identity.py::test_scoped_handle_rejects_other_or_duplicate_documents_and_token_matches[duplicate_entity-ambiguous_token]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Multiple token matches are rejected rather than choosing the first."
+  },
+  "tests/test_assembly_identity.py::test_scoped_handle_rejects_other_or_duplicate_documents_and_token_matches[entity_type-wrong_type]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "A face handle resolving to an edge produces the specific wrong_type diagnostic."
+  },
+  "tests/test_assembly_identity.py::test_unsaved_scope_still_resolves_after_initial_save": {
+    "disposition": "keep",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "The same unsaved scoped handle resolves before and after the test document receives a file ID."
+  },
+  "tests/test_assembly_identity.py::test_nested_occurrence_proxies_are_distinct_instances": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Checks both exact nested paths select different proxy objects despite sharing a component definition."
+  },
+  "tests/test_assembly_identity.py::test_measurements_use_each_occurrence_proxy": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Uses two instance-specific boxes and centers with distinct X positions, checks all coordinate conversions and ambiguity through the public wrappers."
+  },
+  "tests/test_assembly_identity.py::test_health_reports_suppressed_rolled_back_and_unknown": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks six health labels and their tally, distinguishes sketches from features, and verifies unknown status fails the envelope."
+  },
+  "tests/test_assembly_joints.py::test_set_joint_limits_requires_at_least_one_value": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the missing-limits diagnostic."
+  },
+  "tests/test_assembly_joints.py::test_set_joint_limits_min_only": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Verifies rotation-unit evaluation, minimum write, and preservation/read-back of untouched maximum and rest settings."
+  },
+  "tests/test_assembly_joints.py::test_set_joint_limits_min_max_rest": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Runs the slide branch, checks all three expressions in mm and resulting internal limits."
+  },
+  "tests/test_assembly_joints.py::test_set_joint_limits_preflights_later_invalid_expression": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A unit-invalid later expression returns a structured error before changing any earlier limit."
+  },
+  "tests/test_assembly_joints.py::test_drive_joint_requires_value": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the missing drive expression diagnostic."
+  },
+  "tests/test_assembly_joints.py::test_drive_joint_tries_multiple_motion_attrs": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced method-name checks by separate rotation and slide execution cases with clamped write-back."
+  },
+  "tests/test_assembly_joints.py::test_drive_joint_uses_matching_units_and_readback[rotation]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks degree evaluation and requested vs actual after the rotation setter double clamps."
+  },
+  "tests/test_assembly_joints.py::test_drive_joint_uses_matching_units_and_readback[slide]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks mm evaluation and requested vs actual after the slider setter double clamps."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_rigid_face_face_parses": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with rigid_faces dispatch case checking both resolved objects and joint creation calls."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_revolute_uses_axis_enum": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with revolute_z dispatch case verifying the actual setter receives Z."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_slider_x_axis": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with slider_x dispatch case verifying curve geometry, middle key point and X direction."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_cylindrical_y_axis": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with cylindrical_y dispatch case verifying the cylindrical setter receives Y."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_ball_uses_z_pitch_x_yaw": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with ball_pitch_yaw case checking exact direction arguments in order."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_point_kind_uses_sketch_point": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The previous test protected the nonexistent createBySketchPoint call. The replacement uses Autodesk's documented createByPoint with a SketchPoint."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_uses_entity_geometry_and_motion_dispatch[rigid_faces]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks planar-face center geometry for both inputs, rigid motion without axes, and returned joint token."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_uses_entity_geometry_and_motion_dispatch[revolute_z]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks two planar-face geometries and the Z axis for the revolute motion request."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_uses_entity_geometry_and_motion_dispatch[slider_x]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks two edge geometries with the middle key point and X axis for slider motion."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_uses_entity_geometry_and_motion_dispatch[cylindrical_y]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks two planar-face geometries and Y axis for cylindrical motion."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_uses_entity_geometry_and_motion_dispatch[ball_pitch_yaw]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks both BRep vertices and Z then X for ball pitch and yaw."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_uses_entity_geometry_and_motion_dispatch[sketch_points]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "The double exposes Autodesk's documented createByPoint for both SketchPoint inputs, catching the previous wrong method."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_offset_and_angle": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with an execution case inspecting both stored ValueInput arguments."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_renames_when_name_given": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with actual joint object rename and read-back."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_passes_offset_angle_and_renames": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks supplied string inputs reach their own offset and angle properties and the created joint is renamed."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_tries_non_planar_geometry_when_planar_returns_none": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Exercises the documented null result from the planar constructor and verifies non-planar geometry reaches createInput."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_rejects_bad_motion_type": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the invalid motion-type diagnostic."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_rejects_bad_axis": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the invalid axis diagnostic."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_rejects_non_origin_handle_kind": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Split validation for geometry_one and geometry_two into explicit cases."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_rejects_non_origin_handle_kind[0]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects a body handle in the first origin slot."
+  },
+  "tests/test_assembly_joints.py::test_build_create_joint_rejects_non_origin_handle_kind[1]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects a body handle in the second origin slot."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_passes_through_payload": {
+    "disposition": "delete",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Supplied a finished joint response and never verified its generation. Dispatch and optional-input cases now exercise the real wrapper and script together."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_short_circuits_on_invalid_input": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "A rejecting adapter proves invalid motion never dispatches."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_surfaces_joints_add_failed": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Injected a final structured error instead of a failure in add. Replacement injects API failures and checks the wrapper result."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_surfaces_rejected_input_or_add[input_none-joint_input_failed]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A null JointInput returns a structured error and never calls add."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_surfaces_rejected_input_or_add[add_none-joints_add_failed]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A null result from add produces an error instead of dereferencing an absent joint."
+  },
+  "tests/test_assembly_joints.py::test_create_joint_surfaces_rejected_input_or_add[add_exception-joints_add_failed]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A thrown add error becomes joints_add_failed with the actual diagnostic."
+  },
+  "tests/test_handles.py::test_parse_handle_basic": {
+    "disposition": "keep",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Asserts all three fields of a simple body handle."
+  },
+  "tests/test_handles.py::test_parse_handle_path_can_have_slashes_and_indices": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Adds an occurrence colon to the path and checks the full parsed dictionary, including the padded token."
+  },
+  "tests/test_handles.py::test_parse_handle_empty_path_ok": {
+    "disposition": "keep",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Checks the accepted legacy empty-path form preserves its token."
+  },
+  "tests/test_handles.py::test_parse_handle_rejects_unknown_kind": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Asserts the unknown-kind diagnostic for syntactically well-formed input."
+  },
+  "tests/test_handles.py::test_parse_handle_rejects_malformed": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Turns the original sequential checks into separately identifiable cases and adds an empty-token case."
+  },
+  "tests/test_handles.py::test_parse_handle_rejects_malformed[not_a_handle]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Plain text has no handle delimiters and must produce the malformed diagnostic."
+  },
+  "tests/test_handles.py::test_parse_handle_rejects_malformed[body:no_token]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "One delimiter is insufficient to split kind, path, and token."
+  },
+  "tests/test_handles.py::test_parse_handle_rejects_malformed[]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "An empty string is not a handle."
+  },
+  "tests/test_handles.py::test_parse_handle_rejects_malformed[body:plate:]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "A path and both delimiters cannot compensate for an empty token."
+  },
+  "tests/test_handles.py::test_is_handle_true_for_well_formed": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Separates body and indexed, padded edge cases."
+  },
+  "tests/test_handles.py::test_is_handle_true_for_well_formed[body:plate:tok]": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Checks the cheap predicate recognizes the basic body form."
+  },
+  "tests/test_handles.py::test_is_handle_true_for_well_formed[edge:body/edge[0]:tok==]": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Checks the predicate accepts path indexing and token padding."
+  },
+  "tests/test_handles.py::test_is_handle_false_for_garbage": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "Separates a body name, empty string, and a non-string."
+  },
+  "tests/test_handles.py::test_is_handle_false_for_garbage[plate_v3]": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "A regular body name falls through the handle predicate."
+  },
+  "tests/test_handles.py::test_is_handle_false_for_garbage[]": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "The predicate returns False for empty text."
+  },
+  "tests/test_handles.py::test_is_handle_false_for_garbage[None]": {
+    "disposition": "improve",
+    "evidence": "direct Python parser or predicate",
+    "rationale": "The predicate returns False for non-string input rather than raising."
+  },
+  "tests/test_handles.py::test_emit_resolve_includes_token_and_error_block": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced with execution of the exact token lookup and missing-token error branch."
+  },
+  "tests/test_handles.py::test_emit_resolve_reports_missing_token_and_stops": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Checks the exact token lookup, structured failure, and early return."
+  },
+  "tests/test_handles.py::test_emit_resolve_unwraps_basevector": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Supplies a genuinely non-list, indexable vector double and asserts unwrapped identity."
+  },
+  "tests/test_handles.py::test_emit_resolve_many_indexes_helpers": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced internal variable-name assertions with the observable list and lookup order."
+  },
+  "tests/test_handles.py::test_emit_resolve_many_returns_ordered_entities": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Uses two different entities and reversed token order to verify actual list construction."
+  },
+  "tests/test_handles.py::test_emit_make_handle_builds_runtime_expression": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced concatenation token checks with execution of the emitted expression for saved and unsaved documents."
+  },
+  "tests/test_handles.py::test_emit_make_handle_builds_runtime_expression[unsaved]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Parses the emitted handle and checks the exact document ID, occurrence-like colon in the path, and padded entity token."
+  },
+  "tests/test_handles.py::test_emit_make_handle_builds_runtime_expression[saved]": {
+    "disposition": "improve",
+    "evidence": "emitted resolver fragment executed with local Fusion API doubles",
+    "rationale": "Additionally verifies the emitted file-scope key for an existing data file."
+  },
+  "tests/test_handles.py::test_emit_make_handle_rejects_unknown_kind": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks that handle producers reject an unknown kind with the specific diagnostic."
+  },
+  "tests/test_handle_tools.py::test_list_body_entities_all_kinds": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Runs the bridge on a nested occurrence body, verifying three runtime tokens, coordinate conversion, and occurrence/document scope."
+  },
+  "tests/test_handle_tools.py::test_list_body_entities_face_normal_filter": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Runs normal evaluation on a matching face, a side, an opposite face, and a failed evaluator; only the matching token remains."
+  },
+  "tests/test_handle_tools.py::test_list_body_entities_edge_parallel_z_filter": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Discriminates a reversed Z line, a diagonal line, and a curved edge with a Z-parallel chord."
+  },
+  "tests/test_handle_tools.py::test_list_body_entities_min_edge_length_converts_mm_to_cm": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks the threshold boundary and closed-circle length without endpoint data, exposing the old chord algorithm."
+  },
+  "tests/test_handle_tools.py::test_list_body_entities_rejects_unknown_kind": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the invalid entity-kind diagnostic."
+  },
+  "tests/test_handle_tools.py::test_build_measure_distance": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced source token checks with execution that checks entity arguments, distance units, and contact points."
+  },
+  "tests/test_handle_tools.py::test_build_measure_angle": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced method-name checks with execution of angle dispatch and radians-to-degrees conversion."
+  },
+  "tests/test_handle_tools.py::test_measure_dispatches_resolved_entities_and_converts_result[distance]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks exact token lookup order, arguments, converted distance, and both positions."
+  },
+  "tests/test_handle_tools.py::test_measure_dispatches_resolved_entities_and_converts_result[min_distance]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks min_distance uses the same manager call and returns scalar values without dereferencing position fields."
+  },
+  "tests/test_handle_tools.py::test_measure_dispatches_resolved_entities_and_converts_result[angle]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks angle manager dispatch on the exact entities and verifies radian and degree values."
+  },
+  "tests/test_handle_tools.py::test_build_measure_rejects_unknown_kind": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Asserts the unknown measurement-kind diagnostic."
+  },
+  "tests/test_handle_tools.py::test_measure_short_circuits_on_bad_handle": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "An adapter that raises if dispatched preserves the existing validation guarantee."
+  },
+  "tests/test_handle_tools.py::test_build_find_mesh_using_ray_default_root": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced conversion and method string checks with Autodesk's two-return API shape and scoped handle round-trip."
+  },
+  "tests/test_handle_tools.py::test_find_mesh_using_ray_default_root": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks root invocation, cm ray origin, names and scoped mesh handles, then consumes the returned handle with the collision tool."
+  },
+  "tests/test_handle_tools.py::test_build_find_mesh_using_ray_with_component": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced string embedding checks with a root-space ray and exact occurrence path filtering."
+  },
+  "tests/test_handle_tools.py::test_find_mesh_using_ray_with_component": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks root-space origin, occurrence and descendant handle paths, exclusion of similarly named occurrences, and rejection of missing or ambiguous scopes."
+  },
+  "tests/test_handle_tools.py::test_find_mesh_using_ray_rejects_bad_origin": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Fails the test if an invalid origin triggers any adapter dispatch."
+  },
+  "tests/test_handle_tools.py::test_build_ray_collision_with_mesh_uses_calculateCollisionsWithRay": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The method name was present but an actual MeshBody was rejected by the old BRepBody guard. Replaced with real script execution against a MeshBody API double."
+  },
+  "tests/test_handle_tools.py::test_ray_collision_resolves_mesh_body_and_converts_hit_points[mesh_handle]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks canonical mesh_body resolution, real ray arguments, and conversion of two returned Point3D values."
+  },
+  "tests/test_handle_tools.py::test_ray_collision_resolves_mesh_body_and_converts_hit_points[legacy_body_prefix]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks a legacy body-prefixed mesh token remains usable at the mesh-only entry point."
+  },
+  "tests/test_handle_tools.py::test_ray_collision_rejects_bad_handle": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the precise invalid_input result and blocks adapter dispatch."
+  },
+  "tests/test_handle_tools.py::test_build_fillet_edges_resolves_each_handle": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks all three resolved objects in the edge collection, the radius expression, the tangent flag, and the input passed to add."
+  },
+  "tests/test_handle_tools.py::test_fillet_edges_rejects_empty_list": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks invalid_input and fails if the script is submitted."
+  },
+  "tests/test_handle_tools.py::test_build_chamfer_edges_equal": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Executes the no-argument createInput2 and equal-distance edge-set request, and checks the supplied edge and expression."
+  },
+  "tests/test_handle_tools.py::test_chamfer_two_dist_requires_distance2": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Checks the missing second-distance diagnostic."
+  },
+  "tests/test_handle_tools.py::test_build_project_to_sketch_resolves_entities": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks ordered exact inputs, linked project2 call, and the resulting sketch entity count."
+  },
+  "tests/test_handle_tools.py::test_project_to_sketch_uses_qualified_sketch_proxy": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A same-named root sketch cannot intercept an exact nested target; the selected occurrence's sketch proxy receives project2."
+  },
+  "tests/test_handle_tools.py::test_project_to_sketch_refuses_ambiguous_or_shared_targets[outline-sketch_ambiguous]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "An unqualified repeated sketch reports ambiguity before handle resolution."
+  },
+  "tests/test_handle_tools.py::test_project_to_sketch_refuses_ambiguous_or_shared_targets[Part:2 / outline-shared_component_edit_unsupported]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "An exact path to a repeated definition still rejects mutating the shared sketch, before token resolution."
+  },
+  "tests/test_verify.py::test_build_bbox_parses_and_has_run": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The actual bounding box entry point now executes the generated run function, checking stronger behavior than AST shape."
+  },
+  "tests/test_verify.py::test_build_volume_walks_components": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Reads one root body and one nested instance and checks both volume units and exact paths."
+  },
+  "tests/test_verify.py::test_build_mass_uses_physical_properties": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced property-name assertions with executed mass, volume, material and density extraction."
+  },
+  "tests/test_verify.py::test_build_center_of_mass_returns_mm": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The shared source's multiplier could appear outside center-of-mass extraction. Replaced by real converted coordinates in test_measurements_use_each_occurrence_proxy."
+  },
+  "tests/test_verify.py::test_name_filter_omitted_emits_None": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Omitted-selector behavior is exercised across multiple body instances in volume and occurrence measurement tests."
+  },
+  "tests/test_verify.py::test_name_filter_provided_is_json_safe": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The original fallback accepted any source containing weird. Replacement selects an actual body with quotes, backslash and Unicode in its name."
+  },
+  "tests/test_verify.py::test_bounding_box_parses_well_formed_response": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Replaced a hard-coded bounding box envelope with executed measurement extraction and unit conversion."
+  },
+  "tests/test_verify.py::test_bounding_box_reads_exact_quoted_name_and_converts_coordinates": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks exact selection among two bodies, escape preservation, min/max conversion, and three computed extents."
+  },
+  "tests/test_verify.py::test_body_not_found_surfaces_structured_error": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Executes a genuinely missing selector against a different body, verifying selector and empty candidates in the returned diagnostic."
+  },
+  "tests/test_verify.py::test_unparseable_stdout_surfaces_parse_error": {
+    "disposition": "keep",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Synthetic malformed stdout isolates parser-failure behavior and raw message preservation."
+  },
+  "tests/test_verify.py::test_mass_returns_material_field": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Feeding material in a response did not show that the script reads it. Replacement executes with physical property and material objects."
+  },
+  "tests/test_verify.py::test_mass_reads_material_and_physical_properties": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Verifies mass, volume and material name extraction, including the documented kg/cm³ to kg/m³ density conversion."
+  },
+  "tests/test_verify.py::test_build_audit_feature_health_parses_and_runs": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Execution cases now invoke the generated entry point and assert the actual audit result."
+  },
+  "tests/test_verify.py::test_audit_includes_health_state_labels": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Label literals alone could not show classification; execution cases now check state-to-label output and counts."
+  },
+  "tests/test_verify.py::test_audit_walks_sub_components": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Nested feature and sketch rows are now observed in audit output."
+  },
+  "tests/test_verify.py::test_audit_default_skips_healthy": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced the literal-condition assertion with actual omission from rows while retaining the healthy summary count."
+  },
+  "tests/test_verify.py::test_audit_include_healthy_flag": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced the literal-condition assertion with the actual healthy row in the enabled case."
+  },
+  "tests/test_verify.py::test_audit_component_filter_emits_json_safe_value": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The prior input had no special characters. The executed component-filter test now uses a quoted name."
+  },
+  "tests/test_verify.py::test_audit_component_filter_none_emits_none": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The no-filter default is exercised by audit cases that include root and nested components together."
+  },
+  "tests/test_verify.py::test_audit_run_wrapper_parses_healthy_response": {
+    "disposition": "delete",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Passing an invented healthy summary back to the wrapper did not establish auditing. The real script now produces its healthy tally and row filtering."
+  },
+  "tests/test_verify.py::test_audit_surfaces_broken_features": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Replaced a prefilled warning and failure envelope with actual warning/failed entity states, categories and diagnostics."
+  },
+  "tests/test_verify.py::test_audit_reports_health_across_components[skip_healthy]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks recompute, exact warning/failed labels and messages for nested feature/sketch rows, and healthy counting without a healthy row."
+  },
+  "tests/test_verify.py::test_audit_reports_health_across_components[include_healthy]": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks enabling the flag adds the healthy root row while leaving the same summary."
+  },
+  "tests/test_verify.py::test_audit_no_active_design_surfaces_error": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Executes against a non-design active product and verifies the wrapper's actual structured failure."
+  },
+  "tests/test_verify.py::test_audit_summary_respects_component_filter": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "The selected quoted component is counted and the root component's failed feature is excluded."
+  },
+  "tests/test_verify.py::test_audit_stops_if_recompute_fails": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "A false recompute result must return an error without trying to access the root component."
+  },
+  "tests/test_parameters.py::test_build_add_is_valid_python": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The public add test now compiles and invokes the generated entry point."
+  },
+  "tests/test_parameters.py::test_build_add_embeds_defs_as_json": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The old test required a serialization implementation that generated invalid Python for null or booleans. Runtime coverage checks quoted Unicode text, null defaults and an extra boolean."
+  },
+  "tests/test_parameters.py::test_build_add_uses_itemByName_for_idempotency": {
+    "disposition": "improve",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Replaced API text with a two-call add scenario observing preserved existing values and skipped duplicates."
+  },
+  "tests/test_parameters.py::test_build_update_is_valid_python": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The updated script executes through the public wrapper and checks actual mutation and returned data."
+  },
+  "tests/test_parameters.py::test_build_update_quotes_safely": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Uses actual quotes, backslash, Unicode and a newline through the Python boundary; the double intentionally does not evaluate Fusion expressions."
+  },
+  "tests/test_parameters.py::test_build_list_is_valid_python": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The list test executes the script against two parameter objects and checks all returned fields."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Separates the six original names and routes them through the public validation gate."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected[pi]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects the pi constant before dispatch and names it in the error."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected[e]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects the e constant before dispatch and names it in the error."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected[sin]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects sin before dispatch and names it in the error."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected[cos]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects cos before dispatch and names it in the error."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected[sqrt]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects sqrt before dispatch and names it in the error."
+  },
+  "tests/test_parameters.py::test_reserved_math_name_is_rejected[log]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Rejects log before dispatch and names it in the error."
+  },
+  "tests/test_parameters.py::test_empty_defs_rejected": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Folded into the public validation cases, which also prohibit dispatch."
+  },
+  "tests/test_parameters.py::test_missing_expression_rejected": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Folded into the public validation cases with a field-specific error."
+  },
+  "tests/test_parameters.py::test_numeric_leading_name_rejected": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Folded into the public validation cases with the leading-character diagnostic."
+  },
+  "tests/test_parameters.py::test_valid_def_passes": {
+    "disposition": "delete",
+    "evidence": "direct input validation",
+    "rationale": "Successful add and preserved existing values exercise accepted definitions through the normal entry point."
+  },
+  "tests/test_parameters.py::test_add_parameters_short_circuits_on_bad_def": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "Splits distinct invalid definition shapes into explicit public validation cases."
+  },
+  "tests/test_parameters.py::test_add_parameters_short_circuits_on_bad_def[empty]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "An empty list triggers the specific non-empty requirement before dispatch."
+  },
+  "tests/test_parameters.py::test_add_parameters_short_circuits_on_bad_def[missing_expression]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "A missing expression is diagnosed for the exact definition index."
+  },
+  "tests/test_parameters.py::test_add_parameters_short_circuits_on_bad_def[leading_digit]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "A leading digit triggers the name-start rule before dispatch."
+  },
+  "tests/test_parameters.py::test_add_parameters_short_circuits_on_bad_def[invalid_comment]": {
+    "disposition": "improve",
+    "evidence": "direct input validation",
+    "rationale": "A non-string, non-null optional field is rejected before it reaches the Fusion API."
+  },
+  "tests/test_parameters.py::test_add_parameters_passes_through_on_success": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Replaced the prefilled add response with an actual add against a mutable parameter collection."
+  },
+  "tests/test_parameters.py::test_add_parameters_preserves_existing_and_round_trips_definitions": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Verifies idempotent bulk add on repeat invocation, existing-expression preservation, optional defaults and literal safety."
+  },
+  "tests/test_parameters.py::test_update_parameter_rejects_empty_name": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Validates blank names and prohibits dispatch."
+  },
+  "tests/test_parameters.py::test_update_parameter_returns_param_not_found_from_fusion": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Replaced a supplied error envelope with lookup returning None inside the generated script."
+  },
+  "tests/test_parameters.py::test_update_parameter_returns_param_not_found_from_script": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks exact name passed to itemByName and the structured missing-parameter error."
+  },
+  "tests/test_parameters.py::test_list_parameters_parses_param_list": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "A predetermined count could pass with a broken list generator; replaced by enumerating actual collection fields."
+  },
+  "tests/test_parameters.py::test_list_parameters_reads_collection_fields": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Verifies count and every field for a dimensioned and unitless parameter."
+  },
+  "tests/test_doc_state.py::test_build_returns_valid_python": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The actual generated entry point now runs across parametric, direct and absent design cases."
+  },
+  "tests/test_doc_state.py::test_build_imports_required_modules": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "Required imports are exercised by executing the script; string checks were redundant."
+  },
+  "tests/test_doc_state.py::test_build_handles_no_active_design": {
+    "disposition": "delete",
+    "evidence": "static generated source or syntax only",
+    "rationale": "The test_script_reports_no_active_design case directly checks the exact actual payload."
+  },
+  "tests/test_doc_state.py::test_script_reports_parametric_design_fully": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Checks the full public envelope result, counts, units, metadata and absence of unavailable fields."
+  },
+  "tests/test_doc_state.py::test_script_returns_partial_state_on_direct_design": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "The direct design double raises at userParameters and timeline access; both remain null with explanations while feature count and other state are preserved."
+  },
+  "tests/test_doc_state.py::test_script_does_not_swallow_unrelated_errors": {
+    "disposition": "keep",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "An unrelated RuntimeError injected into parameter access still escapes, guarding against an overbroad partial-state exception handler."
+  },
+  "tests/test_doc_state.py::test_script_reports_no_active_design": {
+    "disposition": "improve",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Executes the no-design path through the wrapper and checks the exact success payload."
+  },
+  "tests/test_doc_state.py::test_run_parses_well_formed_response": {
+    "disposition": "delete",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "The parametric execution test now checks the actual JSON decoded by the same wrapper."
+  },
+  "tests/test_doc_state.py::test_run_passes_direct_design_state_through": {
+    "disposition": "delete",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "The old invented result incorrectly marked features unavailable; actual execution verifies the complete direct-design state."
+  },
+  "tests/test_doc_state.py::test_run_surfaces_adapter_error_unchanged": {
+    "disposition": "improve",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Checks the exact failed Envelope instance is returned unchanged, preserving adapter diagnostics."
+  },
+  "tests/test_doc_state.py::test_run_handles_unparseable_stdout": {
+    "disposition": "keep",
+    "evidence": "synthetic adapter envelope",
+    "rationale": "Checks deliberately malformed stdout gets a doc_state_parse_failed result and preserves the original message."
+  }
+}

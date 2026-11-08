@@ -18,39 +18,10 @@ import json
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
+from ..resolver import RESOLVER_SCRIPT
 
-_FIND_BODY_HELPER = """
-def _find_body(root, name):
-    def walk(comp):
-        for i in range(comp.bRepBodies.count):
-            b = comp.bRepBodies.item(i)
-            if b.name == name: return b
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                r = walk(occ.component)
-                if r: return r
-        return None
-    return walk(root)
-"""
-
-_FIND_OCC_HELPER = """
-def _find_occurrence(root, name):
-    for i in range(root.occurrences.count):
-        occ = root.occurrences.item(i)
-        if occ.name == name or occ.component.name == name:
-            return occ
-    # search nested
-    def walk(comp):
-        for i in range(comp.occurrences.count):
-            occ = comp.occurrences.item(i)
-            if occ.name == name or occ.component.name == name:
-                return occ
-            r = walk(occ.component)
-            if r: return r
-        return None
-    return walk(root)
-"""
+_FIND_BODY_HELPER = RESOLVER_SCRIPT
+_FIND_OCC_HELPER = RESOLVER_SCRIPT
 
 
 def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
@@ -94,16 +65,22 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
+    pending = []
+    for body_name, comp_name in {mapping!r}.items():
+        b, error = _select_body(root, body_name)
+        if error:
+            print(json.dumps(error)); return
+        if getattr(b, "assemblyContext", None) is not None:
+            print(json.dumps({{"ok": False, "error": "body_not_in_root", "name": body_name}})); return
+        pending.append((b, body_name, comp_name))
+
     converted = []
-    for body_name, comp_name in {json.dumps(mapping)}.items():
-        b = _find_body(root, body_name)
-        if b is None:
-            print(json.dumps({{"ok": False, "error": "body_not_found", "name": body_name}})); return
+    for b, body_name, comp_name in pending:
         # BRepBody.createComponent() preserves world position.
         # Features.createComponentFromBodyFeatures does not exist.
         new_body = b.createComponent()
         if new_body is None:
-            print(json.dumps({{"ok": False, "error": "create_component_failed", "name": body_name}})); return
+            print(json.dumps({{"ok": False, "error": "create_component_failed", "name": body_name, "converted": converted}})); return
         new_body.parentComponent.name = comp_name
         # createComponent() renames the body to the component default. Restore
         # the original so name-based addressing survives the conversion.
@@ -169,31 +146,66 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    occ = _find_occurrence(root, {json.dumps(name)})
-    if occ is None:
-        print(json.dumps({{"ok": False, "error": "occurrence_not_found", "name": {json.dumps(name)}}})); return
+    occ, error = _select_occurrence(root, {name!r})
+    if error:
+        print(json.dumps(error)); return
 
     matrix = adsk.core.Matrix3D.create()
     matrix.translation = adsk.core.Vector3D.create({tx}, {ty}, {tz})
 {rotation_block}
-    # Compose with the current transform. Do NOT roll the timeline first: that
-    # reverts the pending transform, making the move a silent no-op and
-    # breaking snapshots.add() on jointed components. Ground must also be
-    # broken first, or snapshots.add() snaps the occurrence back.
-    if getattr(occ, 'isGroundToParent', False):
-        occ.isGroundToParent = False
-    before = occ.transform2.translation
+    if getattr(occ, 'isGroundToParent', False) or getattr(occ, 'isGrounded', False):
+        print(json.dumps({{"ok": False, "error": "occurrence_grounded", "name": {name!r}}})); return
+    snapshots = design.snapshots
+    # A snapshot captures all pending occurrence changes in the design.
+    if snapshots.hasPendingSnapshot:
+        print(json.dumps({{"ok": False, "error": "pending_assembly_transforms"}})); return
+
+    original = occ.transform2
+    before_transform = list(original.asArray())
+    before = original.translation
     before_mm = [before.x * 10, before.y * 10, before.z * 10]
     current = occ.transform2
     current.transformBy(matrix)
-    occ.transform2 = current
-    if design.snapshots.hasPendingSnapshot:
-        design.snapshots.add()  # commit the move
+    expected_transform = list(current.asArray())
 
-    # Read back the position so joint-solver overrides are visible to callers.
-    after = occ.transform2.translation
+    def matches(actual, expected):
+        return all(abs(a - b) <= 1e-7 for a, b in zip(actual, expected))
+
+    snapshot = None
+    after_transform = None
+    error = 'move_not_achieved'
+    try:
+        occ.transform2 = current
+        after_transform = list(occ.transform2.asArray())
+        if not matches(after_transform, expected_transform):
+            raise RuntimeError('Fusion did not apply the requested transform')
+        if snapshots.hasPendingSnapshot:
+            error = 'move_snapshot_failed'
+            snapshot = snapshots.add()
+            if snapshot is None or snapshots.hasPendingSnapshot:
+                raise RuntimeError('Fusion did not capture the requested transform')
+        error = 'move_not_achieved'
+        actual = occ.transform2
+        after_transform = list(actual.asArray())
+        if not matches(after_transform, expected_transform):
+            raise RuntimeError('Fusion changed the transform while capturing it')
+    except Exception as exc:
+        try:
+            deleted = snapshot is None or snapshot.deleteMe()
+            if not snapshots.hasPendingSnapshot and not matches(occ.transform2.asArray(), before_transform):
+                occ.transform2 = original
+            reverted = not snapshots.hasPendingSnapshot or snapshots.revertPendingSnapshot()
+            rolled_back = bool(deleted and reverted and not snapshots.hasPendingSnapshot
+                               and matches(occ.transform2.asArray(), before_transform))
+        except Exception:
+            rolled_back = False
+        print(json.dumps({{"ok": False, "error": error, "detail": str(exc),
+            "before_transform": before_transform, "expected_transform": expected_transform,
+            "after_transform": after_transform, "rolled_back": rolled_back}})); return
+
+    after = actual.translation
     after_mm = [after.x * 10, after.y * 10, after.z * 10]
-    moved = any(abs(a - b) > 1e-6 for a, b in zip(after_mm, before_mm))
+    moved = any(abs(a - b) > 1e-8 for a, b in zip(after_transform, before_transform))
 
     # repr(), not json: None must render as Python None, not null.
     print(json.dumps({{
@@ -205,6 +217,8 @@ def run(_ctx):
         "before_translation_mm": [round(v, 4) for v in before_mm],
         "after_translation_mm": [round(v, 4) for v in after_mm],
         "moved": moved,
+        "before_transform": before_transform,
+        "after_transform": after_transform,
     }}))
 """
 
@@ -241,12 +255,15 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
 
-    occ = _find_occurrence(root, {json.dumps(name)})
-    if occ is None:
-        print(json.dumps({{"ok": False, "error": "occurrence_not_found", "name": {json.dumps(name)}}})); return
+    occ, error = _select_occurrence(root, {json.dumps(name)})
+    if error:
+        print(json.dumps(error)); return
 
     occ.isGrounded = {flag}
-    print(json.dumps({{"ok": True, "component": {json.dumps(name)}, "isGrounded": occ.isGrounded}}))
+    if hasattr(occ, 'isGroundToParent') and occ.isGroundToParent != {flag}:
+        occ.isGroundToParent = {flag}
+    print(json.dumps({{"ok": True, "component": {json.dumps(name)}, "isGrounded": occ.isGrounded,
+                       "isGroundToParent": getattr(occ, 'isGroundToParent', None)}}))
 """
 
 
@@ -282,9 +299,9 @@ def run(_ctx):
     occs = adsk.core.ObjectCollection.create()
     found = []
     for nm in {json.dumps(component_names)}:
-        occ = _find_occurrence(root, nm)
-        if occ is None:
-            print(json.dumps({{"ok": False, "error": "occurrence_not_found", "name": nm}})); return
+        occ, error = _select_occurrence(root, nm)
+        if error:
+            print(json.dumps(error)); return
         occs.add(occ)
         found.append(nm)
 
@@ -323,19 +340,7 @@ def build_create_contact_set(body_names: list[str]) -> str:
         raise ValueError("contact set requires at least 2 body names")
     return f"""\
 {_header()}
-# ContactSets needs root-context bodies: use the assembly-context proxies from
-# occ.bRepBodies, not the native bodies a plain component walk returns.
-def _find_body_proxy(root, name):
-    for i in range(root.bRepBodies.count):
-        b = root.bRepBodies.item(i)
-        if b.name == name: return b
-    for i in range(root.allOccurrences.count):
-        occ = root.allOccurrences.item(i)
-        for j in range(occ.bRepBodies.count):
-            b = occ.bRepBodies.item(j)
-            if b.name == name: return b
-    return None
-
+{RESOLVER_SCRIPT}
 
 def run(_ctx):
     app = adsk.core.Application.get()
@@ -347,9 +352,9 @@ def run(_ctx):
     bodies = []
     found = []
     for nm in {json.dumps(body_names)}:
-        b = _find_body_proxy(root, nm)
-        if b is None:
-            print(json.dumps({{"ok": False, "error": "body_not_found", "name": nm}})); return
+        b, error = _select_body(root, nm)
+        if error:
+            print(json.dumps(error)); return
         bodies.append(b)
         found.append(nm)
 
@@ -391,12 +396,16 @@ def run(_ctx):
     entities = adsk.core.ObjectCollection.create()
     found = []
     for nm in {json.dumps(entity_names)}:
-        # try body first, then occurrence
-        item = _find_body(root, nm)
-        kind = 'body'
-        if item is None:
-            item = _find_occurrence(root, nm)
-            kind = 'occurrence'
+        item, body_error = _select_body(root, nm)
+        occ, occ_error = _select_occurrence(root, nm)
+        if body_error and body_error['error'] == 'body_ambiguous':
+            print(json.dumps(body_error)); return
+        if occ_error and occ_error['error'] == 'occurrence_ambiguous':
+            print(json.dumps(occ_error)); return
+        if item is not None and occ is not None:
+            print(json.dumps({{"ok": False, "error": "entity_ambiguous", "name": nm}})); return
+        kind = 'body' if item is not None else 'occurrence'
+        item = item if item is not None else occ
         if item is None:
             print(json.dumps({{"ok": False, "error": "entity_not_found", "name": nm}})); return
         entities.add(item)
@@ -457,30 +466,11 @@ def build_set_joint_limits(
     # units (radians / cm), so expressions go through
     # unitsManager.evaluateExpression with deg/mm as the measure.
     # ValueInput.createByString(...).realValue raises on string inputs.
-    min_block = ""
-    if min_value is not None:
-        min_block = (
-            f"    _v = _eval({json.dumps(min_value)})\n"
-            f"    if _v is None: return\n"
-            f"    lim.isMinimumValueEnabled = True\n"
-            f"    lim.minimumValue = _v\n"
-        )
-    max_block = ""
-    if max_value is not None:
-        max_block = (
-            f"    _v = _eval({json.dumps(max_value)})\n"
-            f"    if _v is None: return\n"
-            f"    lim.isMaximumValueEnabled = True\n"
-            f"    lim.maximumValue = _v\n"
-        )
-    rest_block = ""
-    if rest_value is not None:
-        rest_block = (
-            f"    _v = _eval({json.dumps(rest_value)})\n"
-            f"    if _v is None: return\n"
-            f"    lim.isRestValueEnabled = True\n"
-            f"    lim.restValue = _v\n"
-        )
+    requested = [(flag, attr, expr) for flag, attr, expr in (
+        ("isMinimumValueEnabled", "minimumValue", min_value),
+        ("isMaximumValueEnabled", "maximumValue", max_value),
+        ("isRestValueEnabled", "restValue", rest_value),
+    ) if expr is not None]
 
     return f"""\
 {_header()}
@@ -515,16 +505,23 @@ def run(_ctx):
                            "motion_class": jm.classType()}})); return
     units = 'deg' if limits_kind == 'rotation' else 'mm'
 
-    def _eval(expr):
+    evaluated = []
+    manager = design.unitsManager
+    for flag, attr, expr in {requested!r}:
         try:
-            return design.unitsManager.evaluateExpression(expr, units)
+            if not manager.isValidExpression(expr, units):
+                raise ValueError('Fusion could not evaluate the expression in the expected units')
+            evaluated.append((flag, attr, manager.evaluateExpression(expr, units)))
         except Exception as e:
             print(json.dumps({{"ok": False, "error": "expression_invalid",
                                "expression": expr, "expected_units": units,
                                "detail": str(e)}}))
-            return None
+            return
 
-{min_block}{max_block}{rest_block}
+    for flag, attr, value in evaluated:
+        setattr(lim, flag, True)
+        setattr(lim, attr, value)
+
     # Read back what Fusion actually stored (internal units: radians or cm)
     # so callers can verify the limits took effect.
     print(json.dumps({{
@@ -649,11 +646,13 @@ def _joint_geometry_for_handle(handle_var: str, kind: str) -> str:
             f"        {geom_var} = adsk.fusion.JointGeometry.createByPlanarFace(\n"
             f"            {handle_var}, None, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)\n"
             f"    except Exception:\n"
+            f"        {geom_var} = None\n"
+            f"    if {geom_var} is None:\n"
             f"        {geom_var} = adsk.fusion.JointGeometry.createByNonPlanarFace(\n"
             f"            {handle_var}, adsk.fusion.JointKeyPointTypes.CenterKeyPoint)\n"
             f"    if {geom_var} is None:\n"
             f"        print(json.dumps({{'ok': False, 'error': 'joint_geometry_failed',\n"
-            f"            'kind': 'face', 'detail': 'createByPlanarFace and createByNonPlanarFace both returned None'}})); return\n"
+            f"            'kind': 'face', 'detail': 'Could not create joint geometry from face'}})); return\n"
         )
     if kind == "edge":
         return (
@@ -672,10 +671,10 @@ def _joint_geometry_for_handle(handle_var: str, kind: str) -> str:
         )
     if kind == "point":  # sketch point
         return (
-            f"    {geom_var} = adsk.fusion.JointGeometry.createBySketchPoint({handle_var})\n"
+            f"    {geom_var} = adsk.fusion.JointGeometry.createByPoint({handle_var})\n"
             f"    if {geom_var} is None:\n"
             f"        print(json.dumps({{'ok': False, 'error': 'joint_geometry_failed',\n"
-            f"            'kind': 'point', 'detail': 'createBySketchPoint returned None'}})); return\n"
+            f"            'kind': 'point', 'detail': 'createByPoint returned None'}})); return\n"
         )
     raise ValueError(
         f"handle kind {kind!r} cannot be used as a joint origin; "
@@ -802,6 +801,8 @@ def run(_ctx):
 
     joints = root.joints
     joint_input = joints.createInput(_ent1_geom, _ent2_geom)
+    if joint_input is None:
+        print(json.dumps({{"ok": False, "error": "joint_input_failed"}})); return
 
     # Motion type
 {motion_block}
@@ -815,6 +816,11 @@ def run(_ctx):
             "ok": False, "error": "joints_add_failed",
             "detail": str(e),
             "motion_type": {repr(motion_type)},
+            "axis": {repr(axis)},
+        }})); return
+    if joint is None:
+        print(json.dumps({{
+            "ok": False, "error": "joints_add_failed", "motion_type": {repr(motion_type)},
             "axis": {repr(axis)},
         }})); return
 {rename_block}

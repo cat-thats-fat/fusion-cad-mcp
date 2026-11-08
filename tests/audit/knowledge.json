@@ -1,0 +1,214 @@
+{
+  "tests/test_knowledge.py::test_tokenize_strips_punct_and_lowercases": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: kn._tokenize('MeshBody.calculateCollisionsWithRay') == ['meshbody', 'calculatecollisionswithray']."
+  },
+  "tests/test_knowledge.py::test_tokenize_empty_returns_empty": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: kn._tokenize('') == []; kn._tokenize('   ') == []."
+  },
+  "tests/test_knowledge.py::test_score_record_exact_slug_match_dominates": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: kn._score_record(terms, rec_match) > kn._score_record(terms, rec_unrelated)."
+  },
+  "tests/test_knowledge.py::test_score_record_preview_penalty": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: kn._score_record(terms, rec_stable) > kn._score_record(terms, rec)."
+  },
+  "tests/test_knowledge.py::test_parse_sections_splits_on_hash_headings": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: headings == ['Title', 'A', 'B']."
+  },
+  "tests/test_knowledge.py::test_snippet_returns_context_around_match": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: 'foo' in s; len(s) <= 60."
+  },
+  "tests/test_knowledge.py::test_snippet_falls_back_to_head_when_no_match": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: s.startswith('no match')."
+  },
+  "tests/test_knowledge.py::test_find_api_returns_meshbody_ray_for_known_query": {
+    "disposition": "improve",
+    "evidence": "synthetic corpus integration",
+    "rationale": "Runs real index loading and search against four invented records; does not evaluate ranking quality on Autodesk documentation. Evidence: env.ok is True; len(hits) > 0; 'calculateCollisionsWithRay' in top_slug."
+  },
+  "tests/test_knowledge.py::test_find_api_returns_ucs_for_user_coordinate_system_query": {
+    "disposition": "improve",
+    "evidence": "synthetic corpus integration",
+    "rationale": "Runs real index loading and search against four invented records; does not evaluate ranking quality on Autodesk documentation. Evidence: env.ok is True; any(('UserCoordinateSystem' in s for s in slugs))."
+  },
+  "tests/test_knowledge.py::test_find_api_namespace_filter": {
+    "disposition": "improve",
+    "evidence": "synthetic corpus integration",
+    "rationale": "Runs real index loading and search against four invented records; does not evaluate ranking quality on Autodesk documentation. Evidence: env.ok is True; env.result['matched'] == 1; [h['slug'] for h in env.result['hits']] == ['FusionExport.htm']."
+  },
+  "tests/test_knowledge.py::test_find_api_empty_query_is_structured_error": {
+    "disposition": "improve",
+    "evidence": "synthetic corpus integration",
+    "rationale": "Runs real index loading and search against four invented records; does not evaluate ranking quality on Autodesk documentation. Evidence: env.ok is False; env.error == 'empty_query'."
+  },
+  "tests/test_knowledge.py::test_find_api_returns_corpus_not_built_when_missing": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: env.ok is False; env.error == 'corpus_not_built'."
+  },
+  "tests/test_knowledge.py::test_find_pattern_returns_hits_for_constrained_rect_query": {
+    "disposition": "improve",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: env.ok is True; env.result['matched'] > 0."
+  },
+  "tests/test_knowledge.py::test_find_gotcha_returns_lock_badge_g9": {
+    "disposition": "improve",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: env.ok is True; any(('lock-badge' in h or 'lock badge' in h or 'g9' in h for h in headings))."
+  },
+  "tests/test_knowledge_ranking.py::test_rare_term_outweighs_common_term": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: rare > common."
+  },
+  "tests/test_knowledge_ranking.py::test_repeat_mentions_have_diminishing_returns": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: many > one; many < one * reps / 2."
+  },
+  "tests/test_knowledge_ranking.py::test_covering_more_query_terms_beats_hammering_one": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: covers_all > hammers_one."
+  },
+  "tests/test_knowledge_ranking.py::test_heading_match_still_dominates_body_match": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: in_heading > in_body."
+  },
+  "tests/test_knowledge_ranking.py::test_unknown_term_is_treated_as_rare_not_weightless": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: scored > 0."
+  },
+  "tests/test_knowledge_ranking.py::test_no_match_scores_zero": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: _score_section(['absent'], _sec('x', 'y'), {'absent': 3.0}) == 0.0."
+  },
+  "tests/test_knowledge_ranking.py::test_coverage_floor_is_a_sane_fraction": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: 0.0 < _COVERAGE_FLOOR < 1.0."
+  },
+  "tests/test_knowledge_ranking.py::test_find_tool_ranks_the_named_tool_first": {
+    "disposition": "keep",
+    "evidence": "bundled-document search integration",
+    "rationale": "Queries project-authored knowledge documents and checks a returned ranking or score. Evidence: env.ok; hits; expected_substring in hits[0]['heading'].",
+    "cases": {
+      "pattern_rectangular": "Named tool outranks mentions of direction.",
+      "add_hole": "Named tool outranks face selection discussions.",
+      "set_joint_limits": "Named tool outranks units discussions.",
+      "shell": "Named tool outranks direction discussions.",
+      "export": "Named tool outranks bytes-written references."
+    }
+  },
+  "tests/test_knowledge_ranking.py::test_find_gotcha_ranks_the_right_entry_first": {
+    "disposition": "keep",
+    "evidence": "bundled-document search integration",
+    "rationale": "Queries project-authored knowledge documents and checks a returned ranking or score. Evidence: env.ok; hits; expected_substring in hits[0]['heading'].",
+    "cases": {
+      "ball joint pitch yaw": "Ball joint entry first.",
+      "pattern coincident bodies": "Coincident pattern entry first.",
+      "areaProperties": "Exact API name entry first."
+    }
+  },
+  "tests/test_knowledge_ranking.py::test_scores_are_rounded_for_readability": {
+    "disposition": "keep",
+    "evidence": "bundled-document search integration",
+    "rationale": "Queries project-authored knowledge documents and checks a returned ranking or score. Evidence: isinstance(score, float); math.isclose(score, round(score, 2))."
+  },
+  "tests/test_knowledge_ranking.py::test_tokenizer_keeps_underscored_identifiers_whole": {
+    "disposition": "keep",
+    "evidence": "local unit or knowledge lookup",
+    "rationale": "Tests local scoring, parsing, missing-corpus error, or project-authored document lookup; no external corpus is required. Evidence: 'pattern_rectangular' in _tokenize('call pattern_rectangular now')."
+  },
+  "tests/test_corpus_resume.py::test_full_crawl_reaches_every_page": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: m['scraped'] == 5; _slugs(site) == {'Index.md', 'A.md', 'B.md', 'C.md', 'D.md'}."
+  },
+  "tests/test_corpus_resume.py::test_resume_after_limit_finishes_the_crawl": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: first['scraped'] == 2; first['queue_remaining'] > 0; second['scraped'] == 3; second['frontier_source'] == 'saved'; _slugs(site) == {'Index.md', 'A.md', 'B.md', 'C.md', 'D.md'}."
+  },
+  "tests/test_corpus_resume.py::test_frontier_survives_an_interrupt": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: frontier['pending']; m['frontier_source'] == 'saved'; _slugs(site) == {'Index.md', 'A.md', 'B.md', 'C.md', 'D.md'}; pytest.raises(KeyboardInterrupt)."
+  },
+  "tests/test_corpus_resume.py::test_resume_rebuilds_frontier_from_pages_when_none_saved": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: m['frontier_source'] == 'pages'; m['frontier_restored'] > 0; _slugs(site) == {'Index.md', 'A.md', 'B.md', 'C.md', 'D.md'}."
+  },
+  "tests/test_corpus_resume.py::test_resume_on_a_complete_corpus_is_a_clean_no_op": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: scraper.main(['--resume', '--rate', '0', '--i-accept-autodesk-terms']) == 0."
+  },
+  "tests/test_corpus_resume.py::test_resume_that_recovers_nothing_exits_nonzero": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: rc == 1; 'very likely' in capsys.readouterr().err."
+  },
+  "tests/test_corpus_resume.py::test_extract_links_from_markdown_handles_link_forms": {
+    "disposition": "keep",
+    "evidence": "synthetic crawl with fake network",
+    "rationale": "Runs real scraper against a temporary five-page invented site; makes no network requests or Autodesk corpus claims. Evidence: scraper.extract_links_from_markdown(md) == [BASE + 'A.htm', BASE + 'B.htm', BASE + 'C.htm', BASE + 'D.htm']."
+  },
+  "tests/test_packaged_knowledge.py::test_packaged_copy_exists": {
+    "disposition": "keep",
+    "evidence": "checkout package-resource check",
+    "rationale": "Checks package-tree resources/resolution in the current checkout; installed-wheel behavior is covered separately by wheel_knowledge_smoke.py. Evidence: packaged.exists().",
+    "cases": {
+      "tools.md": "Tool reference included.",
+      "patterns.md": "Pattern reference included.",
+      "gotchas.md": "Gotcha reference included."
+    }
+  },
+  "tests/test_packaged_knowledge.py::test_knowledge_tools_resolve_to_a_real_file": {
+    "disposition": "keep",
+    "evidence": "checkout package-resource check",
+    "rationale": "Checks package-tree resources/resolution in the current checkout; installed-wheel behavior is covered separately by wheel_knowledge_smoke.py. Evidence: _resolve_skill_doc(name) is not None."
+  },
+  "tests/test_version.py::test_package_version_matches_pyproject": {
+    "disposition": "keep",
+    "evidence": "local version metadata",
+    "rationale": "Checks current source package version against project metadata or version format; does not independently inspect a wheel. Evidence: fusion_cad_mcp.__version__ == declared."
+  },
+  "tests/test_version.py::test_version_is_parseable": {
+    "disposition": "keep",
+    "evidence": "local version metadata",
+    "rationale": "Checks current source package version against project metadata or version format; does not independently inspect a wheel. Evidence: re.fullmatch('\\\\d+\\\\.\\\\d+\\\\.\\\\d+', fusion_cad_mcp.__version__)."
+  },
+  "tests/test_packaged_knowledge.py::test_packaged_copy_matches_source": {
+    "disposition": "delete",
+    "evidence": "obsolete source-layout assumption",
+    "rationale": "The asserted comparison targeted a nonexistent src/ documentation location and skipped all three cases. Replaced by a standalone wheel install and isolated search smoke; no fictitious canonical copy is assumed.",
+    "cases": {
+      "tools.md": "Wheel smoke queries find_tool after installation.",
+      "patterns.md": "Wheel smoke queries find_pattern after installation.",
+      "gotchas.md": "Wheel smoke queries find_gotcha after installation."
+    }
+  },
+  "tests/wheel_knowledge_smoke.py::main": {
+    "disposition": "improve",
+    "evidence": "installed wheel subprocess integration",
+    "rationale": "Installs the supplied built wheel with pip into a temporary target, then runs Python isolated from the checkout; verifies packaged document locations and nonempty results for each knowledge search."
+  }
+}

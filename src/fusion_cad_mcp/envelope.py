@@ -1,6 +1,5 @@
 """V2-spec result envelope for tool returns.
 
-Every tool returns the same envelope shape so agents have one parsing contract.
 Every tool returns this shape so clients have one parsing contract.
 """
 
@@ -22,6 +21,7 @@ class Envelope:
     image: dict[str, Any] | None = None  # {data: <base64>, mime_type: "image/png"}
     error: str | None = None
     traceback: str | None = None
+    images: list[dict[str, Any]] | None = None  # all image blocks, if more than one
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None or k == "ok"}
@@ -31,26 +31,14 @@ class Envelope:
 
 
 def from_fusion_response(raw: dict[str, Any]) -> Envelope:
-    """Translate the raw Fusion MCP tools/call response into our envelope.
-
-    Fusion's response shape (observed in the 2026-05-31 spike):
-        {
-          "id": <int>,
-          "jsonrpc": "2.0",
-          "result": {
-            "content": [{"type": "text", "text": "<json-encoded inner>"}]
-          }
-        }
-
-    The inner text payload is JSON with at minimum:
-        { "message": "<stdout>", "success": true | false, "error"?: "...", "traceback"?: "..." }
-    """
-    # Transport-level JSON-RPC error (the request itself failed)
+    """Read native MCP content and Fusion's legacy JSON-encoded text payload."""
     if "error" in raw:
         rpc_err = raw["error"]
+        if not isinstance(rpc_err, dict):
+            return Envelope(ok=False, error="jsonrpc_error")
         return Envelope(
             ok=False,
-            error=rpc_err.get("message", "jsonrpc_error"),
+            error=rpc_err.get("message") or "jsonrpc_error",
             result={"code": rpc_err.get("code")},
         )
 
@@ -59,48 +47,54 @@ def from_fusion_response(raw: dict[str, Any]) -> Envelope:
         return Envelope(ok=False, error="missing_result", message=json.dumps(raw)[:500])
 
     content = result.get("content")
-    if not isinstance(content, list) or not content:
-        return Envelope(ok=False, error="empty_content")
+    texts: list[str] = []
+    parsed_texts: list[tuple[str, Any]] = []
+    images: list[dict[str, Any]] = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "image":
+            data, mime_type = block.get("data"), block.get("mimeType")
+            if isinstance(data, str) and data and isinstance(mime_type, str) and mime_type:
+                images.append({"data": data, "mime_type": mime_type})
+        elif block.get("type") == "text" and isinstance(block.get("text"), str):
+            block_text = block["text"]
+            try:
+                parsed_texts.append((block_text, json.loads(block_text)))
+            except json.JSONDecodeError:
+                texts.append(block_text)
 
-    first = content[0]
-    if not isinstance(first, dict):
-        return Envelope(ok=False, error="unexpected_content_type", result={"content": content})
-
-    ctype = first.get("type")
-
-    # Image responses (e.g. fusion_mcp_read screenshot) come through here
-    if ctype == "image":
-        return Envelope(
-            ok=True,
-            image={"data": first.get("data", ""), "mime_type": first.get("mimeType", "")},
-        )
-
-    if ctype != "text":
-        return Envelope(ok=False, error="unexpected_content_type", result={"content": content})
-
-    text = first.get("text", "")
-
-    # Try to parse the inner JSON payload
-    try:
-        inner = json.loads(text)
-    except json.JSONDecodeError:
-        return Envelope(ok=False, error="inner_not_json", message=text)
-
+    inner = result.get("structuredContent")
     if not isinstance(inner, dict):
-        return Envelope(ok=True, message=text, result={"raw": inner})
+        inner = next((value for _, value in parsed_texts if isinstance(value, dict)), None)
 
-    success = inner.get("success", True)
-    message = inner.get("message", "")
+    message = "\n".join(texts)
+    if inner is not None and isinstance(inner.get("message"), str):
+        message = inner["message"] or message
+    image = images[0] if images else None
+    extra_images = images if len(images) > 1 else None
 
-    if success is False:
+    if result.get("isError") is True or (inner is not None and inner.get("success") is False):
+        details = inner or {}
         return Envelope(
             ok=False,
-            error=inner.get("error") or "fusion_error",
+            error=details.get("error") or "fusion_error",
             message=message,
-            traceback=inner.get("traceback"),
+            traceback=details.get("traceback"),
+            image=image,
+            images=extra_images,
         )
 
-    return Envelope(ok=True, message=message, result=inner)
+    if inner is not None or images:
+        return Envelope(ok=True, message=message, result=inner, image=image, images=extra_images)
+    if parsed_texts:
+        block_text, value = parsed_texts[0]
+        return Envelope(ok=True, message=block_text, result={"raw": value})
+    if texts:
+        return Envelope(ok=True, message=message)
+    if content:
+        return Envelope(ok=False, error="unexpected_content_type", result={"content": content})
+    return Envelope(ok=False, error="empty_content")
 
 
 def parse_stdout_json(envelope: Envelope) -> dict[str, Any] | None:

@@ -16,6 +16,7 @@ import json
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
+from ..resolver import RESOLVER_SCRIPT
 
 
 def _body_walker_script(measurement_block: str, body_name: str | None) -> str:
@@ -31,20 +32,22 @@ import json
 
 NAME_FILTER = {name_filter}
 
-def walk(comp, prefix, entries):
-    for i in range(comp.bRepBodies.count):
-        b = comp.bRepBodies.item(i)
-        if NAME_FILTER is not None and b.name != NAME_FILTER:
-            continue
-        path = prefix + b.name
+{RESOLVER_SCRIPT}
+
+def walk(root, entries):
+    if NAME_FILTER is None:
+        instances = _body_instances(root)
+    else:
+        instances = [(path, b) for path, b in _body_instances(root) if NAME_FILTER in (path, b.name)]
+        body, error = _pick(instances, NAME_FILTER, "body")
+        if error:
+            return error
+    for path, b in instances:
         try:
 {measurement_block}
         except Exception as e:
             entries.append({{"path": path, "error": str(e)}})
-    for j in range(comp.occurrences.count):
-        occ = comp.occurrences.item(j)
-        if occ.component is not None:
-            walk(occ.component, prefix + comp.name + " / ", entries)
+    return None
 
 
 def run(_ctx):
@@ -54,7 +57,9 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}}))
         return
     entries = []
-    walk(design.rootComponent, "", entries)
+    error = walk(design.rootComponent, entries)
+    if error:
+        print(json.dumps(error)); return
     if NAME_FILTER is not None and not entries:
         print(json.dumps({{"ok": False, "error": "body_not_found", "name": NAME_FILTER}}))
         return
@@ -133,114 +138,69 @@ def build_audit_feature_health(
     component_name: str | None = None,
     include_healthy: bool = False,
 ) -> str:
-    """Walk the feature tree (root + every sub-component) and report features
-    whose healthState != 0. Set include_healthy=True to dump every feature.
-
-    Returns a JSON envelope:
-      {ok, summary: {total, healthy, warning, failed}, features: [
-        {path, name, classType, healthState, healthLabel, isSuppressed,
-         errorOrWarningMessage}, ...
-      ]}
-
-    healthState values observed (Fusion May 2026 build):
-      0 = healthy
-      1 = warning (typical: stale profile reference, using cached geometry)
-      2 = failed (typical: fillet could not be created at requested size)
-      3 = failed (variant; also seen for fillets after major upstream changes)
-    """
+    """Recompute and inspect feature and sketch health, including unknown states."""
     comp_filter = "None" if component_name is None else json.dumps(component_name)
     include = "True" if include_healthy else "False"
     return f"""
-import adsk.core
-import adsk.fusion
-import json
+import adsk.core, adsk.fusion, json
+{RESOLVER_SCRIPT}
 
-COMP_FILTER = {comp_filter}
-INCLUDE_HEALTHY = {include}
-
-HEALTH_LABELS = {{0: "healthy", 1: "warning", 2: "failed", 3: "failed"}}
-
-
-def audit_comp(comp, prefix, out):
-    if COMP_FILTER is not None and comp.name != COMP_FILTER:
-        # Still recurse so a deep sub-component matching the filter is reachable.
-        pass
-    else:
-        for i in range(comp.features.count):
-            ft = comp.features.item(i)
-            try:
-                state = int(ft.healthState)
-            except Exception:
-                state = -1
-            if state == 0 and not INCLUDE_HEALTHY:
-                continue
-            try:
-                cls = ft.classType().split("::")[-1]
-            except Exception:
-                cls = "?"
-            try:
-                msg = ft.errorOrWarningMessage or ""
-            except Exception:
-                msg = ""
-            try:
-                supp = bool(ft.isSuppressed)
-            except Exception:
-                supp = False
-            out.append({{
-                "path": prefix + comp.name + " / " + ft.name,
-                "component": comp.name,
-                "name": ft.name,
-                "classType": cls,
-                "healthState": state,
-                "healthLabel": HEALTH_LABELS.get(state, "unknown"),
-                "isSuppressed": supp,
-                "errorOrWarningMessage": msg[:500],
-            }})
-    for j in range(comp.occurrences.count):
-        occ = comp.occurrences.item(j)
-        if occ.component is not None:
-            audit_comp(occ.component, prefix + comp.name + " / ", out)
-
+HEALTH_LABELS = {{0: 'healthy', 1: 'warning', 2: 'failed', 3: 'suppressed', 4: 'rolled_back', 5: 'unknown'}}
+COMPONENT_FILTER = {comp_filter}
 
 def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
     if design is None:
-        print(json.dumps({{"ok": False, "error": "no_active_design"}}))
-        return
+        print(json.dumps({{'ok': False, 'error': 'no_active_design'}})); return
+    try:
+        computed = bool(design.computeAll())
+    except Exception as exc:
+        print(json.dumps({{'ok': False, 'error': 'recompute_failed', 'detail': str(exc)}})); return
+    if not computed:
+        print(json.dumps({{'ok': False, 'error': 'recompute_failed'}})); return
+    root = design.rootComponent
+    components = [(root.name, root)]
+    for i in range(root.allOccurrences.count):
+        occ = root.allOccurrences.item(i)
+        components.append((_occ_path(occ), occ.component))
+    summary = {{'total': 0, 'healthy': 0, 'warning': 0, 'failed': 0, 'suppressed': 0, 'rolled_back': 0, 'unknown': 0}}
     out = []
-    audit_comp(design.rootComponent, "", out)
-    # Summary needs a separate sweep so it's always accurate even when INCLUDE_HEALTHY is False.
-    # COMP_FILTER must apply to both the features list AND the summary (review fix);
-    # always recurse into sub-components, but only count features in matching component(s).
-    summary = {{"total": 0, "healthy": 0, "warning": 0, "failed": 0}}
-
-    def count(comp):
-        if COMP_FILTER is None or comp.name == COMP_FILTER:
-            for i in range(comp.features.count):
-                ft = comp.features.item(i)
-                summary["total"] += 1
+    matched = 0
+    for path, comp in components:
+        if COMPONENT_FILTER is not None and COMPONENT_FILTER not in (path, comp.name):
+            continue
+        matched += 1
+        for category, collection in (('feature', comp.features), ('sketch', comp.sketches)):
+            for i in range(collection.count):
+                entity = collection.item(i)
                 try:
-                    st = int(ft.healthState)
+                    state = int(entity.healthState)
                 except Exception:
-                    st = -1
-                if st == 0:
-                    summary["healthy"] += 1
-                elif st == 1:
-                    summary["warning"] += 1
-                elif st in (2, 3):
-                    summary["failed"] += 1
-        for j in range(comp.occurrences.count):
-            occ = comp.occurrences.item(j)
-            if occ.component is not None:
-                count(occ.component)
-
-    count(design.rootComponent)
-    print(json.dumps({{
-        "ok": True,
-        "summary": summary,
-        "features": out,
-    }}))
+                    state = -1
+                label = HEALTH_LABELS.get(state, 'unknown')
+                summary['total'] += 1
+                summary[label] += 1
+                if state == 0 and not {include}:
+                    continue
+                try:
+                    msg = entity.errorOrWarningMessage or ''
+                except Exception:
+                    msg = ''
+                try:
+                    cls = entity.classType().split('::')[-1]
+                except Exception:
+                    cls = '?'
+                out.append({{'path': path + ' / ' + entity.name, 'component': comp.name,
+                            'name': entity.name, 'classType': cls, 'category': category, 'healthState': state,
+                            'healthLabel': label, 'isSuppressed': getattr(entity, 'isSuppressed', None),
+                            'errorOrWarningMessage': msg[:500]}})
+    if not matched:
+        print(json.dumps({{'ok': False, 'error': 'component_not_found', 'name': COMPONENT_FILTER}})); return
+    if COMPONENT_FILTER is not None and matched > 1:
+        print(json.dumps({{'ok': False, 'error': 'component_ambiguous', 'name': COMPONENT_FILTER}})); return
+    print(json.dumps({{'ok': summary['unknown'] == 0, 'error': 'health_unknown' if summary['unknown'] else None,
+                      'summary': summary, 'features': out, 'recomputed': True}}))
 """.strip()
 
 

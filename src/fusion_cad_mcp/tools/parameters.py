@@ -71,6 +71,9 @@ def _validate_param_defs(defs: list[dict[str, Any]]) -> tuple[bool, str | None]:
             return False, f"defs[{i}].name must be a non-empty string"
         if not isinstance(expr, str) or not expr:
             return False, f"defs[{i}].expression must be a non-empty string"
+        for field in ("units", "comment"):
+            if d.get(field) is not None and not isinstance(d[field], str):
+                return False, f"defs[{i}].{field} must be a string or null"
         if name in RESERVED_MATH_NAMES:
             return False, (
                 f"defs[{i}].name {name!r} is a reserved math identifier; "
@@ -87,16 +90,13 @@ def build_add(defs: list[dict[str, Any]]) -> str:
     Each def is {name, expression, units?, comment?}. Existing params are skipped
     (not overwritten); use update_parameter for in-place edits.
     """
-    # The defs are JSON-encoded into the script so the script is self-contained
-    # and depends on no out-of-band state.
-    encoded = json.dumps(defs)
     return f"""
 import adsk.core
 import adsk.fusion
 import json
 
 
-PARAM_DEFS = {encoded}
+PARAM_DEFS = {defs!r}
 
 
 def run(_ctx):
@@ -112,8 +112,8 @@ def run(_ctx):
     for d in PARAM_DEFS:
         name = d["name"]
         expression = d["expression"]
-        units = d.get("units", "")
-        comment = d.get("comment", "")
+        units = d.get("units") or ""
+        comment = d.get("comment") or ""
         existing = params.itemByName(name)
         if existing is not None:
             skipped.append({{"name": name, "current_expression": existing.expression}})

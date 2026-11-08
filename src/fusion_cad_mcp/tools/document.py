@@ -19,8 +19,8 @@ VALID_CLOSE_CONFIRM = {"save", "discard", "prompt"}
 
 
 def list_open_docs(adapter: FusionAdapter) -> Envelope:
-    """Return the list of recently-open documents from Fusion."""
-    return adapter.read_query("document", operation="recent")
+    """Return documents currently open in Fusion (not the recent-file list)."""
+    return adapter.read_query("document", operation="open")
 
 
 def list_projects(adapter: FusionAdapter) -> Envelope:
@@ -36,12 +36,31 @@ def search_docs(adapter: FusionAdapter, query: str, project: str | None = None) 
     return adapter.read_query("document", **kwargs)
 
 
-def open_doc(adapter: FusionAdapter, name: str, project: str | None = None) -> Envelope:
-    """Open a document by name (fuzzy). Optional project scope."""
-    kwargs: dict = {"operation": "open", "name": name}
-    if project:
-        kwargs["project"] = project
-    return adapter.read_query("document", **kwargs)
+def open_doc(
+    adapter: FusionAdapter, name: str, project: str | None = None, file_id: str | None = None
+) -> Envelope:
+    """Resolve an exact unique name, then execute the documented open operation."""
+    if file_id:
+        return adapter.execute_document_op("open", fileId=file_id)
+    if not isinstance(name, str) or not name.strip():
+        return Envelope(ok=False, error="invalid_name")
+    found = search_docs(adapter, name, project)
+    if not found.ok:
+        return found
+    rows = (found.result or {}).get("results")
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        return Envelope(ok=False, error="document_search_unrecognized")
+    matches = [row for row in rows if row.get("name") == name]
+    if len(matches) != 1:
+        return Envelope(
+            ok=False,
+            error="document_ambiguous" if len(matches) > 1 else "document_not_found",
+            result={"matches": matches},
+        )
+    file_id = matches[0].get("id") or matches[0].get("fileId")
+    if not isinstance(file_id, str) or not file_id:
+        return Envelope(ok=False, error="document_id_missing")
+    return adapter.execute_document_op("open", fileId=file_id)
 
 
 # ---------- write-side: document ops ----------
@@ -55,14 +74,12 @@ def save(adapter: FusionAdapter) -> Envelope:
 
 
 def save_as(adapter: FusionAdapter, path: str) -> Envelope:
-    """Initial save for a new document. Note: Fusion's MCP may still refuse a
-    programmatic SaveAs on Untitled documents and require the user to do it in the UI;
-    the tool surfaces that refusal verbatim.
-    """
-    # Fusion's execute schema accepts fileId for open; save_as isn't a documented
-    # parameter in the schema we probed, so we pass `path` via a flex object key
-    # and let Fusion's MCP either accept it or return its own error message.
-    return adapter.execute_document_op("save", path=path)
+    """A local path is not a valid Fusion cloud save destination."""
+    return Envelope(
+        ok=False,
+        error="save_as_unsupported",
+        message="Use export for a local file, or Fusion's Save dialog for an initial cloud save.",
+    )
 
 
 def close(adapter: FusionAdapter, confirm: str = "prompt") -> Envelope:
@@ -98,7 +115,7 @@ def undo(adapter: FusionAdapter, count: int = 1) -> Envelope:
     atomic transaction; mixed-content scripts (params + geometry) get fully wiped.
     Prefer the delete-loop cleanup pattern in patterns.md when possible.
     """
-    if count < 1:
+    if type(count) is not int or count < 1:
         return Envelope(ok=False, error="invalid_count", message="count must be >= 1")
     last: Envelope | None = None
     for _ in range(count):
@@ -111,7 +128,7 @@ def undo(adapter: FusionAdapter, count: int = 1) -> Envelope:
 
 def redo(adapter: FusionAdapter, count: int = 1) -> Envelope:
     """Run redo `count` times."""
-    if count < 1:
+    if type(count) is not int or count < 1:
         return Envelope(ok=False, error="invalid_count", message="count must be >= 1")
     last: Envelope | None = None
     for _ in range(count):

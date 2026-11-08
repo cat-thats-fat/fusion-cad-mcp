@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from fusion_cad_mcp.envelope import Envelope, from_fusion_response, parse_stdout_json
 
 
@@ -47,6 +49,7 @@ def test_jsonrpc_transport_error():
     env = from_fusion_response(raw)
     assert env.ok is False
     assert env.error == "Method not found"
+    assert env.result == {"code": -32601}
 
 
 def test_empty_content_is_structured_error():
@@ -56,11 +59,11 @@ def test_empty_content_is_structured_error():
     assert env.error == "empty_content"
 
 
-def test_inner_not_json_falls_back_to_message():
+def test_native_plain_text_success_is_preserved():
     raw = _fusion_text_response("not actually json")
     env = from_fusion_response(raw)
-    assert env.ok is False
-    assert env.error == "inner_not_json"
+    assert env.ok is True
+    assert env.error is None
     assert env.message == "not actually json"
 
 
@@ -70,8 +73,11 @@ def test_parse_stdout_json_extracts_dict():
     assert parsed == {"bodies": 3, "sketches": 1}
 
 
-def test_parse_stdout_json_returns_none_for_non_json():
-    env = Envelope(ok=True, message="just a plain message\n")
+@pytest.mark.parametrize(
+    ("ok", "stdout"), [(True, "just a plain message\n"), (True, "[1, 2]"), (False, '{"a":1}')]
+)
+def test_parse_stdout_json_rejects_non_object_or_failed_result(ok, stdout):
+    env = Envelope(ok=ok, message=stdout)
     assert parse_stdout_json(env) is None
 
 
@@ -102,3 +108,52 @@ def test_image_content_parses_into_image_field():
     assert env.image == {"data": "iVBORw0KGgo=", "mime_type": "image/png"}
     # message stays empty for image responses
     assert env.message == ""
+
+
+def test_mcp_is_error_takes_precedence_over_inner_success():
+    raw = _fusion_text_response('{"success":true,"error":"Fusion rejected the command"}')
+    raw["result"]["isError"] = True
+    env = from_fusion_response(raw)
+    assert env.ok is False
+    assert env.error == "Fusion rejected the command"
+
+
+def test_mcp_error_plain_text_is_preserved():
+    raw = _fusion_text_response("Fusion is busy")
+    raw["result"]["isError"] = True
+    env = from_fusion_response(raw)
+    assert env.ok is False
+    assert env.error == "fusion_error"
+    assert env.message == "Fusion is busy"
+
+
+def test_structured_content_takes_precedence_and_retains_all_images_in_order():
+    raw = _fusion_text_response('{"message":"compatibility copy","success":true}')
+    raw["result"]["structuredContent"] = {"message": "structured", "success": True, "count": 2}
+    raw["result"]["content"] += [
+        {"type": "image", "data": "AAAA", "mimeType": "image/png"},
+        {"type": "text", "text": "secondary text"},
+        {"type": "image", "data": "BBBB", "mimeType": "image/png"},
+    ]
+    env = from_fusion_response(raw)
+    assert env.ok and env.message == "structured"
+    assert env.result["count"] == 2
+    assert env.image == env.images[0]
+    assert [image["data"] for image in env.images] == ["AAAA", "BBBB"]
+
+
+def test_structured_content_does_not_require_a_text_copy():
+    raw = {"result": {"structuredContent": {"count": 2}, "content": []}}
+    env = from_fusion_response(raw)
+    assert env.ok and env.result == {"count": 2}
+
+
+def test_text_before_image_preserves_both_without_structured_content():
+    raw = _fusion_text_response("Screenshot caption")
+    raw["result"]["content"].append({"type": "image", "data": "AAAA", "mimeType": "image/png"})
+    env = from_fusion_response(raw)
+    assert env.to_dict() == {
+        "ok": True,
+        "message": "Screenshot caption",
+        "image": {"data": "AAAA", "mime_type": "image/png"},
+    }

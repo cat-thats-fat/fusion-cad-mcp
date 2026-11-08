@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from fusion_cad_mcp.envelope import Envelope
 from fusion_cad_mcp.tools import document
 
@@ -29,10 +31,10 @@ class FakeAdapter:
         return Envelope(ok=True, message="", result={"ok": True})
 
 
-def test_list_open_docs_wraps_recent_op():
+def test_list_open_docs_uses_current_documents_operation():
     a = FakeAdapter()
     document.list_open_docs(a)
-    assert a.calls == [("read_query", {"queryType": "document", "operation": "recent"})]
+    assert a.calls == [("read_query", {"queryType": "document", "operation": "open"})]
 
 
 def test_list_projects_wraps_projects_query():
@@ -58,13 +60,86 @@ def test_search_docs_omits_project_when_none():
     assert "project" not in a.calls[0][1]
 
 
-def test_open_doc_wraps_open_op():
+def test_open_doc_by_id_executes_instead_of_listing():
     a = FakeAdapter()
-    document.open_doc(a, "my-part-v2")
-    assert a.calls[0] == (
-        "read_query",
-        {"queryType": "document", "operation": "open", "name": "my-part-v2"},
+    document.open_doc(a, "", file_id="fixture-id")
+    assert a.calls == [("execute_document_op", {"operation": "open", "fileId": "fixture-id"})]
+
+
+class SearchingAdapter(FakeAdapter):
+    def __init__(self, response):
+        super().__init__()
+        self.response = response
+
+    def read_query(self, query_type, **kwargs):
+        super().read_query(query_type, **kwargs)
+        return self.response
+
+
+def test_open_doc_resolves_unique_exact_match():
+    a = SearchingAdapter(
+        Envelope(
+            ok=True,
+            result={
+                "results": [
+                    {"name": "fixture", "id": "exact-id"},
+                    {"name": "fixture old", "id": "wrong-id"},
+                ]
+            },
+        )
     )
+    result = document.open_doc(a, "fixture", "test-project")
+    assert result.ok
+    assert a.calls == [
+        (
+            "read_query",
+            {
+                "queryType": "document",
+                "operation": "search",
+                "name": "fixture",
+                "project": "test-project",
+            },
+        ),
+        ("execute_document_op", {"operation": "open", "fileId": "exact-id"}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("rows", "error"),
+    [
+        ([], "document_not_found"),
+        ([{"name": "fixture-old", "id": "wrong"}], "document_not_found"),
+        ([{"name": "fixture", "id": "a"}, {"name": "fixture", "id": "b"}], "document_ambiguous"),
+        ([{"name": "fixture"}], "document_id_missing"),
+        (["invalid"], "document_search_unrecognized"),
+        (None, "document_search_unrecognized"),
+    ],
+)
+def test_open_doc_refuses_uncertain_resolution_without_mutation(rows, error):
+    a = SearchingAdapter(Envelope(ok=True, result={"results": rows}))
+    result = document.open_doc(a, "fixture")
+    assert not result.ok and result.error == error
+    assert len(a.calls) == 1 and a.calls[0][0] == "read_query"
+
+
+def test_open_doc_propagates_search_error_without_opening():
+    error = Envelope(ok=False, error="offline")
+    a = SearchingAdapter(error)
+    assert document.open_doc(a, "fixture") is error
+    assert len(a.calls) == 1
+
+
+def test_open_doc_blank_name_never_searches():
+    a = FakeAdapter()
+    assert document.open_doc(a, " ").error == "invalid_name"
+    assert not a.calls
+
+
+def test_save_as_refuses_undocumented_path_parameter():
+    a = FakeAdapter()
+    result = document.save_as(a, "/fixture/design.f3d")
+    assert not result.ok and result.error == "save_as_unsupported"
+    assert not a.calls
 
 
 def test_save_passes_no_extras():
@@ -121,8 +196,6 @@ def test_redo_calls_update_with_redo_kind():
 
 
 def test_undo_stops_on_first_error():
-    a = FakeAdapter()
-
     class ErroringAdapter(FakeAdapter):
         def update(self, kind: str) -> Envelope:
             self.calls.append(("update", {"kind": kind}))
@@ -133,3 +206,25 @@ def test_undo_stops_on_first_error():
     assert env.ok is False
     assert env.error == "no_more_history"
     assert len(a.calls) == 1, "must not keep calling after first failure"
+
+
+@pytest.mark.parametrize("operation", [document.undo, document.redo])
+@pytest.mark.parametrize("count", [-1, 0, 1.5, "2", True, None])
+def test_history_rejects_nonpositive_or_noninteger_without_mutation(operation, count):
+    a = FakeAdapter()
+    result = operation(a, count)
+    assert not result.ok and result.error == "invalid_count"
+    assert not a.calls
+
+
+@pytest.mark.parametrize("operation", [document.undo, document.redo])
+def test_history_preserves_last_success_and_stops_on_later_error(operation):
+    class SequenceAdapter(FakeAdapter):
+        def update(self, kind):
+            super().update(kind)
+            return Envelope(ok=len(self.calls) < 2, error="stop" if len(self.calls) == 2 else None)
+
+    a = SequenceAdapter()
+    result = operation(a, 4)
+    assert not result.ok and result.error == "stop"
+    assert len(a.calls) == 2

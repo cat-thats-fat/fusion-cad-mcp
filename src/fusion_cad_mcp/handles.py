@@ -14,7 +14,7 @@ Lifecycle:
   a structured `handle_invalid` error from any consuming tool.
 
 Kinds (V2 spec Section 5a):
-    sketch, profile, body, face, edge, vertex, feature, component, occurrence,
+    sketch, profile, body, mesh_body, face, edge, vertex, feature, component, occurrence,
     param, joint, ucs, plane, axis, point
 """
 
@@ -28,6 +28,7 @@ VALID_KINDS = frozenset(
         "sketch",
         "profile",
         "body",
+        "mesh_body",
         "face",
         "edge",
         "vertex",
@@ -44,7 +45,7 @@ VALID_KINDS = frozenset(
 )
 
 # token: alphanumeric, +, /, =, _, -, . (entityToken is base64-ish + some symbols)
-_HANDLE_RE = re.compile(r"^([a-z][a-z_]*):([^:]*):([A-Za-z0-9+/=_\-.]+)$")
+_HANDLE_RE = re.compile(r"^([a-z][a-z_]*):(.*):([A-Za-z0-9+/=_\-.]+)$")
 
 
 def parse_handle(s: str) -> dict[str, str]:
@@ -78,39 +79,88 @@ def emit_resolve(handle_str: str, var: str = "_entity", fail_var: str = "_handle
     can catch by checking `{var}` for None.
     """
     h = parse_handle(handle_str)
-    return (
-        f"_h_token = {json.dumps(h['token'])}\n"
-        f"_h_str = {json.dumps(handle_str)}\n"
-        f"_found = design.findEntityByToken(_h_token)\n"
-        f"if not _found:\n"
-        f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid',"
-        f" 'detail': {{'handle': _h_str, 'reason': 'not_found_in_active_doc'}}}}));\n"
-        f"    return\n"
-        # Fusion's findEntityByToken returns a BaseVector (SWIG-wrapped
-        # std::vector), not a Python list. BaseVector is indexable via [0]
-        # and supports len() but has none of .item/.count/.classType. Lists
-        # and tuples also satisfy len()+[0]. Bare entities (rare) don't.
-        f"{var} = _found[0] if hasattr(_found, '__len__') else _found\n"
+    types = {"sketch": "Sketch", "profile": "Profile", "body": "BRepBody", "mesh_body": "MeshBody",
+             "face": "BRepFace", "edge": "BRepEdge", "vertex": "BRepVertex",
+             "feature": "Feature", "component": "Component", "occurrence": "Occurrence",
+             "param": "Parameter", "joint": "Joint", "ucs": "ConstructionCoordinateSystem",
+             "plane": "ConstructionPlane", "axis": "ConstructionAxis", "point": "SketchPoint"}
+    expected = types[h["kind"]]
+    fields = {}
+    for field in h["path"].split("|")[1:]:
+        key, sep, value = field.partition("=")
+        if key in {"occ", "doc", "file"}:
+            if not sep or not value or key in fields:
+                raise ValueError("invalid handle scope metadata")
+            fields[key] = value
+    occurrence_path = fields.get("occ")
+    if "file" in fields and "doc" not in fields:
+        raise ValueError("file scope requires document scope")
+    for key in ("doc", "file"):
+        if key in fields and not re.fullmatch(r"(?:[0-9a-f]{2})+", fields[key]):
+            raise ValueError("invalid handle scope encoding")
+    scope_code = ""
+    if "doc" in fields:
+        scope_code = (
+            f"_app = adsk.core.Application.get()\n"
+            f"_active_doc = _app.activeDocument\n"
+            f"_doc_key = {json.dumps(fields['doc'])}\n"
+            f"_file_key = {repr(fields.get('file'))}\n"
+            f"def _scope_matches(_doc):\n"
+            f"    try:\n"
+            f"        if not _doc or not _doc.creationId or str(_doc.creationId).encode('utf-8').hex() != _doc_key: return False\n"
+            f"        if _file_key is not None:\n"
+            f"            _file = _doc.dataFile\n"
+            f"            if not _file or not _file.id or str(_file.id).encode('utf-8').hex() != _file_key: return False\n"
+            f"        return True\n"
+            f"    except Exception:\n"
+            f"        return False\n"
+            f"if not _scope_matches(_active_doc):\n"
+            f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'reason': 'document_scope_mismatch'}}}})); return\n"
+            f"try:\n"
+            f"    _docs = _app.documents\n"
+            f"    _scope_count = sum(1 for _i in range(_docs.count) if _scope_matches(_docs.item(_i)))\n"
+            f"except Exception:\n"
+            f"    _scope_count = 0\n"
+            f"if _scope_count != 1:\n"
+            f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'reason': 'document_scope_ambiguous_or_unavailable'}}}})); return\n"
+        )
+    context_code = ""
+    if occurrence_path:
+        context_code = (
+            f"_occs = [design.rootComponent.allOccurrences.item(_i) for _i in range(design.rootComponent.allOccurrences.count) if design.rootComponent.allOccurrences.item(_i).fullPathName == {occurrence_path!r}]\n"
+            f"if len(_occs) != 1:\n"
+            f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'handle': {handle_str!r}, 'reason': 'occurrence_not_found_or_ambiguous'}}}})); return\n"
+            f"_ctx = getattr({var}, 'assemblyContext', None)\n"
+            f"if _ctx is None:\n"
+            f"    {var} = {var}.createForAssemblyContext(_occs[0])\n"
+            f"elif _ctx.fullPathName != {occurrence_path!r}:\n"
+            f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'handle': {handle_str!r}, 'reason': 'occurrence_mismatch'}}}})); return\n"
+            f"if {var} is None:\n"
+            f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'handle': {handle_str!r}, 'reason': 'proxy_unavailable'}}}})); return\n"
+        )
+    return scope_code + (
+        f"_found = design.findEntityByToken({json.dumps(h['token'])})\n"
+        f"_matches = list(_found) if _found is not None and hasattr(_found, '__len__') else ([_found] if _found else [])\n"
+        f"if len(_matches) != 1:\n"
+        f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'handle': {handle_str!r}, 'reason': 'not_found_in_active_doc' if not _matches else 'ambiguous_token'}}}})); return\n"
+        f"{var} = _matches[0]\n"
+        f"_actual_type = getattr({var}, 'objectType', '')\n"
+        f"if not _actual_type or {json.dumps(expected)} not in _actual_type:\n"
+        f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid', 'detail': {{'handle': {handle_str!r}, 'reason': 'wrong_type', 'actual_type': _actual_type}}}})); return\n"
+        + context_code
     )
+
 
 
 def emit_resolve_many(handles: list[str], collection_var: str = "_resolved") -> str:
     """Emit Python that resolves a list of handles into a Python list, with per-handle failure."""
     lines = [f"{collection_var} = []\n"]
-    for i, h in enumerate(handles):
-        parsed = parse_handle(h)
+    for i, handle in enumerate(handles):
         var = f"_h{i}"
-        lines.append(
-            f"_h{i}_token = {json.dumps(parsed['token'])}\n"
-            f"_h{i}_found = design.findEntityByToken(_h{i}_token)\n"
-            f"if not _h{i}_found:\n"
-            f"    print(json.dumps({{'ok': False, 'error': 'handle_invalid',"
-            f" 'detail': {{'handle': {json.dumps(h)}, 'reason': 'not_found_in_active_doc'}}}}));\n"
-            f"    return\n"
-            f"{var} = _h{i}_found[0] if hasattr(_h{i}_found, '__len__') else _h{i}_found\n"
-            f"{collection_var}.append({var})\n"
-        )
+        lines.append(emit_resolve(handle, var=var))
+        lines.append(f"{collection_var}.append({var})\n")
     return "".join(lines)
+
 
 
 def emit_make_handle(kind: str, path_expr: str, entity_expr: str) -> str:
@@ -126,7 +176,15 @@ def emit_make_handle(kind: str, path_expr: str, entity_expr: str) -> str:
     """
     if kind not in VALID_KINDS:
         raise ValueError(f"unknown handle kind {kind!r}")
-    return f"({json.dumps(kind)} + ':' + str({path_expr}) + ':' + {entity_expr}.entityToken)"
+    return f"({json.dumps(kind)} + ':' + str({path_expr}) + {emit_scope_expr()} + ':' + {entity_expr}.entityToken)"
+
+
+def emit_scope_expr() -> str:
+    """Emit document scope using the active document's creation and saved file IDs."""
+    doc = "adsk.core.Application.get().activeDocument"
+    return (f"('|doc=' + str({doc}.creationId).encode('utf-8').hex() + "
+            f"(('|file=' + str({doc}.dataFile.id).encode('utf-8').hex()) "
+            f"if {doc}.dataFile and {doc}.dataFile.id else ''))")
 
 
 __all__ = [
@@ -134,6 +192,7 @@ __all__ = [
     "emit_make_handle",
     "emit_resolve",
     "emit_resolve_many",
+    "emit_scope_expr",
     "is_handle",
     "parse_handle",
 ]

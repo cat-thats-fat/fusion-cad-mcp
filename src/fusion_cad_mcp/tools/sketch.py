@@ -29,10 +29,13 @@ from __future__ import annotations
 
 import json
 import re
+import textwrap
 from typing import Any
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
+from ..handles import emit_make_handle, emit_resolve, is_handle, parse_handle
+from ..resolver import RESOLVER_SCRIPT
 
 # ---------- entity-ref resolver (generator-time) ----------
 
@@ -99,22 +102,43 @@ def _resolve_ref(ref: str, sk_var: str = "sk") -> str:
 # ---------- script header shared by all sketch tools ----------
 
 
+SKETCH_RESOLVER_SCRIPT = RESOLVER_SCRIPT + """
+def _shared_component(root, component):
+    return sum(1 for i in range(root.allOccurrences.count)
+               if root.allOccurrences.item(i).component == component) > 1
+
+def _select_sketch(root, selector):
+    matches = []
+    for i in range(root.sketches.count):
+        sk = root.sketches.item(i)
+        if selector == sk.name:
+            matches.append((sk.name, sk, root))
+    for i in range(root.allOccurrences.count):
+        occ = root.allOccurrences.item(i)
+        comp = occ.component
+        for j in range(comp.sketches.count):
+            sk = comp.sketches.item(j)
+            path = occ.fullPathName + ' / ' + sk.name
+            if selector == path or selector == sk.name:
+                matches.append((path, sk, comp))
+    if len(matches) != 1:
+        return None, None, {'ok': False, 'error': 'sketch_' + ('not_found' if not matches else 'ambiguous'),
+                            'name': selector, 'matches': [m[0] for m in matches]}
+    path, sk, comp = matches[0]
+    if comp != root and _shared_component(root, comp):
+        return None, None, {'ok': False, 'error': 'shared_component_edit_unsupported', 'name': selector}
+    return sk, comp, None
+"""
+
+
 def _sketch_header(sketch_name: str) -> str:
-    """Emit Python that locates the sketch by name in the root component."""
     return f"""\
 import adsk.core
 import adsk.fusion
 import json
 
 P = adsk.core.Point3D.create
-
-def _find_sketch(root, name):
-    for i in range(root.sketches.count):
-        sk = root.sketches.item(i)
-        if sk.name == name:
-            return sk
-    return None
-
+{SKETCH_RESOLVER_SCRIPT}
 def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
@@ -122,59 +146,90 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}}))
         return
     root = design.rootComponent
-    SKETCH_NAME = {json.dumps(sketch_name)}
+    SKETCH_NAME = {sketch_name!r}
 """
 
 
 def _ensure_sketch_in_script() -> str:
     return """\
-    sk = _find_sketch(root, SKETCH_NAME)
-    if sk is None:
-        print(json.dumps({"ok": False, "error": "sketch_not_found", "name": SKETCH_NAME}))
-        return
+    sk, owner, error = _select_sketch(root, SKETCH_NAME)
+    if error:
+        print(json.dumps(error)); return
 """
 
 
 # ---------- create_sketch ----------
 
 PLANE_MAP = {
-    "xy": "root.xYConstructionPlane",
-    "xz": "root.xZConstructionPlane",
-    "yz": "root.yZConstructionPlane",
+    "xy": "xYConstructionPlane",
+    "xz": "xZConstructionPlane",
+    "yz": "yZConstructionPlane",
 }
 
 
-def build_create_sketch(plane: str, name: str) -> str:
-    plane_lc = plane.lower()
-    if plane_lc not in PLANE_MAP:
-        raise ValueError(f"plane must be one of xy / xz / yz, got {plane!r}")
-    plane_expr = PLANE_MAP[plane_lc]
+def build_create_sketch(plane: str, name: str, component: str | None = None) -> str:
+    if not plane or not name:
+        raise ValueError("plane and name are required")
+    token = None
+    if is_handle(plane):
+        handle = parse_handle(plane)
+        if handle["kind"] not in {"plane", "face"}:
+            raise ValueError("plane handle must refer to a construction plane or face")
+        token = handle["token"]
+    principal = PLANE_MAP.get(plane.lower())
+    resolve_target = textwrap.indent(emit_resolve(plane, var="target"), "        ") if token else ""
+    make_handle = emit_make_handle("sketch", "sk.name", "sk")
     return f"""\
 import adsk.core
 import adsk.fusion
 import json
-
+{SKETCH_RESOLVER_SCRIPT}
 def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
     if design is None:
-        print(json.dumps({{"ok": False, "error": "no_active_design"}}))
-        return
+        print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
     root = design.rootComponent
-    for i in range(root.sketches.count):
-        if root.sketches.item(i).name == {json.dumps(name)}:
-            print(json.dumps({{"ok": False, "error": "sketch_name_taken", "name": {json.dumps(name)}}}))
-            return
-    sk = root.sketches.add({plane_expr})
-    sk.name = {json.dumps(name)}
-    handle = 'sketch:' + sk.name + ':' + sk.entityToken
-    print(json.dumps({{"ok": True, "sketch_name": sk.name, "plane": {json.dumps(plane_lc)}, "handle": handle}}))
+    component_selector = {repr(component)}
+    owner = root
+    if component_selector is not None:
+        occurrence, error = _select_occurrence(root, component_selector)
+        if error:
+            print(json.dumps(error)); return
+        owner = occurrence.component
+        if _shared_component(root, owner):
+            print(json.dumps({{"ok": False, "error": "shared_component_edit_unsupported", "name": component_selector}})); return
+    if owner.sketches.itemByName({json.dumps(name, ensure_ascii=False)}) is not None:
+        print(json.dumps({{"ok": False, "error": "sketch_name_taken", "name": {name!r}}})); return
+    token = {repr(token)}
+    principal = {repr(principal)}
+    if token is not None:
+{resolve_target}        face = adsk.fusion.BRepFace.cast(target)
+        construction_plane = adsk.fusion.ConstructionPlane.cast(target)
+        target_owner = face.body.parentComponent if face else (construction_plane.component if construction_plane else None)
+        if target_owner != owner:
+            print(json.dumps({{"ok": False, "error": "plane_wrong_component"}})); return
+        target = target.nativeObject or target
+    elif principal is not None:
+        target = getattr(owner, principal)
+    else:
+        matches = [owner.constructionPlanes.item(i) for i in range(owner.constructionPlanes.count)
+                   if owner.constructionPlanes.item(i).name == {json.dumps(plane, ensure_ascii=False)}]
+        if len(matches) != 1:
+            print(json.dumps({{"ok": False, "error": "plane_not_found_or_ambiguous", "name": {plane!r}}})); return
+        target = matches[0]
+    sk = owner.sketches.add(target)
+    if sk is None:
+        print(json.dumps({{"ok": False, "error": "sketch_creation_failed"}})); return
+    sk.name = {name!r}
+    handle = {make_handle}
+    print(json.dumps({{"ok": True, "sketch_name": sk.name, "plane": {plane!r}, "component": component_selector, "handle": handle}}))
 """
 
 
-def create_sketch(adapter: FusionAdapter, plane: str, name: str) -> Envelope:
+def create_sketch(adapter: FusionAdapter, plane: str, name: str, component: str | None = None) -> Envelope:
     try:
-        script = build_create_sketch(plane, name)
+        script = build_create_sketch(plane, name, component)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
     return _run(adapter, script, "create_sketch")
@@ -491,7 +546,7 @@ GC_KINDS: dict[str, tuple[str, int, str]] = {
     "horizontal": ("addHorizontal", 1, "line_or_two_points"),
     "vertical": ("addVertical", 1, "line_or_two_points"),
     "parallel": ("addParallel", 2, "lines"),
-    "perpendicular": ("addPerpendicular", 2, "lines"),
+    "perpendicular": ("addPerpendicular2", 2, "line_and_curve"),
     "coincident": ("addCoincident", 2, "any"),
     "tangent": ("addTangent", 2, "any"),
     "equal": ("addEqual", 2, "any"),
@@ -512,8 +567,17 @@ def build_add_geometric_constraint(sketch_name: str, kind: str, entities: list[s
     header = _sketch_header(sketch_name)
     ensure = _ensure_sketch_in_script()
     resolved = ", ".join(_resolve_ref(r) for r in entities)
+    if kind == "perpendicular":
+        call = f"""method = getattr(gc, 'addPerpendicular2', None) or getattr(gc, 'addPerpendicular', None)
+    if method is None:
+        print(json.dumps({{"ok": False, "error": "constraint_not_supported"}})); return
+    constraint = method({resolved})"""
+    else:
+        call = f"constraint = gc.{method}({resolved})"
     return f"""{header}{ensure}    gc = sk.geometricConstraints
-    gc.{method}({resolved})
+    {call}
+    if constraint is None:
+        print(json.dumps({{"ok": False, "error": "constraint_creation_failed"}})); return
     print(json.dumps({{"ok": True, "kind": {json.dumps(kind)}, "applied_to": {json.dumps(entities)}}}))
 """
 

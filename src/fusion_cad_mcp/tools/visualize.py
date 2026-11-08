@@ -6,7 +6,7 @@ set_view via fusion_mcp_execute (no direct read tool; uses the active viewport).
 
 from __future__ import annotations
 
-from ..adapter import FusionAdapter
+from ..adapter import AdapterError, FusionAdapter
 from ..envelope import Envelope, parse_stdout_json
 
 VALID_DIRECTIONS = {
@@ -51,7 +51,10 @@ def screenshot(
         kwargs["width"] = width
     if height is not None:
         kwargs["height"] = height
-    return adapter.read_query("screenshot", **kwargs)
+    env = adapter.read_query("screenshot", **kwargs)
+    if env.ok and env.image is None:
+        return Envelope(ok=False, error="screenshot_missing_image", message=env.message)
+    return env
 
 
 def build_set_view(direction: str, fit: bool = True) -> str:
@@ -83,8 +86,12 @@ def build_set_view(direction: str, fit: bool = True) -> str:
                 f" 'direction': {direction!r}}})); return"
             )
         else:
-            orient_block = f"vp.viewOrientation = adsk.core.ViewOrientations.{enum_name}"
-    fit_block = "vp.fit()" if fit else "# fit=False — leaving zoom alone"
+            orient_block = (
+                "camera = vp.camera\n"
+                f"    camera.viewOrientation = adsk.core.ViewOrientations.{enum_name}\n"
+                "    vp.camera = camera"
+            )
+    fit_block = "vp.fit()" if fit else ""
     return f"""
 import adsk.core
 import adsk.fusion
@@ -122,7 +129,7 @@ def set_view(
     parsed = parse_stdout_json(env)
     if parsed is None:
         return Envelope(ok=False, error="set_view_parse_failed", message=env.message)
-    if parsed.get("ok") is False:
+    if parsed.get("ok") is not True:
         return Envelope(ok=False, error=parsed.get("error", "set_view_failed"), message=env.message)
     return Envelope(ok=True, message=env.message, result=parsed)
 
@@ -146,7 +153,7 @@ def run(_ctx):
 
 
 def _set_marker_script(target_pos: int) -> str:
-    """Emit a script that sets the timeline marker. Clamps to [0, tl.count]."""
+    """Emit a script that sets the timeline marker to the exact requested position."""
     return f"""
 import adsk.core
 import adsk.fusion
@@ -159,11 +166,29 @@ def run(_ctx):
         print(json.dumps({{"ok": False, "error": "no_active_design"}}))
         return
     tl = design.timeline
-    target = max(0, min({target_pos}, tl.count))
+    target = {target_pos}
+    if not 0 <= target <= tl.count:
+        print(json.dumps({{"ok": False, "error": "invalid_marker_position"}}))
+        return
     tl.markerPosition = target
     app.activeViewport.refresh()
     print(json.dumps({{"ok": True, "pos": tl.markerPosition, "count": tl.count}}))
 """.strip()
+
+
+def _move_marker(adapter: FusionAdapter, target: int) -> Envelope:
+    try:
+        env = adapter.execute_script(_set_marker_script(target))
+    except (AdapterError, TimeoutError) as exc:
+        return Envelope(ok=False, error="marker_move_failed", message=str(exc))
+    if not env.ok:
+        return env
+    parsed = parse_stdout_json(env)
+    if parsed is not None and parsed.get("ok") is True:
+        actual = parsed.get("pos")
+        if type(actual) is int and actual == target:
+            return env
+    return Envelope(ok=False, error="marker_move_unverified", message=env.message, result=parsed)
 
 
 def screenshot_compare_with_marker(
@@ -175,7 +200,7 @@ def screenshot_compare_with_marker(
     transparent: bool = True,
     anti_aliasing: bool = True,
 ) -> Envelope:
-    """Capture before/after screenshots from the same camera by rolling the
+    """Capture before/after screenshots with the same view direction by rolling the
     timeline marker to `before_marker_position`, screenshotting, then rolling
     forward to the original position and screenshotting again.
 
@@ -198,67 +223,80 @@ def screenshot_compare_with_marker(
             message=f"direction must be one of {sorted(VALID_DIRECTIONS)}, got {direction!r}",
         )
 
-    # Step 1: capture current marker position (= the "after" state)
-    cur_env = adapter.execute_script(_get_marker_script())
+    if type(before_marker_position) is not int or before_marker_position < 0:
+        return Envelope(
+            ok=False,
+            error="invalid_marker_position",
+            message="before_marker_position must be a nonnegative integer.",
+        )
+
+    try:
+        cur_env = adapter.execute_script(_get_marker_script())
+    except (AdapterError, TimeoutError) as exc:
+        return Envelope(ok=False, error="marker_read_failed", message=str(exc))
     if not cur_env.ok:
         return cur_env
-    cur_parsed = parse_stdout_json(cur_env)
-    if cur_parsed is None or cur_parsed.get("ok") is False:
+    cur_parsed = parse_stdout_json(cur_env) or {}
+    after_pos = cur_parsed.get("pos")
+    tl_count = cur_parsed.get("count")
+    if (
+        cur_parsed.get("ok") is not True
+        or type(after_pos) is not int
+        or type(tl_count) is not int
+        or not 0 <= after_pos <= tl_count
+    ):
         return Envelope(
             ok=False,
             error="marker_read_failed",
             message=cur_env.message,
             result=cur_parsed,
         )
-    after_pos = cur_parsed["pos"]
-    tl_count = cur_parsed["count"]
-
-    def _restore():
-        adapter.execute_script(_set_marker_script(after_pos))
-
-    # Step 2: roll back to the "before" position
-    if before_marker_position < 0 or before_marker_position > tl_count:
+    if before_marker_position > tl_count:
         return Envelope(
             ok=False,
             error="invalid_marker_position",
             message=f"before_marker_position must be in [0, {tl_count}], got {before_marker_position}",
         )
-    roll_back_env = adapter.execute_script(_set_marker_script(before_marker_position))
-    if not roll_back_env.ok:
-        _restore()
-        return roll_back_env
 
-    # Step 3: before screenshot
-    before_env = screenshot(adapter, direction, width, height, transparent, anti_aliasing)
-    if not before_env.ok or before_env.image is None:
-        _restore()
-        return Envelope(
-            ok=False,
-            error="before_screenshot_failed",
-            message=before_env.message,
-            result=before_env.to_dict(),
-        )
+    def capture(phase: str) -> Envelope:
+        try:
+            env = screenshot(adapter, direction, width, height, transparent, anti_aliasing)
+        except (AdapterError, TimeoutError) as exc:
+            return Envelope(ok=False, error=f"{phase}_screenshot_failed", message=str(exc))
+        if not env.ok:
+            return Envelope(
+                ok=False, error=f"{phase}_screenshot_failed", message=env.message, result=env.to_dict()
+            )
+        return env
 
-    # Step 4: roll forward to the original position
-    roll_fwd_env = adapter.execute_script(_set_marker_script(after_pos))
-    if not roll_fwd_env.ok:
-        # The marker may be stuck mid-rebuild; surface clearly
+    # Even a failed or timed-out move may have changed the marker in Fusion.
+    try:
+        before_env = _move_marker(adapter, before_marker_position)
+        if before_env.ok:
+            before_env = capture("before")
+    finally:
+        restored = _move_marker(adapter, after_pos)
+
+    if not restored.ok:
+        details = {
+            "before_marker": before_marker_position,
+            "after_marker_target": after_pos,
+            "restore": restored.to_dict(),
+        }
+        if not before_env.ok:
+            details["before_failure"] = before_env.to_dict()
         return Envelope(
             ok=False,
             error="restore_marker_failed",
-            message=roll_fwd_env.message,
-            result={"before_marker": before_marker_position, "after_marker_target": after_pos},
+            message=f"Could not verify restoration to timeline marker {after_pos}. {restored.message}".strip(),
+            result=details,
         )
+    if not before_env.ok:
+        return before_env
 
-    # Step 5: after screenshot
-    after_env = screenshot(adapter, direction, width, height, transparent, anti_aliasing)
-    if not after_env.ok or after_env.image is None:
-        return Envelope(
-            ok=False,
-            error="after_screenshot_failed",
-            message=after_env.message,
-            result=after_env.to_dict(),
-        )
+    after_env = capture("after")
+    if not after_env.ok:
+        return after_env
 
     return Envelope(
         ok=True,

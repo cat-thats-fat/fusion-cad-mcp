@@ -1,20 +1,32 @@
 """Tier 1b corpus search regression tests + unit tests on the scorers.
 
-The regression suite runs against the real local corpus (if present) and
-asserts that known-good queries return the expected slugs in the top hits.
-If the corpus isn't built, those tests are skipped (no false failures in CI
-on machines without the scrape).
+Search tests use a small synthetic corpus so they run without Autodesk content.
+They do not evaluate ranking against a real, locally acquired corpus.
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
 from fusion_cad_mcp.tools import knowledge as kn
 
 
-def _have_corpus() -> bool:
-    return kn._resolve_corpus_dir() is not None
+@pytest.fixture
+def synthetic_corpus(tmp_path, monkeypatch):
+    """Small invented corpus: deterministic, portable, and no Autodesk content."""
+    records = [
+        {"slug": "MeshBody_calculateCollisionsWithRay.htm", "title": "MeshBody ray method", "body_md": "ray collisions", "namespace": "fusion"},
+        {"slug": "UserCoordinateSystem.htm", "title": "UserCoordinateSystem", "body_md": "coordinate system", "namespace": "fusion"},
+        {"slug": "FusionExport.htm", "title": "Export", "body_md": "export", "namespace": "fusion"},
+        {"slug": "CoreExport.htm", "title": "Export", "body_md": "export", "namespace": "core"},
+    ]
+    (tmp_path / "corpus.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    monkeypatch.setattr(kn, "_resolve_corpus_dir", lambda: tmp_path)
+    kn._api_index.cache_clear()
+    yield tmp_path
+    kn._api_index.cache_clear()
 
 
 # ---------- pure-unit (no corpus required) ----------
@@ -79,11 +91,10 @@ def test_snippet_falls_back_to_head_when_no_match():
     assert s.startswith("no match")
 
 
-# ---------- corpus regression (skip if no corpus) ----------
+# ---------- corpus search against portable synthetic records ----------
 
 
-@pytest.mark.skipif(not _have_corpus(), reason="no local Fusion API corpus built")
-def test_find_api_returns_meshbody_ray_for_known_query():
+def test_find_api_returns_meshbody_ray_for_known_query(synthetic_corpus):
     env = kn.find_api("MeshBody calculateCollisionsWithRay")
     assert env.ok is True
     hits = env.result["hits"]
@@ -92,28 +103,21 @@ def test_find_api_returns_meshbody_ray_for_known_query():
     assert "calculateCollisionsWithRay" in top_slug
 
 
-@pytest.mark.skipif(not _have_corpus(), reason="no local Fusion API corpus built")
-def test_find_api_returns_ucs_for_user_coordinate_system_query():
+def test_find_api_returns_ucs_for_user_coordinate_system_query(synthetic_corpus):
     env = kn.find_api("UserCoordinateSystem")
     assert env.ok is True
     slugs = [h["slug"] for h in env.result["hits"]]
     assert any("UserCoordinateSystem" in s for s in slugs)
 
 
-@pytest.mark.skipif(not _have_corpus(), reason="no local Fusion API corpus built")
-def test_find_api_namespace_filter():
+def test_find_api_namespace_filter(synthetic_corpus):
     env = kn.find_api("export", namespace="fusion", limit=10)
     assert env.ok is True
-    # at least one fusion-namespace result
-    namespaces = [h.get("namespace") or "" for h in env.result["hits"]]
-    assert (
-        any("fusion" in ns.lower() or ns.lower().startswith("fusion") for ns in namespaces)
-        or env.result["matched"] == 0
-    )
+    assert env.result["matched"] == 1
+    assert [h["slug"] for h in env.result["hits"]] == ["FusionExport.htm"]
 
 
-@pytest.mark.skipif(not _have_corpus(), reason="no local Fusion API corpus built")
-def test_find_api_empty_query_is_structured_error():
+def test_find_api_empty_query_is_structured_error(synthetic_corpus):
     env = kn.find_api("   ")
     assert env.ok is False
     assert env.error == "empty_query"
@@ -132,18 +136,12 @@ def test_find_api_returns_corpus_not_built_when_missing(monkeypatch, tmp_path):
 # ---------- patterns / gotchas (regression if files present) ----------
 
 
-def _have_skill_doc(name: str) -> bool:
-    return kn._resolve_skill_doc(name) is not None
-
-
-@pytest.mark.skipif(not _have_skill_doc("patterns.md"), reason="patterns.md not located")
 def test_find_pattern_returns_hits_for_constrained_rect_query():
     env = kn.find_pattern("constrained rectangle")
     assert env.ok is True
     assert env.result["matched"] > 0
 
 
-@pytest.mark.skipif(not _have_skill_doc("gotchas.md"), reason="gotchas.md not located")
 def test_find_gotcha_returns_lock_badge_g9():
     env = kn.find_gotcha("lock badge")
     assert env.ok is True

@@ -7,12 +7,15 @@ then returns the envelope as a plain dict for FastMCP serialization.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .adapter import DEFAULT_URL, FusionAdapter
+from .envelope import Envelope
 from .tools import assembly as asm
 from .tools import construction as cons
 from .tools import doc_state as doc_state_tool
@@ -40,6 +43,27 @@ def _get_adapter() -> FusionAdapter:
     return _adapter
 
 
+def _image_result(env: Envelope, *, compare: bool = False) -> CallToolResult:
+    """Keep image bytes in native MCP blocks, with compact structured metadata."""
+    metadata = env.to_dict()
+    images = metadata.pop("images", None) or []
+    first = metadata.pop("image", None)
+    if not images and first:
+        images.append(first)
+    if compare and isinstance(metadata.get("result"), dict):
+        result = metadata["result"]
+        for key in ("before_image", "after_image"):
+            value = result.pop(key, None)
+            if value:
+                result[key] = {"content_index": len(images) + 1}
+                images.append(value)
+    content = [TextContent(type="text", text=json.dumps(metadata))]
+    content.extend(
+        ImageContent(type="image", data=i["data"], mimeType=i["mime_type"]) for i in images
+    )
+    return CallToolResult(content=content, structuredContent=metadata, isError=not env.ok)
+
+
 # ---------- Group 1: Document & State ----------
 
 
@@ -51,7 +75,7 @@ def doc_state() -> dict:
 
 @mcp.tool()
 def list_open_docs() -> dict:
-    """List recently-open documents in Fusion."""
+    """List documents currently open in Fusion."""
     return docs.list_open_docs(_get_adapter()).to_dict()
 
 
@@ -68,20 +92,20 @@ def search_docs(query: str, project: str | None = None) -> dict:
 
 
 @mcp.tool()
-def open_doc(name: str, project: str | None = None) -> dict:
-    """Open a document by name (fuzzy). Optional project scope."""
-    return docs.open_doc(_get_adapter(), name, project).to_dict()
+def open_doc(name: str, project: str | None = None, file_id: str | None = None) -> dict:
+    """Open a unique exact document name, or an explicit file_id from search_docs."""
+    return docs.open_doc(_get_adapter(), name, project, file_id).to_dict()
 
 
 @mcp.tool()
 def save() -> dict:
-    """Save the active document. Untitled docs are refused by Fusion; use save_as instead."""
+    """Save the active document. Initial cloud save may require Fusion's Save dialog."""
     return docs.save(_get_adapter()).to_dict()
 
 
 @mcp.tool()
 def save_as(path: str) -> dict:
-    """Save the active document to a new path. Fusion's MCP may still require initial save via UI."""
+    """Return save_as_unsupported; use export for local files or Fusion's Save dialog."""
     return docs.save_as(_get_adapter(), path).to_dict()
 
 
@@ -137,9 +161,12 @@ def list_parameters() -> dict:
 
 
 @mcp.tool()
-def create_sketch(plane: str, name: str) -> dict:
-    """Create a new sketch on a principal plane. plane in {xy, xz, yz}. name must be unique."""
-    return sk.create_sketch(_get_adapter(), plane, name).to_dict()
+def create_sketch(plane: str, name: str, component: str | None = None) -> dict:
+    """Create a sketch on xy/xz/yz, a named plane, or a scoped planar face handle.
+    component selects a unique component or occurrence path. Coordinates are sketch-local.
+    Shared component definitions are refused to prevent editing every instance.
+    """
+    return sk.create_sketch(_get_adapter(), plane, name, component).to_dict()
 
 
 @mcp.tool()
@@ -533,10 +560,12 @@ def add_hole(
     extent_kind: str = "all",
     depth_expression: str | None = None,
     name: str | None = None,
+    face_handle: str | None = None,
 ) -> dict:
-    """Add a hole on the body's top face (max-Z, +Z normal).
+    """Add a hole to one root-component body, optionally on an explicit planar face.
     kind: simple | counterbore (needs cbore_diameter + cbore_depth) | countersink (needs csink_diameter + csink_angle).
-    position_mm: [x, y, z] — x/y locate on the top face; z is informational.
+    position_mm: model-space [x, y, z]. Without face_handle, select the nearest
+    trimmed +Z face at that XY. Only the selected body participates in the cut.
     extent_kind: all | distance (needs depth_expression).
     """
     return feat.add_hole(
@@ -552,41 +581,16 @@ def add_hole(
         extent_kind,
         depth_expression,
         name,
+        face_handle,
     ).to_dict()
 
 
 @mcp.tool()
 def rebuild_feature(feature_name: str, component_name: str | None = None) -> dict:
-    """Rebuild a feature whose downstream references are stale (G10) by
-    capturing its inputs, deleting it, and re-creating from the current sketch.
-
-    Supported feature classes: ExtrudeFeature (DistanceExtent, ProfilePlaneStart
-    or OffsetStart, 1 or N profiles in the same sketch). This is the most
-    common G10 case — a feature that got `healthState=1 (warning, using cached
-    geometry)` after a sketch geometry rewrite.
-
-    Returns structured `not_supported_for_rebuild` error for other feature
-    classes (fillet, chamfer, hole, revolve, etc.) with a recommendation:
-    - FilletFeature/ChamferFeature broken by upstream edits: SUPPRESS instead
-      (gotcha G11; edge re-binding is design-specific geometric matching).
-    - Others: delete + re-create via the appropriate add_* tool.
-
-    Profile matching: when the original sketch has more than one profile, picks
-    the new profile whose area is closest to the captured original area. Falls
-    back to profile[0] if no area was captured.
-
-    Failure mode warning: if delete succeeds but recreate fails (e.g., sketch
-    name changed, multiple profiles spread across sketches), the response sets
-    ok=false and includes a WARNING field instructing the agent to undo via
-    Fusion's undo and try again manually.
-
-    Args:
-        feature_name: Name of the feature to rebuild. Walks root + every
-            sub-component.
-        component_name: Optional hint for disambiguation.
-
-    Chain pattern: edit_sketch_dimension -> audit_feature_health -> for each
-    broken extrude in features list, rebuild_feature -> audit_feature_health.
+    """Return safe_rebuild_unavailable without changing the design.
+    Automatic delete-and-recreate cannot preserve downstream references or
+    reliably identify replacement profiles. Inspect audit_feature_health and
+    correct the original feature inputs instead.
     """
     return feat.rebuild_feature(_get_adapter(), feature_name, component_name).to_dict()
 
@@ -621,12 +625,17 @@ def rib(
     side: str = "symmetric",
     extend_profile: bool = True,
     name: str | None = None,
+    target_body: str | None = None,
+    is_flipped: bool = False,
 ) -> dict:
-    """NOT SCRIPTABLE in the current Fusion API: RibFeatures is a read-only
-    collection (no createInput/add), so this always returns the structured
-    error `rib_not_scriptable`. Model ribs as thin join-extrudes instead.
+    """Create a symmetric to-next rib on builds exposing RibFeatures.createInput.
+    target_body is required. Older builds return rib_not_scriptable.
+    is_flipped reverses the in-plane extrusion direction. A warning/error
+    returns rib_feature_unhealthy and reports that the model may have changed.
     """
-    return feat.rib(_get_adapter(), sketch, thickness, side, extend_profile, name).to_dict()
+    return feat.rib(
+        _get_adapter(), sketch, thickness, side, extend_profile, name, target_body, is_flipped
+    ).to_dict()
 
 
 # ---------- Group 5: Assembly & Motion (first slice, no joints) ----------
@@ -651,9 +660,9 @@ def move_component(
 ) -> dict:
     """Move an occurrence by translation (mm) and/or rotation (axis + angle deg).
     rotation_origin_mm defaults to [0, 0, 0] (world origin) if omitted.
-    Breaks the occurrence's ground-to-parent flag if set (otherwise the move
-    silently reverts). Check `moved` and `after_translation_mm` in the
-    response; a joint solver can override the requested move.
+    Use a full occurrence path when a name is ambiguous. Grounded occurrences
+    and designs with pending position changes return an error. The response
+    reports whether the move was applied and includes the resulting transform.
     """
     return asm.move_component(
         _get_adapter(),
@@ -914,10 +923,10 @@ def find_mesh_using_ray(
     direction: list,
     component_name: str | None = None,
 ) -> dict:
-    """NEW May 2026: cast a ray and return MeshBody objects intersected.
-    origin_mm: ray origin [x, y, z] in mm.
-    direction: ray direction [dx, dy, dz] (any magnitude; will be normalized by Fusion).
-    component_name: optional component to scope the search; omit for whole root.
+    """Cast a ray in root coordinates and return intersected mesh handles.
+    origin_mm is [x, y, z] in mm and direction is [dx, dy, dz].
+    Pass a unique component name or full occurrence path to limit hits to that
+    occurrence and its descendants. Omit component_name to search the whole assembly.
     """
     return ht.find_mesh_using_ray(_get_adapter(), origin_mm, direction, component_name).to_dict()
 
@@ -1008,21 +1017,22 @@ def audit_feature_health(
     whose healthState != 0.
 
     Call this after ANY tool that edits sketch geometry, user parameters, or
-    features. If summary.failed > 0 (state 2 or 3) or summary.warning > 0
+    features. If summary.failed > 0 (state 2) or summary.warning > 0
     (state 1), the BREP may look healthy via the API while Fusion's UI shows
     a stale cached display. See gotchas G10/G11.
 
     Args:
-        component_name: Restrict the audit to features in this component
-            (still recurses into its sub-components). Default: root + all.
+        component_name: Restrict the audit to a unique component or occurrence
+            path. Default: root + all.
         include_healthy: Include healthy features (state 0) in the features
-            list. Default False — only broken features are returned.
+            list. Default False — non-healthy entities are returned.
 
     Returns envelope.result = {
-        ok, summary: {total, healthy, warning, failed},
-        features: [{path, component, name, classType, healthState, healthLabel,
+        ok, summary: {total, healthy, warning, failed, suppressed, rolled_back, unknown},
+        features: [{path, component, name, classType, category, healthState, healthLabel,
                     isSuppressed, errorOrWarningMessage}, ...]
     }
+    States 3, 4, and 5 mean suppressed, rolled back, and unknown, respectively.
     """
     return verify_tools.audit_feature_health(
         _get_adapter(), component_name, include_healthy
@@ -1036,14 +1046,14 @@ def screenshot(
     height: int | None = None,
     transparent: bool = True,
     anti_aliasing: bool = True,
-) -> dict:
-    """Capture a PNG screenshot of the active viewport. Returns base64 image in envelope.image.
+) -> CallToolResult:
+    """Capture a PNG screenshot of the active viewport as a native MCP image.
     direction: one of current, front, back, bottom, top, left, right, iso-* (4 variants).
     Fusion handles fit-view internally for named directions.
     """
-    return viz_tools.screenshot(
-        _get_adapter(), direction, width, height, transparent, anti_aliasing
-    ).to_dict()
+    return _image_result(
+        viz_tools.screenshot(_get_adapter(), direction, width, height, transparent, anti_aliasing)
+    )
 
 
 @mcp.tool()
@@ -1062,21 +1072,14 @@ def screenshot_compare_with_marker(
     height: int | None = None,
     transparent: bool = True,
     anti_aliasing: bool = True,
-) -> dict:
-    """Capture before/after screenshots from the same camera by rolling the
+) -> CallToolResult:
+    """Capture before/after screenshots with the same view direction by rolling the
     timeline marker to `before_marker_position`, screenshotting, restoring
     the original marker position, and screenshotting again.
 
-    Use this to give yourself or the user a clean visual diff of a change you
-    just made — much more convincing than describing the change in words when
-    the geometric delta is subtle. Same camera both shots so the comparison
-    is honest.
-
-    Restore semantics: if anything fails after the marker is moved, this tool
-    attempts to roll back to the original position before returning. The
-    `restore_marker_failed` error indicates the rollback itself failed — in
-    that case the design may be left at an intermediate marker position and
-    the user should manually drag the marker back.
+    If rollback or the before capture fails, this tool still attempts to
+    restore the marker. The restore_marker_failed error means the original
+    marker position could not be verified.
 
     Args:
         before_marker_position: Timeline marker position to capture as the
@@ -1088,21 +1091,21 @@ def screenshot_compare_with_marker(
         transparent: PNG transparency. Default True.
         anti_aliasing: Smooth edges. Default True.
 
-    Returns envelope.result = {
-        before_image: {data: <base64 PNG>, mime_type: "image/png"},
-        after_image:  {data: <base64 PNG>, mime_type: "image/png"},
-        before_marker, after_marker, direction
-    }
+    Returns two native image blocks in before/after order. Structured metadata
+    identifies their content indices, the marker positions, and the direction.
     """
-    return viz_tools.screenshot_compare_with_marker(
-        _get_adapter(),
-        before_marker_position,
-        direction,
-        width,
-        height,
-        transparent,
-        anti_aliasing,
-    ).to_dict()
+    return _image_result(
+        viz_tools.screenshot_compare_with_marker(
+            _get_adapter(),
+            before_marker_position,
+            direction,
+            width,
+            height,
+            transparent,
+            anti_aliasing,
+        ),
+        compare=True,
+    )
 
 
 # ---------- Group 7: IO & Knowledge ----------
@@ -1129,10 +1132,10 @@ def find_api(
 
 @mcp.tool()
 def find_pattern(query: str, limit: int = 5) -> dict:
-    """Search patterns.md (verified Fusion MCP patterns and helpers) by intent.
+    """Search historical Fusion modeling recipes by intent.
 
-    Use when looking for the canonical idiom for a common operation (constrained
-    rectangle, fillet by geometry, screenshot fit-view, etc).
+    Entries may describe older builds or retired APIs. Check current Autodesk
+    documentation and verify resulting geometry when adapting a recipe.
     """
     return kn.find_pattern(query, limit).to_dict()
 
@@ -1167,25 +1170,30 @@ def export(
     body: str | None = None,
     refinement: str = "medium",
     units: str = "mm",
+    component: str | None = None,
 ) -> dict:
     """Export geometry to a file. format in {stl, 3mf, step, iges, obj, f3d, sat, smt}.
     path: absolute path (relative + '..' + Windows reserved names rejected).
-    body: optional body name. If omitted, exports the whole root component.
-          STEP/IGES/SAT/SMT/F3D always export the whole design (ignore body).
+    body: optional unique body selector for STL/3MF/OBJ.
+    component: optional occurrence path selecting a component for CAD formats
+    or an occurrence for mesh formats. Body scope is rejected for CAD formats.
     refinement: low | medium | high — applies to STL and OBJ mesh quality.
-    units: mm | cm | m | inch — STL/OBJ only.
+    units: mm | cm | m | inch — STL only.
     """
-    return io_tools.export(_get_adapter(), format, path, body, refinement, units).to_dict()
+    return io_tools.export(
+        _get_adapter(), format, path, body, refinement, units, component
+    ).to_dict()
 
 
 @mcp.tool()
-def import_geometry(format: str, path: str) -> dict:
+def import_geometry(format: str, path: str, target_component: str | None = None) -> dict:
     """Import geometry from a file into the active design.
     format in {step, iges, sat, smt, f3d}.
     path: absolute path to an existing file.
-    Returns counts of bodies and occurrences added to the root component.
+    Returns imported object identities, source hash, units, and target frame.
+    target_component accepts a unique component or occurrence path.
     """
-    return io_tools.import_geometry(_get_adapter(), format, path).to_dict()
+    return io_tools.import_geometry(_get_adapter(), format, path, target_component).to_dict()
 
 
 # ---------- Escape hatch ----------
@@ -1239,7 +1247,13 @@ def main() -> None:
         print(_USAGE, file=sys.stderr)
         raise SystemExit(2)
 
-    mcp.run()
+    global _adapter
+    try:
+        mcp.run()
+    finally:
+        if _adapter is not None:
+            _adapter.close()
+            _adapter = None
 
 
 if __name__ == "__main__":

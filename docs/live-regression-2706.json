@@ -1,0 +1,317 @@
+{
+  "status": "completed",
+  "fusion": {
+    "version": "2706.1.17",
+    "rib_scriptable": true
+  },
+  "checks": [
+    {
+      "name": "negative_extrusion",
+      "status": "passed",
+      "evidence": {
+        "min": [
+          0.0,
+          50.0,
+          -5.0
+        ],
+        "max": [
+          10.0,
+          60.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "name": "component_authoring_and_world_measurements",
+      "status": "passed",
+      "evidence": {
+        "bbox_mm": {
+          "min": [
+            100.0,
+            0.0,
+            0.0
+          ],
+          "max": [
+            110.0,
+            10.0,
+            1.0
+          ]
+        },
+        "center_mm": [
+          105.0,
+          5.0,
+          0.5
+        ],
+        "moved": true
+      }
+    },
+    {
+      "name": "repeated_instance_ambiguity_and_shared_edit_refusal",
+      "status": "passed",
+      "evidence": {
+        "body_error": "body_ambiguous",
+        "edit_error": "shared_component_edit_unsupported"
+      }
+    },
+    {
+      "name": "proxy_handle_distance",
+      "status": "passed",
+      "evidence": {
+        "distance_mm": 10.0
+      }
+    },
+    {
+      "name": "cross_document_handle_refusal",
+      "status": "passed",
+      "evidence": {
+        "error": "handle_invalid"
+      }
+    },
+    {
+      "name": "nullable_parameter_and_dependency_recompute",
+      "status": "passed",
+      "evidence": {
+        "volume_mm3": 300.0
+      }
+    },
+    {
+      "name": "hole_participant_scope",
+      "status": "passed",
+      "evidence": {
+        "case_volume_mm3": 1587.434,
+        "protected_volume_mm3": 1600.0
+      }
+    },
+    {
+      "name": "explicit_side_face_hole",
+      "status": "passed",
+      "evidence": {
+        "volume_mm3": 968.584
+      }
+    },
+    {
+      "name": "interference_rotation_and_grounding",
+      "status": "passed",
+      "evidence": {
+        "overlap_volume_mm3": 50,
+        "rotation_detected": true,
+        "grounded_move_refused": true
+      }
+    },
+    {
+      "name": "pending_transform_refusal",
+      "status": "passed",
+      "evidence": {
+        "first_x": 100.0,
+        "second_x": 120.0,
+        "pending": false
+      }
+    },
+    {
+      "name": "nested_rotated_component_authoring",
+      "status": "passed",
+      "evidence": {
+        "min": [
+          190.0,
+          30.0,
+          20.0
+        ],
+        "max": [
+          210.0,
+          40.0,
+          22.0
+        ]
+      }
+    },
+    {
+      "name": "plane_handle_perpendicular_and_proxy_projection",
+      "status": "passed",
+      "evidence": {
+        "perpendicular_dot": 0.0,
+        "projection": {
+          "min_x_mm": 100.0,
+          "max_x_mm": 110.0,
+          "linked": true
+        }
+      }
+    },
+    {
+      "name": "point_joint_and_limit_prevalidation",
+      "status": "passed",
+      "evidence": {
+        "min_deg": 0,
+        "max_deg": 90,
+        "invalid_batch_preserved_limits": true
+      }
+    },
+    {
+      "name": "unsafe_rebuild_refused",
+      "status": "passed",
+      "evidence": {
+        "original_volume_mm3": 500
+      }
+    },
+    {
+      "name": "modern_rib_creation",
+      "status": "passed",
+      "evidence": {
+        "base_plus_rib_volume_mm3": 1600.0
+      }
+    },
+    {
+      "name": "component_export_step",
+      "status": "passed",
+      "evidence": {
+        "bytes": 8892
+      }
+    },
+    {
+      "name": "component_export_iges",
+      "status": "blocked",
+      "reason": "Installed Fusion capability restricts this format"
+    },
+    {
+      "name": "component_export_sat",
+      "status": "blocked",
+      "reason": "Installed Fusion capability restricts this format"
+    },
+    {
+      "name": "component_export_smt",
+      "status": "passed",
+      "evidence": {
+        "bytes": 5592
+      }
+    },
+    {
+      "name": "component_export_f3d",
+      "status": "passed",
+      "evidence": {
+        "bytes": 62907
+      }
+    },
+    {
+      "name": "component_export_stl",
+      "status": "passed",
+      "evidence": {
+        "bytes": 684
+      }
+    },
+    {
+      "name": "component_export_obj",
+      "status": "passed",
+      "evidence": {
+        "bytes": 2239
+      }
+    },
+    {
+      "name": "component_export_3mf",
+      "status": "passed",
+      "evidence": {
+        "bytes": 18161
+      }
+    },
+    {
+      "name": "stl_millimeter_scale",
+      "status": "passed",
+      "evidence": {
+        "extent_mm": [
+          10.0,
+          10.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "name": "mesh_handle_ray_roundtrip",
+      "status": "passed",
+      "evidence": {
+        "hit_z_mm": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "scoped_repeated_mesh_world_rays",
+      "status": "passed",
+      "evidence": {
+        "hit_z_mm": [
+          20,
+          21
+        ],
+        "other_instance_excluded": true
+      }
+    },
+    {
+      "name": "scoped_import_step",
+      "status": "passed",
+      "evidence": {
+        "object_count": 1,
+        "volumes_mm3": [
+          100.0
+        ]
+      }
+    },
+    {
+      "name": "scoped_import_iges",
+      "status": "blocked",
+      "reason": "No exported fixture available on this installation"
+    },
+    {
+      "name": "scoped_import_sat",
+      "status": "blocked",
+      "reason": "No exported fixture available on this installation"
+    },
+    {
+      "name": "scoped_import_smt",
+      "status": "passed",
+      "evidence": {
+        "object_count": 1,
+        "volumes_mm3": [
+          100.0,
+          100.0
+        ]
+      }
+    },
+    {
+      "name": "scoped_import_f3d",
+      "status": "passed",
+      "evidence": {
+        "object_count": 1,
+        "volumes_mm3": [
+          100.0,
+          100.0,
+          100.0
+        ]
+      }
+    },
+    {
+      "name": "camera_and_timeline_restoration",
+      "status": "passed",
+      "evidence": {
+        "top_camera_verified": true,
+        "marker_restored_after_timeout": true
+      }
+    },
+    {
+      "name": "feature_health",
+      "status": "passed",
+      "evidence": {
+        "total": 36,
+        "healthy": 36,
+        "warning": 0,
+        "failed": 0,
+        "suppressed": 0,
+        "rolled_back": 0,
+        "unknown": 0
+      }
+    },
+    {
+      "name": "viewport_capture",
+      "status": "passed",
+      "evidence": {
+        "native_image_available": true
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ An MCP server that gives Autodesk Fusion a named, typed tool surface: `create_sk
 
 Fusion ships its own MCP server, but it exposes four broad tools that take raw Python. That works, and it means every call is an opportunity to get the Fusion API wrong. This sits in front of it and turns the common operations into validated tools with structured errors, so an agent can do CAD without carrying a large prose skill in context.
 
-**Status: beta (0.2.x).** 75 tools, 467 tests, and a full pass of live verification against Fusion 2704.1.23 that found and fixed 17 bugs. Used in production for parametric part design.
+**Status: beta (0.2.x).** Automated tests cover validation, generated scripts, transport, and selected Fusion workflows. Check results and feature health in the active design; not every operation is verified against every Fusion version.
 
 ## Requirements
 
@@ -44,11 +44,11 @@ MCP client (Claude, Cursor, Cline, ...)
         -> adsk.fusion / adsk.core
 ```
 
-Each tool generates a Python script and runs it through Fusion's `execute`. It is a peer of Autodesk's bridge, not a replacement, so anything you can do in the Fusion API you can still do here via the `execute` escape hatch.
+Many modeling tools generate a Python script and run it through Fusion's `execute`. It is a peer of Autodesk's bridge, not a replacement, so anything you can do in the Fusion API you can still do here via the `execute` escape hatch.
 
 ## The tools
 
-75 registered, 74 usable. Full reference with signatures, enums, return keys, and error codes is in [`tools.md`](src/fusion_cad_mcp/knowledge/tools.md), or search it in place with the `find_tool` tool.
+75 registered tools. Availability depends on the Fusion API version. Full reference with signatures, enums, return keys, and error codes is in [`tools.md`](src/fusion_cad_mcp/knowledge/tools.md), or search it in place with the `find_tool` tool.
 
 | Group | Tools |
 |---|---|
@@ -63,7 +63,9 @@ Each tool generates a Python script and runs it through Fusion's `execute`. It i
 | Import, export, knowledge | `export`, `import_geometry`, `find_tool`, `find_gotcha`, `find_pattern`, `find_api` |
 | Escape hatch | `execute` |
 
-`rib` is registered but always returns `rib_not_scriptable`: Fusion exposes `RibFeatures` as a read-only collection, so ribs cannot be created through the API at all. Model one as a thin join-extrude instead.
+`rib` checks whether Fusion exposes a writable rib API and returns `rib_not_scriptable` if it does not. This refusal was verified on 2705.1.30; actual rib creation was verified on 2706.1.17. `is_flipped` controls the in-plane direction, and unhealthy features return an error with `model_may_have_changed`. `rebuild_feature` returns `safe_rebuild_unavailable` without changing the design.
+
+The modernization has [offline and live validation evidence](docs/validation.md), including a [test-by-test review ledger](tests/audit/README.md). Historical modeling recipes retain version-specific observations and some retired API examples; use the current tools and Autodesk API documentation when adapting them.
 
 ## Every tool returns the same envelope
 

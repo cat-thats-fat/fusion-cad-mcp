@@ -65,11 +65,6 @@ def test_build_shell_closed_adds_body_to_input_entities():
     assert "target_faces.add(body)" in src
 
 
-def test_build_shell_no_faces_emits_closed_shell_comment():
-    src = f.build_shell("plate", "2 mm")
-    assert "no faces removed" in src
-
-
 def test_build_shell_rejects_unknown_direction():
     with pytest.raises(ValueError):
         f.build_shell("plate", "2 mm", direction="diagonal")
@@ -83,16 +78,10 @@ def test_build_add_hole_simple_all_extent():
     ast.parse(src)
     assert "createSimpleInput" in src
     assert "setAllExtent" in src
-    assert "NegativeExtentDirection" in src
-    # 10mm -> 1.0cm target coords feed both face selection and the point
-    assert "_tx = 1.0" in src
-    assert "_ty = 0.5" in src
-    assert "P(_tx, _ty, top_z)" in src
-    # Face selection must prefer the +Z face containing the target x/y, not
-    # blindly the tallest one (a hole aimed at a lower step used to start in
-    # mid-air above it).
-    assert "containing_face" in src
-    assert "position_on_face" in src
+    assert "PositiveExtentDirection" in src
+    assert "P(1.0, 0.5, 0.0)" in src
+    assert "isPointOnFace" in src
+    assert "participantBodies = [body]" in src
 
 
 def test_build_add_hole_simple_distance_extent():

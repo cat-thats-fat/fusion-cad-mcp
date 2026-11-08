@@ -1,0 +1,936 @@
+{
+  "tests/test_features.py::test_build_extrude_distance_emits_setDistanceExtent": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'PositiveExtentDirection' in src; 'createByString(\"thickness\")' in src; 'NewBodyFeatureOperation' in src."
+  },
+  "tests/test_features.py::test_build_extrude_distance_negative_direction": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'NegativeExtentDirection' in src; 'CutFeatureOperation' in src."
+  },
+  "tests/test_features.py::test_build_extrude_symmetric_full_length": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setSymmetricExtent' in src; 'createByString(\"10 mm\")' in src."
+  },
+  "tests/test_features.py::test_build_extrude_all_positive": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setAllExtent' in src; 'PositiveExtentDirection' in src."
+  },
+  "tests/test_features.py::test_build_extrude_all_negative": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'NegativeExtentDirection' in src."
+  },
+  "tests/test_features.py::test_build_extrude_participants_wires_find_body": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_select_body' in src; '\"plate\"' in src; '\"rib\"' in src; 'participantBodies' in src."
+  },
+  "tests/test_features.py::test_build_extrude_rejects_unknown_operation": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_extrude_distance_requires_expression": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_extrude_invalid_extent_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_extrude_invalid_direction": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_fillet_z_parallel_emits_correct_axis_check": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'abs(sp.x - ep.x) < 1e-6 and abs(sp.y - ep.y) < 1e-6 and abs(sp.z - ep.z) > 1e-6' in src; 'createByString(\"corner_r\")' in src."
+  },
+  "tests/test_features.py::test_build_fillet_y_parallel": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'abs(sp.x - ep.x) < 1e-6 and abs(sp.z - ep.z) < 1e-6 and abs(sp.y - ep.y) > 1e-6' in src."
+  },
+  "tests/test_features.py::test_build_fillet_any_parallel_skips_axis_filter": {
+    "disposition": "replace",
+    "evidence": "executes generated script with local Fusion API doubles",
+    "rationale": "Checks that the public wrapper selects a diagonal edge when no axis filter is requested and passes that edge to the fillet input. This test does not establish Fusion geometry."
+  },
+  "tests/test_features.py::test_build_fillet_min_length_filter": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'edge_length_cm >= 0.3' in src."
+  },
+  "tests/test_features.py::test_build_fillet_rejects_unknown_axis": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_fillet_rejects_empty_radius": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_chamfer_equal_kind": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'chamferEdgeSets.addEqualDistanceChamferEdgeSet' in src; 'createInput2()' in src."
+  },
+  "tests/test_features.py::test_build_chamfer_two_dist_requires_distance2": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_chamfer_dist_angle_emits_correct_method": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'chamferEdgeSets.addDistanceAndAngleChamferEdgeSet' in src; 'createByString(\"45 deg\")' in src."
+  },
+  "tests/test_features.py::test_build_chamfer_rejects_unknown_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_mirror_xy_plane": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'root.xYConstructionPlane' in src."
+  },
+  "tests/test_features.py::test_build_mirror_named_plane_uses_lookup": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'root.constructionPlanes.item' in src; '\"mid_plane\"' in src."
+  },
+  "tests/test_features.py::test_build_pattern_rect_x_only_no_y": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'createByReal(5)' in src; 'createByString(\"40 mm\")' in src."
+  },
+  "tests/test_features.py::test_build_pattern_rect_two_directions": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setDirectionTwo' in src."
+  },
+  "tests/test_features.py::test_pattern_rect_requires_x_distance_when_count_gt_1": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_pattern_rect_rejects_count_zero": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_pattern_circular_default_z_axis": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'root.zConstructionAxis' in src; 'createByReal(6)' in src; 'createByString(\"360 deg\")' in src."
+  },
+  "tests/test_features.py::test_pattern_circular_rejects_count_less_than_2": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_build_combine_join": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'JoinFeatureOperation' in src; 'isKeepToolBodies = False' in src."
+  },
+  "tests/test_features.py::test_build_combine_cut_keep_tools": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'CutFeatureOperation' in src; 'isKeepToolBodies = True' in src."
+  },
+  "tests/test_features.py::test_combine_rejects_empty_tools": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_combine_rejects_unknown_op": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features.py::test_extrude_short_circuits_on_invalid_input": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'invalid_input'; a.scripts == []."
+  },
+  "tests/test_features.py::test_extrude_passes_through_payload": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is True; env.result['bodies_added'] == ['Body1']."
+  },
+  "tests/test_features.py::test_fillet_surfaces_no_edges_matched_error": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'no_edges_matched'."
+  },
+  "tests/test_features_extras.py::test_build_revolve_full_360": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setAngleExtent(False' in src; \"createByString('360 deg')\" in src; 'root.zConstructionAxis' in src."
+  },
+  "tests/test_features_extras.py::test_build_revolve_angle_with_expression": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'createByString(\"90 deg\")' in src."
+  },
+  "tests/test_features_extras.py::test_build_revolve_rejects_angle_without_expression": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_extras.py::test_build_revolve_with_participants": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'participantBodies' in src; '_find_body' in src."
+  },
+  "tests/test_features_extras.py::test_build_shell_with_face_normal": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'ThicknessDirections' not in src; 'shell_in.insideThickness' in src; 'shell_in.outsideThickness' not in src; 'target_normals = [(0, 0, 1)]' in src; 'abs(n.x - tn[0])' in src; 'createByString(\"wall_thk\")' in src."
+  },
+  "tests/test_features_extras.py::test_build_shell_outside_direction_sets_outside_thickness": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'shell_in.outsideThickness' in src; 'shell_in.insideThickness' not in src."
+  },
+  "tests/test_features_extras.py::test_build_shell_closed_adds_body_to_input_entities": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'target_faces.add(body)' in src."
+  },
+  "tests/test_features_extras.py::test_build_shell_rejects_unknown_direction": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_extras.py::test_build_add_hole_simple_all_extent": {
+    "disposition": "improve",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated request text for a simple through-all hole, positive natural extent, converted point, face containment, and target participant; text alone does not prove Fusion behavior."
+  },
+  "tests/test_features_extras.py::test_build_add_hole_simple_distance_extent": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setDistanceExtent' in src; 'createByString(\"thickness / 2\")' in src."
+  },
+  "tests/test_features_extras.py::test_build_add_hole_simple_requires_depth_for_distance": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_extras.py::test_build_add_hole_simple_rejects_bad_position": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_final.py::test_build_move_body_translation": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'moveFeatures.createInput' in src; 'Vector3D.create(2.0, 0.0, 0.0)' in src."
+  },
+  "tests/test_features_final.py::test_build_move_body_rotation": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setToRotation' in src; '0.7853' in src."
+  },
+  "tests/test_features_final.py::test_build_move_body_requires_something": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_final.py::test_build_rib_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'isSymmetric' in src; 'createByString(\"2 mm\")' in src."
+  },
+  "tests/test_features_final.py::test_build_rib_rejects_unknown_side": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_final.py::test_rib_requires_target_body": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: not env.ok; env.error == 'invalid_input'; 'target_body' in env.message."
+  },
+  "tests/test_features_final.py::test_add_hole_simple_alias_still_works": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'createSimpleInput' in src."
+  },
+  "tests/test_features_final.py::test_add_hole_counterbore": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'createCounterboreInput' in src; 'createByString(\"10 mm\")' in src; 'createByString(\"3 mm\")' in src."
+  },
+  "tests/test_features_final.py::test_add_hole_countersink": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'createCountersinkInput' in src; 'createByString(\"90 deg\")' in src."
+  },
+  "tests/test_features_final.py::test_add_hole_counterbore_requires_args": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_features_final.py::test_add_hole_unknown_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_geometry_modernization.py::test_distance_extrude_direction_is_one_sided": {
+    "disposition": "keep",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Checks emitted script behavior and recorded API calls against controlled doubles; does not establish actual Fusion API compatibility or geometry. Evidence: result['ok'].",
+    "cases": {
+      "positive": "Positive direction passed to one-sided extent.",
+      "negative": "Negative direction passed to one-sided extent."
+    }
+  },
+  "tests/test_geometry_modernization.py::test_rebuild_refuses_without_touching_design": {
+    "disposition": "keep",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Checks emitted script behavior and recorded API calls against controlled doubles; does not establish actual Fusion API compatibility or geometry. Evidence: result['error'] == 'safe_rebuild_unavailable'; result['feature_name'] == 'cut'; result['component'] == 'housing'."
+  },
+  "tests/test_geometry_modernization.py::test_hole_rejects_wrong_handle_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError, match='face handle'); does not exercise Fusion. Evidence: pytest.raises(ValueError, match='face handle')."
+  },
+  "tests/test_geometry_modernization.py::test_rib_requires_target_and_rejects_unsupported_mode": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError, match='target_body'), pytest.raises(ValueError, match='symmetric'); does not exercise Fusion. Evidence: pytest.raises(ValueError, match='target_body'); pytest.raises(ValueError, match='symmetric')."
+  },
+  "tests/test_geometry_modernization.py::test_hole_uses_requested_face_and_only_selected_body": {
+    "disposition": "improve",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Executes the generated explicit-face script against controlled doubles; checks point placement, positive natural through-all direction, and that only the selected body participates. Fusion geometry still needs live verification. Live Fusion 2705.1.30 separately verified a through-all top-face hole while a second plate remained unchanged, and an explicit side-face hole."
+  },
+  "tests/test_geometry_modernization.py::test_rib_capability_gate_and_current_api_signature": {
+    "disposition": "improve",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Executes generated rib against controlled doubles: checks exact target, input values, to-next extent, healthy result, warning with empty message, failed extent abort, and unavailable capability. Fusion 2706.1.17 separately verified the flipped bracket geometry and detected an unhealthy unflipped result.",
+    "cases": {
+      "is_flipped=False": "Requests the default in-plane extent direction.",
+      "is_flipped=True": "Requests the reverse in-plane extent direction."
+    }
+  },
+  "tests/test_geometry_modernization.py::test_sketch_resolver_uses_occurrence_path_and_refuses_shared_definition": {
+    "disposition": "keep",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Checks emitted script behavior and recorded API calls against controlled doubles; does not establish actual Fusion API compatibility or geometry. Evidence: error['error'] == 'sketch_ambiguous'; entity is selected and owner is component and (error is None); entity is None and error['error'] == 'shared_component_edit_unsupported'."
+  },
+  "tests/test_geometry_modernization.py::test_create_sketch_uses_component_plane_and_emits_document_scope": {
+    "disposition": "keep",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Checks emitted script behavior and recorded API calls against controlled doubles; does not establish actual Fusion API compatibility or geometry. Evidence: result['ok']; result['handle'] == 'sketch:outline|doc=646f6331:abc'."
+  },
+  "tests/test_geometry_modernization.py::test_create_sketch_uses_native_construction_plane_in_selected_component": {
+    "disposition": "add",
+    "evidence": "generated Python executed with local Fusion API doubles",
+    "rationale": "Resolves a scoped plane in a component with a non-BMP name and passes its native plane to the owner sketch collection."
+  },
+  "tests/test_geometry_modernization.py::test_rectangular_pattern_executes_direction_two": {
+    "disposition": "improve",
+    "evidence": "generated code executed with API doubles",
+    "rationale": "Checks emitted script behavior and recorded API calls against controlled doubles; does not establish actual Fusion API compatibility or geometry. Evidence: result['ok'] and result['y_count'] == expected_count; create.call_args.args[1:] == (axes[primary], 3, '30 mm', 'extent').",
+    "cases": {
+      "x, no secondary": "Checks Y fallback and one instance at zero offset.",
+      "y, no secondary": "Checks Z fallback avoids matching the primary.",
+      "x and explicit y": "Checks caller quantity and spacing reach the second-direction call."
+    }
+  },
+  "tests/test_sketch.py::test_resolve_origin": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: sk._resolve_ref('origin') == 'sk.originPoint'."
+  },
+  "tests/test_sketch.py::test_resolve_line_index": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: sk._resolve_ref('line:3') == 'sk.sketchCurves.sketchLines.item(3)'."
+  },
+  "tests/test_sketch.py::test_resolve_line_start_end": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: sk._resolve_ref('line:0:start') == 'sk.sketchCurves.sketchLines.item(0).startSketchPoint'; sk._resolve_ref('line:0:end') == 'sk.sketchCurves.sketchLines.item(0).endSketchPoint'."
+  },
+  "tests/test_sketch.py::test_resolve_circle_center": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: sk._resolve_ref('circle:2:center') == 'sk.sketchCurves.sketchCircles.item(2).centerSketchPoint'."
+  },
+  "tests/test_sketch.py::test_resolve_arc_subentities": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: sk._resolve_ref('arc:1') == base; sk._resolve_ref('arc:1:start') == base + '.startSketchPoint'; sk._resolve_ref('arc:1:end') == base + '.endSketchPoint'; sk._resolve_ref('arc:1:center') == base + '.centerSketchPoint'."
+  },
+  "tests/test_sketch.py::test_resolve_point_and_dim": {
+    "disposition": "keep",
+    "evidence": "direct unit behavior",
+    "rationale": "Checks local return values or wrapper validation; no Fusion execution. Evidence: sk._resolve_ref('point:5') == 'sk.sketchPoints.item(5)'; sk._resolve_ref('dim:0') == 'sk.sketchDimensions.item(0)'."
+  },
+  "tests/test_sketch.py::test_resolve_rejects_bad_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_resolve_rejects_missing_index": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_resolve_rejects_bad_subentity": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError), pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError); pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_resolve_rejects_malformed_ref": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError), pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError); pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_build_create_sketch_xy": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'xYConstructionPlane' in src; '\"outer\"' in src."
+  },
+  "tests/test_sketch.py::test_build_create_sketch_accepts_named_plane": {
+    "disposition": "improve",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'owner.constructionPlanes.item(i).name == \"diagonal\"' in src."
+  },
+  "tests/test_sketch.py::test_build_create_sketch_checks_name_collision": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'sketch_name_taken' in src."
+  },
+  "tests/test_sketch.py::test_build_add_line_converts_mm_to_cm": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'P(8.0, 5.0, 0)' in src; 'P(12.0, 5.0, 0)' in src."
+  },
+  "tests/test_sketch.py::test_build_add_rectangle_center_kind": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addCenterPointRectangle' in src."
+  },
+  "tests/test_sketch.py::test_build_add_rectangle_corner_kind": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addTwoPointRectangle' in src."
+  },
+  "tests/test_sketch.py::test_build_add_rectangle_3pt_requires_p3": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_build_add_circle_center_radius": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addByCenterRadius' in src; '0.6' in src."
+  },
+  "tests/test_sketch.py::test_build_add_circle_3pt": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addByThreePoints' in src."
+  },
+  "tests/test_sketch.py::test_build_add_circle_rejects_missing_args": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError), pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError); pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_build_add_polygon_geometry": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addScribedPolygon' in src; 'math.hypot' in src; 'math.atan2' in src."
+  },
+  "tests/test_sketch.py::test_build_add_polygon_rejects_few_sides": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_build_horizontal_constraint": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'gc.addHorizontal(sk.sketchCurves.sketchLines.item(0))' in src."
+  },
+  "tests/test_sketch.py::test_build_parallel_resolves_both_lines": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'gc.addParallel(' in src; 'item(0)' in src; 'item(2)' in src."
+  },
+  "tests/test_sketch.py::test_build_coincident_with_origin": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'startSketchPoint' in src; 'originPoint' in src."
+  },
+  "tests/test_sketch.py::test_constraint_rejects_wrong_arity": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_constraint_rejects_unknown_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_build_distance_h_dim_with_param_expression": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addDistanceDimension(' in src; 'HorizontalDimensionOrientation' in src; '\"length\"' in src."
+  },
+  "tests/test_sketch.py::test_build_diameter_dim": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addDiameterDimension(' in src; '\"hole_d\"' in src."
+  },
+  "tests/test_sketch.py::test_build_angle_dim_requires_two_lines": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_build_distance_rejects_empty_expression": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch.py::test_dim_text_pos_converts_mm_to_cm": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'P(2.0, 3.0, 0)' in src."
+  },
+  "tests/test_sketch.py::test_build_assert_profiles_emits_actual_vs_expected": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'actual = sk.profiles.count' in src; 'actual == 1' in src."
+  },
+  "tests/test_sketch.py::test_create_sketch_short_circuits_on_bad_plane": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'invalid_input'; a.scripts == []."
+  },
+  "tests/test_sketch.py::test_add_rectangle_passes_payload_through_on_success": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is True; env.result['line_indices'] == [0, 1, 2, 3]."
+  },
+  "tests/test_sketch.py::test_add_dimension_surfaces_invalid_input_without_calling_fusion": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'invalid_input'; a.scripts == []."
+  },
+  "tests/test_sketch.py::test_assert_profiles_flips_envelope_ok_false_on_mismatch": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'profile_count_mismatch'; env.result['actual'] == 2."
+  },
+  "tests/test_sketch.py::test_assert_profiles_ok_when_match": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is True."
+  },
+  "tests/test_sketch.py::test_build_probe_sketch_dimensions_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'SKETCH_NAME = \"clip_profile\"' in src; 'COMP_HINT = None' in src."
+  },
+  "tests/test_sketch.py::test_build_probe_with_component_hint": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'COMP_HINT = \"body\"' in src."
+  },
+  "tests/test_sketch.py::test_build_probe_walks_sub_components": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_find_sketch_anywhere' in src; 'occurrences.item(j)' in src."
+  },
+  "tests/test_sketch.py::test_build_probe_emits_entity_descriptors": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'startSketchPoint' in src; 'centerSketchPoint' in src; 'majorAxisRadius' in src."
+  },
+  "tests/test_sketch.py::test_probe_returns_dim_list": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is True; env.result['dimension_count'] == 2; env.result['dimensions'][0]['param_name'] == 'd278'."
+  },
+  "tests/test_sketch.py::test_probe_surfaces_sketch_not_found": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'sketch_not_found'."
+  },
+  "tests/test_sketch.py::test_build_edit_sketch_dimension_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'SKETCH_NAME = \"clip_profile\"' in src; 'DIM_NAME = \"d278\"' in src; 'NEW_EXPR = \"80 mm\"' in src; 'design.computeAll()' in src."
+  },
+  "tests/test_sketch.py::test_build_edit_walks_sub_components": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_find_sketch_anywhere' in src."
+  },
+  "tests/test_sketch.py::test_build_edit_with_component_hint": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'COMP_HINT = \"body\"' in src."
+  },
+  "tests/test_sketch.py::test_build_edit_accepts_param_expressions": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'NEW_EXPR = \"oval_x / 2\"' in src."
+  },
+  "tests/test_sketch.py::test_edit_short_circuits_on_empty_expression": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'invalid_input'; a.scripts == []."
+  },
+  "tests/test_sketch.py::test_edit_returns_old_and_new_expression": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is True; env.result['old_expression'] == '65 mm'; env.result['new_expression'] == '80 mm'; env.result['new_value_mm'] == 80.0."
+  },
+  "tests/test_sketch.py::test_edit_dim_not_found_returns_available_dims": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'dim_not_found'; len(env.result['available_dims']) == 2."
+  },
+  "tests/test_sketch.py::test_edit_expression_rejected_surfaces_detail": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'expression_rejected'; 'Parsing error' in env.result['detail']."
+  },
+  "tests/test_sketch.py::test_edit_emits_value_deg_for_angle_dims_not_mm": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '\"rad\"' in src; '\"deg\"' in src; 'new_value_deg' in src; 'new_value_mm' in src."
+  },
+  "tests/test_sketch.py::test_edit_emits_value_mm_for_angle_payload_returns_deg": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is True; env.result['new_value_deg'] == 45.0; 'new_value_mm' not in env.result."
+  },
+  "tests/test_sketch.py::test_build_probe_emits_ambiguity_resolver": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_resolve_sketch' in src; 'sketch_name_ambiguous' in src; '_hinted_find' not in src."
+  },
+  "tests/test_sketch.py::test_build_edit_emits_ambiguity_resolver": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_resolve_sketch' in src; 'sketch_name_ambiguous' in src; '_hinted_find' not in src."
+  },
+  "tests/test_sketch.py::test_build_resolver_returns_matches_with_component_and_sketch": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '\"component\": c' in src; '\"sketch\": s.name' in src."
+  },
+  "tests/test_sketch.py::test_probe_surfaces_sketch_name_ambiguous": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'sketch_name_ambiguous'; len(env.result['matches']) == 2; {m['component'] for m in env.result['matches']} == {'body', 'lid'}."
+  },
+  "tests/test_sketch.py::test_edit_surfaces_sketch_name_ambiguous": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'sketch_name_ambiguous'; 'component_name' in env.result['hint']."
+  },
+  "tests/test_sketch_extras.py::test_build_ellipse_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'sketchEllipses.add' in src; 'P(2.0, 0.0, 0)' in src."
+  },
+  "tests/test_sketch_extras.py::test_build_ellipse_rejects_3d_points": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch_extras.py::test_build_arc_3pt_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addByThreePoints' in src."
+  },
+  "tests/test_sketch_extras.py::test_build_arc_center_start_end_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addByCenterStartEnd' in src."
+  },
+  "tests/test_sketch_extras.py::test_build_arc_center_start_sweep_parses": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'addByCenterStartSweep' in src; '1.5708' in src."
+  },
+  "tests/test_sketch_extras.py::test_build_arc_rejects_unknown_kind": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch_extras.py::test_build_arc_rejects_missing_args": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_sketch_extras.py::test_build_spline_parses_and_converts_mm": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'sketchFittedSplines.add' in src; 'P(1.0, 0.5, 0)' in src; 'isClosed = False' in src."
+  },
+  "tests/test_sketch_extras.py::test_build_spline_closed_flag": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'isClosed = True' in src."
+  },
+  "tests/test_sketch_extras.py::test_build_spline_rejects_one_point": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_construction.py::test_plane_offset_emits_setByOffset": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setByOffset' in src; 'root.xYConstructionPlane' in src; 'createByString(\"thickness\")' in src."
+  },
+  "tests/test_construction.py::test_plane_offset_requires_args": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_construction.py::test_plane_midplane_resolves_named_plane": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setByTwoPlanes' in src; 'root.xYConstructionPlane' in src; '\"lift_plane\"' in src."
+  },
+  "tests/test_construction.py::test_plane_at_angle_uses_axis_and_base": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setByAngle' in src; 'root.xConstructionAxis' in src; 'createByString(\"30 deg\")' in src."
+  },
+  "tests/test_construction.py::test_plane_3_points_creates_helper_sketch": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_cplane_helper_3pt' in src; 'setByThreePoints' in src; 'P(1.0, 0.0, 0.0)' in src; 'P(0.0, 1.0, 0.5)' in src."
+  },
+  "tests/test_construction.py::test_plane_3_points_requires_three_points": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_construction.py::test_plane_unknown_kind_rejected": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_construction.py::test_axis_2_points_creates_helper_sketch": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_caxis_helper_2pt' in src; 'setByTwoPoints' in src; 'P(0.0, 0.0, 5.0)' in src."
+  },
+  "tests/test_construction.py::test_axis_normal_to_face_uses_normal_match": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'setByNormalToFaceAtPoint' in src; 'getNormalAtPoint' in src; 'abs(n.z - 1.0)' in src."
+  },
+  "tests/test_construction.py::test_axis_normal_to_face_requires_body_and_normal": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError), pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError); pytest.raises(ValueError)."
+  },
+  "tests/test_construction.py::test_point_coords_creates_helper_sketch": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: '_cpoint_helper' in src; 'P(2.0, 3.0, 4.0)' in src."
+  },
+  "tests/test_construction.py::test_point_rejects_bad_coords": {
+    "disposition": "keep",
+    "evidence": "direct input validation",
+    "rationale": "Checks rejected input via pytest.raises(ValueError); does not exercise Fusion. Evidence: pytest.raises(ValueError)."
+  },
+  "tests/test_construction.py::test_delete_walks_all_construction_collections": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: 'constructionPlanes' in src; 'constructionAxes' in src; 'constructionPoints' in src; '\"lift_plane\"' in src."
+  },
+  "tests/test_construction.py::test_create_construction_plane_short_circuits_on_invalid_input": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False; env.error == 'invalid_input'."
+  },
+  "tests/test_construction.py::test_delete_construction_requires_name": {
+    "disposition": "keep",
+    "evidence": "wrapper response or validation with adapter double",
+    "rationale": "Checks wrapper handling of fabricated adapter response or rejection; does not establish that Fusion produces that response. Evidence: env.ok is False."
+  },
+  "tests/test_codegen_safety.py::test_generated_script_has_no_js_literals": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry.",
+    "cases": "Each ID in GENERATOR_CALLS is separately parameterized; representative defaults and branches are AST-checked, not executed."
+  },
+  "tests/test_codegen_safety.py::test_pattern_rectangular_single_direction_is_valid_python": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "AST checks the default script for bare JavaScript literals and confirms its generated absent-axis guard is false; test_rectangular_pattern_executes_direction_two separately executes the branch with a double."
+  },
+  "tests/test_codegen_safety.py::test_fillet_by_geometry_no_match_branch_is_valid_python": {
+    "disposition": "keep",
+    "evidence": "static generated script request shape",
+    "rationale": "Checks generated text/syntax only, not whether Fusion accepts the API call or produces geometry. Evidence: not _js_literal_names(src); '\"min_length_mm\": None' in src."
+  },
+  "tests/test_features_extras.py::test_build_shell_no_faces_emits_closed_shell_comment": {
+    "disposition": "delete",
+    "evidence": "insufficient static text assertion",
+    "rationale": "Deleted: only asserted a comment, which provides no evidence that a closed shell is constructed."
+  },
+  "tests/test_codegen_safety.py::test_pattern_rectangular_always_sets_direction_two": {
+    "disposition": "delete",
+    "evidence": "insufficient static text assertion",
+    "rationale": "Replaced: substring counts did not show which branch executes; generated script is now executed for both fallback and explicit direction."
+  },
+  "tests/test_codegen_safety.py::test_pattern_rectangular_direction_two_fallback_differs_from_primary": {
+    "disposition": "delete",
+    "evidence": "insufficient static text assertion",
+    "rationale": "Replaced: axis name occurrence alone did not prove the axis was passed; execution checks both X and Y primary axes."
+  },
+  "tests/test_codegen_safety.py::test_pattern_rectangular_two_direction_still_uses_caller_values": {
+    "disposition": "delete",
+    "evidence": "insufficient static text assertion",
+    "rationale": "Replaced: values appearing in source did not prove they reached the call; execution checks arguments."
+  },
+  "tests/test_features.py::test_build_rebuild_feature_parses": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'FEATURE_NAME = \"dispense_hole_cut\"' in src; 'COMP_HINT = None' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_feature_with_component_hint": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'COMP_HINT = \"body\"' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_walks_components": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: '_find_feature_anywhere' in src; 'occurrences.item(j)' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_captures_extent_and_start": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'DistanceExtentDefinition' in src; 'OffsetStartDefinition' in src; 'ProfilePlaneStartDefinition' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_captures_participant_bodies": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'participantBodies' in src; 'participant_body_names' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_matches_profile_by_area": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'areaProperties().area' in src; 'areaProperties.area' not in src; 'best_diff' in src."
+  },
+  "tests/test_features.py::test_rebuild_returns_old_and_new_health": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is True; env.result['old_health'] == 1; env.result['new_health'] == 0; env.result['captured']['extent_kind'] == 'distance'."
+  },
+  "tests/test_features.py::test_rebuild_returns_structured_error_for_fillet": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is False; env.error == 'not_supported_for_rebuild'; 'FilletFeature' in env.result['feature_class']; 'suppress' in env.result['recommendation'].lower()."
+  },
+  "tests/test_features.py::test_rebuild_warns_when_delete_succeeded_but_recreate_failed": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is False; env.error == 'sketch_not_found'; 'undo' in env.result['WARNING'].lower()."
+  },
+  "tests/test_features.py::test_rebuild_surfaces_feature_not_found": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is False; env.error == 'feature_not_found'."
+  },
+  "tests/test_features.py::test_build_rebuild_always_emits_profile_areas_list": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'info[\"profile_areas\"] = [prof.areaProperties().area]' in src; 'profile_area\"]' not in src or 'profile_areas\"]' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_wraps_profile_getter": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'profile_unreadable' in src; '        prof = ft.profile' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_preflight_checks_profiles_exist": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'sketch_has_no_profiles' in pre; 'profiles.count == 0' in pre."
+  },
+  "tests/test_features.py::test_build_rebuild_recreates_with_object_collection_for_multi_profile": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'ObjectCollection.create()' in src; 'len(matched_profiles) == 1' in src or 'len(matched_profiles)==1' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_uses_n_to_n_area_matching": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'used_indices' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_preflight_runs_before_delete": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: '_preflight_check' in src; idx_pre != -1; idx_del != -1; idx_pre < idx_del."
+  },
+  "tests/test_features.py::test_build_rebuild_preflight_returns_original_preserved_note": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'Original feature preserved' in src."
+  },
+  "tests/test_features.py::test_rebuild_preflight_short_circuits_unsupported_extent": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is False; env.error == 'unsupported_extent_type'; 'preserved' in env.result['note'].lower()."
+  },
+  "tests/test_features.py::test_rebuild_succeeds_for_multi_profile_extrude": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is True; env.result['captured']['profile_count'] == 3; env.result['captured']['profile_areas'] == [12.5, 8.7, 4.2]."
+  },
+  "tests/test_features.py::test_build_rebuild_captures_sketch_owner_component": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: 'sketch_owner_component' in src; 'parentSketch.parentComponent.name' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_uses_resolver_with_owner_hint": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: '_resolve_sketch' in src; 'captured.get(\"sketch_owner_component\")' in src."
+  },
+  "tests/test_features.py::test_build_rebuild_preflight_resolves_sketch_before_delete": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: pre_start != -1 and pre_end != -1 and (pre_start < pre_end); '_resolve_sketch' in pre_body; 'sketch_name_ambiguous' in pre_body."
+  },
+  "tests/test_features.py::test_rebuild_surfaces_sketch_name_ambiguous_from_preflight": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original assumed rebuild could inspect or recreate a feature; the current safe-rebuild capability deliberately refuses without touching the design. That refusal is exercised by test_rebuild_refuses_without_touching_design. Original checks: env.ok is False; env.error == 'sketch_name_ambiguous'; 'preserved' in env.result['note'].lower(); len(env.result['matches']) == 2."
+  },
+  "tests/test_features_final.py::test_rib_returns_not_scriptable_without_calling_fusion": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original expected all rib calls to be unavailable; the generator now gates capability on the Fusion API and validates a target body. test_rib_capability_gate_and_current_api_signature checks both supported and unavailable doubles. Original checks: env.ok is False; env.error == 'rib_not_scriptable'; 'thin' in env.message.lower() or 'extrude' in env.message.lower()."
+  },
+  "tests/test_sketch.py::test_build_create_sketch_rejects_bad_plane": {
+    "disposition": "delete",
+    "evidence": "obsolete pre-modernization expectation",
+    "rationale": "Original rejected a valid named construction plane; test_build_create_sketch_accepts_named_plane checks the current named-plane lookup. Original checks: ."
+  }
+}
