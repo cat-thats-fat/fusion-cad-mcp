@@ -119,6 +119,11 @@ def run(_ctx):
 3. `print()` is the return channel; stdout becomes `message`.
 4. Print the bounding box after any extrude.
 
+Fusion's MCP has intermittently lost expected stdout during live tests. An empty
+reply or timeout does not prove a write failed; inspect the actual design before
+retrying. A raw script that intentionally prints nothing can validly return an
+empty message.
+
 Look the API up before writing against an unfamiliar method. `find_api` costs one call; a failed round trip plus debugging costs far more. Always pass a category when using Autodesk's `apiDocumentation` query, since omitting it returns success with empty data.
 
 ## Setup
@@ -131,6 +136,13 @@ pip install "fusion-cad-mcp @ git+https://github.com/cat-thats-fat/fusion-cad-mc
 
 Then point your MCP client at the `fusion-cad-mcp` command. `CONNECT.md` in that repo has per-client config and troubleshooting.
 
+For Codex, follow the `CONNECT.md` Codex section: install into a dedicated Python
+environment, register its absolute interpreter path as a stdio server, and copy
+this skill with `install_skill.py --skills-dir` into the Codex skills directory.
+The installer includes all three reference files. A saved client registration is
+not proof of a live connection; verify `find_tool`, `doc_state` and
+`inspect_assembly` before modeling.
+
 The server talks to Autodesk's MCP at `127.0.0.1:27182`, which is enabled in **Preferences > General > API > Fusion MCP Server**. Fusion must be running with a design open.
 
 `find_api` needs a local corpus of Autodesk's API help, which is not redistributed. Build it once:
@@ -142,4 +154,6 @@ fusion-cad-mcp corpus build --i-accept-autodesk-terms
 
 Everything else works without it.
 
-If Fusion is restarted, the server re-handshakes automatically on the next call. If the *client* session goes stale instead, that shows up as repeated 4xx and needs a client-side reconnect, which only the user can do.
+If Fusion is restarted, the adapter re-handshakes on a rejected session. If errors
+persist, inspect the error and listener state, then reconnect the MCP client as
+needed. Do not diagnose a client fault solely from repeated failures.

@@ -10,13 +10,24 @@ In Fusion: **Preferences > General > API > Fusion MCP Server**, enable it.
 
 This is what actually talks to Fusion. `fusion-cad-mcp` connects to it on `127.0.0.1:27182`, so it must be on or nothing works.
 
-Confirm it is listening:
+Check the route on macOS or Linux:
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:27182/mcp
 ```
 
-`405` means the route exists and only accepts POST, which is correct and healthy. `404` means the server is off. Connection refused means Fusion is not running.
+On Windows PowerShell, use `curl.exe` explicitly to avoid the Windows PowerShell
+5.1 `curl` alias:
+
+```powershell
+curl.exe -s -o NUL -w "%{http_code}\n" http://127.0.0.1:27182/mcp
+```
+
+`405` indicates that the route rejected this GET request; it does not prove that
+MCP initialization or Python execution works. `404` means the expected route was
+not found. Connection refused means nothing accepted the connection at that
+address. Confirm Fusion is running and its MCP server is enabled, then perform
+the tool checks below.
 
 ## 2. Install
 
@@ -40,6 +51,76 @@ which fusion-cad-mcp
 ```
 
 ## 3. Point your client at it
+
+### Codex
+
+For a fresh Windows checkout, use the following instead of the global install in
+step 2. Run it from the directory where you want to keep the repository. Python
+3.11+ and Git must already be installed; `py -3` must select a supported Python.
+
+```powershell
+git clone https://github.com/cat-thats-fat/fusion-cad-mcp.git
+Set-Location fusion-cad-mcp
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install .
+$fusionPython = (Resolve-Path .\.venv\Scripts\python.exe).Path
+codex mcp add fusion_cad --env FUSION_MCP_URL=http://127.0.0.1:27182/mcp --env PYTHONUNBUFFERED=1 -- $fusionPython -m fusion_cad_mcp.server
+codex mcp get fusion_cad
+```
+
+This installs a fixed snapshot of the checkout. After deliberately updating the
+checkout, run the same `pip install .` command again and reconnect the MCP server.
+The absolute interpreter path avoids dependence on shell activation or PATH.
+On macOS, create the environment with `python3 -m venv .venv` and use the absolute
+path to `.venv/bin/python` instead; the live setup report below covers Windows.
+
+Codex stores this registration in `~/.codex/config.toml`. Edit the existing
+`fusion_cad` table to set the timeouts below; do not add a second table with the
+same name. Replace the example command path with your actual interpreter path.
+
+```toml
+[mcp_servers.fusion_cad]
+command = "C:/path/to/fusion-cad-mcp/.venv/Scripts/python.exe"
+args = ["-m", "fusion_cad_mcp.server"]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
+
+[mcp_servers.fusion_cad.env]
+FUSION_MCP_URL = "http://127.0.0.1:27182/mcp"
+PYTHONUNBUFFERED = "1"
+```
+
+The adapter's default transport deadline is 60 seconds per request. The longer
+client timeout leaves room for initialization, error reporting and cleanup; it
+does not increase Fusion's execution budget or prove cancellation. See OpenAI's
+[MCP configuration documentation](https://developers.openai.com/codex/mcp) for
+the current configuration options.
+
+Install the companion skill from the same checkout:
+
+```powershell
+.\.venv\Scripts\python.exe install_skill.py --skills-dir (Join-Path $env:USERPROFILE '.codex/skills')
+```
+
+If you use a custom `CODEX_HOME`, select its `skills` directory instead. This
+copies `SKILL.md` and all three reference files; copying `SKILL.md` alone leaves
+its references missing. Refresh the skill with the same command after updating.
+
+Start a new Codex chat and select the `fusion-cad` skill. If the server is not
+listed, reconnect or restart the client. `codex mcp get fusion_cad` confirms the
+saved configuration, not a live connection. Verify through the tools:
+
+1. Discover the server's tools (88 at the verified revision).
+2. Call `find_tool` for `create_parametric_enclosure`; confirm a nonempty hit.
+3. Call `doc_state`; confirm `result.active_design` is true and inspect the
+   document's units, dirty flag and entity counts.
+4. Call `inspect_assembly` with bounded results; check each returned section for
+   counts or an explicit unavailable status.
+
+These are read-only connection checks, not a modeling benchmark. The
+[verification report](docs/codex-setup-validation.md) records the tested version
+and results. If Autodesk's own MCP is also registered, both servers control the
+same Fusion instance; avoid concurrent model edits from separate agents.
 
 ### Claude Code
 
@@ -112,13 +193,15 @@ fusion-cad-mcp corpus build --i-accept-autodesk-terms
 
 It crawls at 1 request/second and takes a while. Output goes to `~/.fusion-cad/corpus/`, which is the first place the server looks. Override with `FUSION_CAD_CORPUS_DIR`.
 
-The other 74 tools work without it. Only `find_api` returns `corpus_not_built` until you do this.
+The other tools work without it. Only `find_api` returns `corpus_not_built` until you do this. Installing the `corpus` extra alone does not build the corpus.
 
 ## Troubleshooting
 
 **Every call fails with a connection error.** Fusion is not running, or the API server is off. Check step 1.
 
-**Everything worked, then every call started failing after restarting Fusion.** The server re-handshakes automatically on a rejected session, so this should recover on the next call. If it does not, your *client* session is stale rather than the server's: reconnect the MCP server in your client (`/mcp` in Claude Code). No tool call can fix that from the inside.
+**Everything worked, then calls started failing after restarting Fusion.** The adapter re-handshakes on a rejected session. If errors persist, confirm the listener and inspect the error; reconnect the MCP server in your client if needed. Repeated failures alone do not identify which layer is at fault.
+
+**Expected script output is empty, or a call times out.** Intermittent empty successful replies were observed from Autodesk's MCP on Fusion 2706.1.17, including read-only print probes. The cause is unresolved. A write may have completed even if its result was lost: inspect the design before retrying, and do not assume timeout cancellation or automatic rollback. Restarting Fusion restored output in recorded runs, but is not a proven fix; protect unsaved work before restarting. An intentionally silent raw `execute` script can legitimately return empty output.
 
 **`find_api` returns `corpus_not_built`.** Expected until you build the corpus. See above.
 

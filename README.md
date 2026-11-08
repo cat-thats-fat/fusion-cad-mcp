@@ -14,7 +14,9 @@ Fusion ships its own MCP server, but it exposes four broad tools that take raw P
 
 ## Install
 
-**Not a developer?** Start with [AI-SETUP-PROMPT.md](AI-SETUP-PROMPT.md). Paste one prompt into Claude and it walks you through the whole thing, install to first extrude, and verifies it worked.
+**Using Codex?** Follow the [local Codex setup](CONNECT.md#codex) for an isolated Python environment, the `fusion_cad` MCP registration, and the companion skill. The [setup verification](docs/codex-setup-validation.md) records 88 discovered tools and successful read-only calls to live Fusion; the intermittent empty-output issue remains unresolved.
+
+**Not a developer?** Start with [AI-SETUP-PROMPT.md](AI-SETUP-PROMPT.md). Paste its guided prompt into your assistant to install, connect, and verify a first model in an empty design.
 
 ```bash
 pip install "fusion-cad-mcp @ git+https://github.com/cat-thats-fat/fusion-cad-mcp.git"
@@ -37,7 +39,7 @@ See [CONNECT.md](CONNECT.md) for per-client details and troubleshooting.
 ## How it works
 
 ```
-MCP client (Claude, Cursor, Cline, ...)
+MCP client (Codex, Claude, Cursor, Cline, ...)
   -> fusion-cad-mcp            this package, stdio MCP server
     -> httpx
       -> 127.0.0.1:27182/mcp   Fusion's own MCP
@@ -113,7 +115,7 @@ Four tools answer questions without touching Fusion, so they work with it closed
 | `find_tool` | this server's tool reference |
 | `find_gotcha` | a catalog of Fusion API failure modes |
 | `find_pattern` | reusable Python recipes for `execute` |
-| `find_api`, `set_reference_metadata`, `get_reference_metadata` | Autodesk's Fusion API help |
+| `find_api` | Autodesk's Fusion API help |
 
 The first three ship with the package. `find_api` needs a local copy of Autodesk's help, which is their content and is not redistributed, so you build your own once:
 
@@ -124,14 +126,14 @@ fusion-cad-mcp corpus build --i-accept-autodesk-terms
 
 That crawls at 1 request/second into `~/.fusion-cad/corpus/`, which is where the server looks first. Set `FUSION_CAD_CORPUS_DIR` to keep it elsewhere. Everything else works without it.
 
-## The Claude skill
+## The agent skill
 
 `SKILL.md` in this repo is the agent-facing companion to the server: which tool
 to reach for, the six rules that prevent most failures, and how to fall back to
 raw scripts. It reads alongside the same `tools.md`, `patterns.md` and
 `gotchas.md` the knowledge tools search, so there is one copy of each.
 
-Install it into a Claude skills directory:
+From a checkout, install it into a Claude skills directory:
 
 ```bash
 python install_skill.py
@@ -142,12 +144,18 @@ location, `--name` for another folder name, and `--overlay DIR` to copy your own
 markdown over the base, which is how a private variant adds house conventions
 without forking the skill.
 
+For Codex, use `--skills-dir` to select your Codex skills directory; the
+[Codex guide](CONNECT.md#codex) includes the Windows PowerShell command.
+
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,corpus]"
 pytest              # offline tests; no Fusion required
 ```
+
+The `corpus` extra installs dependencies needed by the corpus tests; it does not
+download Autodesk documentation. Without it, those tests are skipped.
 
 The tests cover script generation, envelope parsing, argument validation, and packaging integrity. They deliberately do not need Fusion running, which is also their limit: **offline tests do not prove that Fusion accepts every generated operation.** Several of the bugs found in this project passed every unit test and only surfaced against a live document, so verify behavioral changes in Fusion and check entity counts rather than trusting a success envelope.
 
