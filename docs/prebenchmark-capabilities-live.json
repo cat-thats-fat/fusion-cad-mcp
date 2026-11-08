@@ -1,0 +1,285 @@
+{
+  "status": "passed",
+  "fusion": {
+    "version": "2706.1.17",
+    "rib_scriptable": true
+  },
+  "checks": [
+    {
+      "name": "occurrence_hierarchy",
+      "status": "passed",
+      "evidence": {
+        "root_count": 2,
+        "subtree_count": 1,
+        "child_parent_correct": true
+      }
+    },
+    {
+      "name": "nested_rotated_inspection",
+      "status": "passed",
+      "evidence": {
+        "bounds_mm": {
+          "min": [
+            92.0,
+            30.0,
+            10.0
+          ],
+          "max": [
+            100.0,
+            42.0,
+            12.0
+          ]
+        },
+        "body_count": 1
+      }
+    },
+    {
+      "name": "absolute_nested_relative_placement",
+      "status": "passed",
+      "evidence": {
+        "bounds_mm": {
+          "min": [
+            72.0,
+            40.0,
+            13.0
+          ],
+          "max": [
+            80.0,
+            52.0,
+            15.0
+          ]
+        },
+        "repeat_changed": false
+      }
+    },
+    {
+      "name": "semantic_geometry_and_feature_inspection",
+      "status": "passed",
+      "evidence": {
+        "top_face_z_mm": 15,
+        "ambiguous_count": 6,
+        "feature_parameter_count": 2
+      }
+    },
+    {
+      "name": "shared_reference_insertion_and_retry_refusal",
+      "status": "passed",
+      "evidence": {
+        "duplicate_error": "operation_id_exists",
+        "shared_edit_error": "shared_component_edit_unsupported",
+        "metadata_roundtrip": true,
+        "spare_bounds_mm": {
+          "min": [
+            72,
+            60,
+            13
+          ],
+          "max": [
+            80,
+            72,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "exact_clearance_and_bounded_fit_report",
+      "status": "passed",
+      "evidence": {
+        "minimum_distance_mm": 8,
+        "statuses": [
+          "pass",
+          "violation",
+          "pass",
+          "pass"
+        ]
+      }
+    },
+    {
+      "name": "contained_solid_interference",
+      "status": "passed",
+      "evidence": {
+        "overlap_mm3": 125,
+        "clearance_violation": true
+      }
+    },
+    {
+      "name": "independent_component_copy_and_scoped_handle_roundtrip",
+      "status": "passed",
+      "evidence": {
+        "metadata_definition_independent": true,
+        "body_bounds_mm": {
+          "min": [
+            150.0,
+            80.0,
+            10.0
+          ],
+          "max": [
+            162.0,
+            88.0,
+            12.0
+          ]
+        },
+        "handle_bounds_status": "pass"
+      }
+    },
+    {
+      "name": "parametric_enclosure_and_dimension_propagation",
+      "status": "passed",
+      "evidence": {
+        "initial_volume_mm3": 11712,
+        "edited_volume_mm3": 13232,
+        "edited_bounds_mm": {
+          "min": [
+            -35.0,
+            -20.0,
+            0.0
+          ],
+          "max": [
+            35.0,
+            20.0,
+            20.0
+          ]
+        },
+        "retry_error": "primitive_name_exists"
+      }
+    },
+    {
+      "name": "annular_boss_side_cutout_and_signed_anchor",
+      "status": "passed",
+      "evidence": {
+        "boss_added_mm3": 169.64600329384882,
+        "port_removed_mm3": 64,
+        "edited_boss_center_mm": [
+          -18,
+          -10
+        ]
+      }
+    },
+    {
+      "name": "cutout_position_parameter_propagation",
+      "status": "passed",
+      "evidence": {
+        "x_mm": [
+          8.000000000000002,
+          16.0
+        ]
+      }
+    },
+    {
+      "name": "missed_cut_targeted_recovery",
+      "status": "passed",
+      "evidence": {
+        "rollback": "verified",
+        "timeline_restored": true,
+        "body_inventory_restored": true
+      }
+    },
+    {
+      "name": "independent_enclosure_variant",
+      "status": "passed",
+      "evidence": {
+        "volume_mm3": 25112,
+        "bounds_mm": {
+          "min": [
+            -40.0,
+            -25.0,
+            0.0
+          ],
+          "max": [
+            40.0,
+            25.0,
+            25.0
+          ]
+        }
+      }
+    },
+    {
+      "name": "opposite_direction_and_yz_side_cutouts",
+      "status": "passed",
+      "evidence": {
+        "removed_mm3": [
+          96,
+          96
+        ],
+        "directions": [
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            -1,
+            0,
+            0
+          ]
+        ],
+        "edited_depth_mm": [
+          2,
+          3
+        ],
+        "edited_total_removed_mm3": [
+          128,
+          192
+        ],
+        "yz_corners_component_mm": [
+          [
+            40.0,
+            -4.0,
+            12.000000000000002
+          ],
+          [
+            40.0,
+            -4.0,
+            8.000000000000002
+          ],
+          [
+            40.0,
+            4.0,
+            12.000000000000002
+          ],
+          [
+            40.0,
+            4.0,
+            8.000000000000002
+          ]
+        ]
+      }
+    },
+    {
+      "name": "native_nested_rotated_sweep_edit_and_handle_roundtrip",
+      "status": "passed",
+      "evidence": {
+        "initial_volume_mm3": 251.32741228718345,
+        "edited_volume_mm3": 565.4866776461628,
+        "edited_root_bounds_mm": {
+          "min": [
+            36.0,
+            71.0,
+            12.0
+          ],
+          "max": [
+            56.0,
+            77.0,
+            18.0
+          ]
+        },
+        "retry_error": "feature_name_taken"
+      }
+    },
+    {
+      "name": "capability_fixture_health",
+      "status": "passed",
+      "evidence": {
+        "total": 30,
+        "healthy": 30,
+        "warning": 0,
+        "failed": 0,
+        "suppressed": 0,
+        "rolled_back": 0,
+        "unknown": 0
+      }
+    }
+  ],
+  "cleanup": "fixture_closed"
+}

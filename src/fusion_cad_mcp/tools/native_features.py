@@ -105,7 +105,11 @@ def run(_ctx):
         # Snapshot before feature creation; Path and input are non-document objects.
         tx = _Mutation(design, owner)
         collection = adsk.core.ObjectCollection.create()
-        for curve in curves: collection.add(curve)
+        for curve in curves:
+            contextual = curve.createForAssemblyContext(occ) if occ else curve
+            if contextual is None:
+                raise _MutationError('path_proxy_unavailable', 'Could not create path curve assembly proxy')
+            collection.add(contextual)
         path = adsk.fusion.Path.create(collection, adsk.fusion.ChainedCurveOptions.noChainedCurves)
         if path is None: raise _MutationError('path_invalid', 'Fusion could not create the specified connected path')
         sweeps = owner.features.sweepFeatures

@@ -46,13 +46,15 @@ class _Sketch(_Entity):
         self.geometricConstraints = Collection()
         self.geometricConstraints.addHorizontal = lambda *_: _Entity(self.geometricConstraints)
         self.geometricConstraints.addVertical = lambda *_: _Entity(self.geometricConstraints)
-        self.geometricConstraints.addCoincident = lambda *_: _Entity(self.geometricConstraints)
+        self.geometricConstraints.addCoincident = self._coincident
         self.sketchDimensions = NS(addDistanceDimension=self._dimension, addDiameterDimension=self._dimension)
         self.sketchCurves = NS(
             sketchLines=NS(addCenterPointRectangle=self._center_rectangle, addTwoPointRectangle=self._corner_rectangle),
             sketchCircles=NS(addByCenterRadius=self._circle),
         )
         self.radii = []
+        self.circles = []
+        self.projected_point = None
 
     @property
     def isFullyConstrained(self):
@@ -62,6 +64,9 @@ class _Sketch(_Entity):
         parameter = _parameter("")
         self.dimensions.append(parameter)
         return NS(parameter=parameter)
+
+    def _coincident(self, point, target):
+        return _Entity(self.geometricConstraints, point=point, target=target)
 
     def _rectangle(self, lower, upper):
         x0, y0, x1, y1 = lower.geometry.x, lower.geometry.y, upper.x, upper.y
@@ -79,17 +84,21 @@ class _Sketch(_Entity):
 
     def _circle(self, center, radius):
         self.radii.append(radius)
-        x, y, _ = center.geometry.asArray()
+        center_point = center if hasattr(center, "geometry") else NS(geometry=center)
+        x, y, _ = center_point.geometry.asArray()
         bounds = (x - self.radii[0], y - self.radii[0], x + self.radii[0], y + self.radii[0])
         area = math.pi * (self.radii[0] ** 2 - radius ** 2) if len(self.radii) == 2 else math.pi * radius ** 2
         self.profiles.add(NS(sketch=self, profileLoops=NS(count=len(self.radii)), area=area, bounds=bounds))
-        return NS(centerSketchPoint=center)
+        circle = NS(centerSketchPoint=center_point)
+        self.circles.append(circle)
+        return circle
 
     def project2(self, entities, linked):
         entity = entities[0]
         x, y, z = entity.geometry.asArray()
         uv = {0: (-z, y), 1: (x, -z), 2: (x, y)}[self.plane.axis]
-        return [_ProjectedPoint(geometry=_point(*uv, 0), isLinked=linked)]
+        self.projected_point = _ProjectedPoint(geometry=_point(*uv, 0), isLinked=linked)
+        return [self.projected_point]
 
     def sketchToModelSpace(self, position):
         u, v, n = position.asArray()
@@ -237,7 +246,11 @@ class _Rig:
                 body.volume -= amount
             def restore():
                 body.volume = prior
-        extent = _parameter(inputs.expression)
+        negative = inputs.direction == "negative"
+        signed_expression = f"-( {inputs.expression} )" if negative else inputs.expression
+        extent = _parameter(signed_expression)
+        extent.name = "d_extent"
+        extent.value = -length if negative else length
         if self.lose_dimension:
             extent.expression = "1 mm"
         return _Entity(self.root.features, bodies=Collection([body]), restore=restore,
@@ -323,6 +336,29 @@ def test_boss_uses_ring_profile_signed_anchor_and_explicit_combine(monkeypatch):
     assert rig.root.bRepBodies.items == [body, sibling]
     assert sibling.volume == 2.0
 
+    sketch = rig.root.sketches.item(0)
+    centers = [circle.centerSketchPoint for circle in sketch.circles]
+    assert len(centers) == 2 and centers[0] is not centers[1]
+    assert sketch.geometricConstraints.count == 2
+    for center, constraint in zip(centers, sketch.geometricConstraints.items, strict=True):
+        assert center is not sketch.projected_point
+        assert center.geometry.asArray() == sketch.projected_point.geometry.asArray()
+        assert constraint.point is center
+        assert constraint.target is sketch.projected_point
+
+
+def test_refused_boss_coincidence_rolls_back_before_extruding(monkeypatch):
+    rig = _Rig(monkeypatch)
+    monkeypatch.setattr(_Sketch, "_coincident", lambda *_: None)
+
+    env = p.create_mounting_boss(rig.adapter, "Standoff", "-5 mm", "-7 mm", "3 mm",
+                                "6 mm", "2 mm", "4 mm")
+
+    assert env.error == "constraint_failed"
+    assert env.result["rollback"]["status"] == "verified"
+    assert all(call[0] == "offset" for call in rig.calls)
+    assert rig.root.bRepBodies.count == rig.root.sketches.count == 0
+
 
 @pytest.mark.parametrize(("plane", "direction", "corner", "normal"), [
     ("xy", "positive", [4, 8, 5], [0, 0, 1]),
@@ -331,10 +367,11 @@ def test_boss_uses_ring_profile_signed_anchor_and_explicit_combine(monkeypatch):
 ])
 def test_cutout_scopes_the_cut_and_reports_the_component_frame(monkeypatch, plane, direction, corner, normal):
     rig = _Rig(monkeypatch)
+    rig.driver_values["port_depth"] = 2
     target = rig.body("Lid", 15.0, (-2, -2, 0, 2, 2, 1))
     sibling = rig.body("PCB", 10.0, (-2, -2, 0, 2, 2, 1))
     env = p.create_cutout(rig.adapter, "Port", "Lid", "-4 mm", "3 mm", "5 mm",
-                          "8 mm", "5 mm", "2 mm", plane=plane, direction=direction)
+                          "8 mm", "5 mm", "port_depth", plane=plane, direction=direction)
 
     assert env.ok, env.result
     assert env.result["removed_volume_mm3"] == pytest.approx(80)
@@ -342,8 +379,35 @@ def test_cutout_scopes_the_cut_and_reports_the_component_frame(monkeypatch, plan
     assert env.result["profile_corners_component_mm"][3] == pytest.approx(corner)
     assert env.result["cut_direction_component"] == normal
     assert rig.calls[-1] == ("cut", ["Lid"], direction)
+    extent = rig.root.features.item(0).extentOne.distance
+    assert extent.expression == ("-( port_depth )" if direction == "negative" else "port_depth")
+    assert extent.value == pytest.approx(-0.2 if direction == "negative" else 0.2)
     assert target.volume == pytest.approx(14.92)
     assert sibling.volume == 10.0
+
+
+def test_negative_cut_rejects_equivalent_literal_that_loses_its_depth_driver(monkeypatch):
+    rig = _Rig(monkeypatch)
+    rig.driver_values["port_depth"] = 2
+    target = rig.body("Lid", 15.0, (-2, -2, 0, 2, 2, 1))
+    extrudes = rig.root.features.extrudeFeatures
+    original_add = extrudes.add
+
+    def freeze_depth(inputs):
+        feature = original_add(inputs)
+        feature.extentOne.distance.expression = "-2 mm"
+        return feature
+
+    monkeypatch.setattr(extrudes, "add", freeze_depth)
+    env = p.create_cutout(rig.adapter, "Port", "Lid", "-4 mm", "3 mm", "5 mm",
+                          "8 mm", "5 mm", "port_depth", plane="xz", direction="negative")
+
+    assert env.error == "dimension_expression_mismatch"
+    assert env.result["requested_expression"] == "-(port_depth)"
+    assert env.result["actual_expression"] == "-2 mm"
+    assert env.result["parameter_name"] == "d_extent"
+    assert env.result["rollback"]["status"] == "verified"
+    assert target.volume == 15
 
 
 def test_noop_cutout_rolls_back_linked_anchor_and_empty_feature(monkeypatch):

@@ -38,7 +38,7 @@ file proves and what requires live Fusion.
 
 | Check | Observed result |
 | --- | --- |
-| Full suite, Python 3.12.14 | 785 passed, no skips |
+| Full suite, Python 3.12.14 | 790 passed, no skips |
 | Static checks | Ruff over source/tests/scripts and `git diff --check` passed |
 | Packaging | Wheel built; installed into a temporary target; all three bundled knowledge searches passed with checkout fallback disabled |
 | MCP wire | In-process client/server checks pass for legacy/new/raw tools, structured/text equivalence, error flags, images and required arguments |
@@ -59,53 +59,36 @@ evidence, not live Fusion geometry verification.
 
 ## Live evidence
 
-The [P0 regression report](prebenchmark-p0-live.json) records 30 passed checks and
-4 blocked checks on an intermediate upgrade revision: real geometry, parameter
-propagation, nested authoring, handles, assembly poses, joints, interference,
-local file exchange and camera/timeline restoration. All 36 inspected features
-and sketches were healthy. The test's unsaved document was closed.
+The fresh-session [baseline report](prebenchmark-p0-live.json) on Fusion 2706.1.17 completed **30 checks**, with **4 blocked** for unsupported IGES/SAT exports and missing paired import fixtures. All 36 inspected features and sketches were healthy, and the disposable fixture was closed. These checks include real geometry, parameter propagation, nested authoring, scoped handles, assembly poses, joints, interference, local file exchange and camera/timeline restoration.
 
-The [interrupted capability report](prebenchmark-capabilities-interrupted.json)
-preserves seven completed checks and its overall failure status. It is **not a
-completed live pass of the final working tree**. Completed observations include:
+A separate [capability fixture](prebenchmark-capabilities-live.json) completed **16 checks** and closed its disposable document; all 30 inspected features and sketches were healthy. Its scoped evidence includes:
 
-| Capability | Independently checked evidence |
+| Capability | Measured evidence |
 | --- | --- |
-| Nested rotated component inspection | Body bounds `[92,30,10]` to `[100,42,12]` mm |
-| Absolute placement relative to a parent | Bounds `[72,40,13]` to `[80,52,15]` mm; same-pose retry reports no change |
-| Semantic geometry and feature inspection | One top face at Z=15 mm; expected-count refusal for six planar faces; native feature parameters |
-| Shared insertion and metadata | Duplicate operation refused; metadata round-trip; shared definition edit refused; second occurrence bounds checked |
-| Clearance requirements | Measured 8 mm; 7 mm threshold passes, 9 mm threshold fails; bounds and no-interference checks pass |
-| Contained solid interference | 125 mm³ overlap detected even with positive distance between surfaces |
-| Parametric enclosure | 11,712 mm³ initially; width edit changes it to 13,232 mm³ with bounds ±35/±20/Z0..20 mm; duplicate name refused |
+| Nested inspection, placement and hierarchy | Rotated and nested occurrence bounds and relative absolute-placement readback; repeated placement was a no-op. |
+| References and assemblies | Shared insertion, duplicate-operation refusal, scoped-handle placement and validation, reference metadata round-trip, and shared-definition edit refusal. Metadata save/reopen persistence remains untested. |
+| Mechanical checks | 8 mm clearance passes a 7 mm requirement and violates 9 mm; contained solids report 125 mm³ interference. Bounds checks remain axis-aligned. |
+| Enclosure | 11,712 mm³ initially; width parameter edit produced 13,232 mm³ and bounds ±35/±20/Z0..20 mm; duplicate name refused. An independent variant measured 25,112 mm³. |
+| Annular boss and cutout | Boss added 54π mm³ and side cutout removed 64 mm³. Moving the boss anchor updated the actual B-rep. An explicit coincidence constraint was needed: the prior shared-point approach moved sketch geometry but could leave the solid stale. |
+| Targeted recovery | A deliberately missed cut reported verified targeted rollback, with the fixture's recorded timeline, body inventory and measurements restored. This does not prove identical topology or general rollback. |
+| Native child sweep | A radius parameter edit from 2 to 3 mm changed volume from 80π to 180π mm³, with scoped-body-handle validation and duplicate-name refusal. Child path curves required occurrence proxies; the profile remained native. |
 
-Fusion's own MCP subsequently returned an empty successful reply even for a
-direct read-only print probe. The same symptom occurred independently of this
-adapter. Restarting the desktop application temporarily restored output; the
-cause is unresolved. No Autodesk output writer or security mechanism was patched.
-The interrupted harness could not confirm cleanup through stdout. A separate
-read-only diagnostic confirmed its fixture was closed and only a blank,
-unmodified document remained. The original report is retained without rewriting
-its cleanup status as a successful harness result.
+The completed capability report includes the rotated nested sweep. After changing its radius to 3 mm, volume was 180π mm³ and root-frame bounds were `[36,71,12]` to `[56,77,18]` mm.
 
-The final live harness additionally checks hierarchy, independent component
-copies, scoped-handle placement/validation, bosses, signed side cutouts, targeted
-failed-cut recovery and sweep parameter propagation. The reports do not yet
-record passing live results for those checks. A separate Fusion probe confirmed
-that a linked sketch point followed its construction-plane offset when edited.
-That observation covers the anchor only. Run both commands from the checkout
-with `PYTHONPATH=src`.
+The same capability report exercises negative cut depth: named `side_depth` changed 3→2→3 mm and total removed volume across two cuts changed 192→128→192 mm³. A cutout X parameter change from -4 to 8 mm was checked against actual B-rep faces at 8 and 16 mm. These observations cover the stated fixtures, not all parameter expressions or future edits.
+
+The [interrupted capability report](prebenchmark-capabilities-interrupted.json) is retained as an interrupted run, not a final pass. In that run Autodesk's own MCP returned an empty successful reply even for a direct read-only print probe. The symptom later recurred during a baseline run after the completed 16-check capability run. An unmodified blank design was independently confirmed through Autodesk's document read; restarting the hidden background Fusion process restored output, and the fresh baseline above completed. The cause remains unresolved; no Autodesk output writer or security mechanism was patched. Do not blindly retry a write after a missing reply.
+
+Run the two disposable-fixture harnesses from the checkout with `PYTHONPATH=src`:
 
 ```text
 python scripts/live_regression.py --run --report outputs/regression.json
 python scripts/live_capabilities.py --run --report outputs/capabilities.json
 ```
 
-Both scripts create disposable unsaved documents. Typed test scripts check the
-fixture's identity, name and unsaved status in the same call before their body
-executes. Cleanup checks those properties again and requires an explicit close
-acknowledgement. Missing creation or cleanup replies leave cleanup unverified.
-Reports omit tokens, document identities, account data and local paths.
+Both scripts check fixture identity, name and unsaved status before mutation and require explicit close acknowledgement. Missing creation or cleanup replies leave cleanup unverified. Reports omit tokens, document identities, account data and local paths.
+
+The related Fusion API references are [assembly proxies](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ComponentsProxies_UM.htm), [path creation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_Path_create.htm), [one-sided extrude extents](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_ExtrudeFeatureInput_setOneSideExtent.htm) and [geometric constraints](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_GeometricConstraints.htm).
 
 ## Verification limits and deferred work
 

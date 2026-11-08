@@ -198,7 +198,7 @@
       "name": "component_export_f3d",
       "status": "passed",
       "evidence": {
-        "bytes": 62746
+        "bytes": 62550
       }
     },
     {
@@ -219,7 +219,7 @@
       "name": "component_export_3mf",
       "status": "passed",
       "evidence": {
-        "bytes": 18160
+        "bytes": 18159
       }
     },
     {

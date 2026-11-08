@@ -37,16 +37,7 @@ of modeling correctness. The revolve helper-name assertion was removed and
 replaced with an executable ambiguity/no-feature-add check. Parameterized cases
 are reported as cases rather than multiplied into historical audit totals.
 
-Live evidence belongs in the live report, not in the fake-test claims above. At
-review time the reported disposable Fusion checks included nested rotated
-inspection, relative/absolute placement and no-op handling, shared insertion
-and retry identity, clearance thresholds, contained-solid interference, health,
-and an enclosure with analytic geometry and parameter propagation. A boss run
-had returned empty stdout and was not a demonstrated pass; sweep and other
-primitive coverage require their own completed live checks. No conclusion about
-those results is inferred from the offline doubles. Unsupported exports/imports,
-cloud-file workflows, cavity containment, topology equivalence, and arbitrary
-CAD designs remain outside this review.
+Live evidence belongs in the live report, not in the fake-test claims above. A completed disposable Fusion capability fixture passed 16 checks with 30 healthy features/sketches and a confirmed close; it covered rotated nested inspection and placement, metadata, interference and clearance, parameter-driven enclosure, annular boss, side cutout, targeted recovery and a child sweep. The completed capability run includes rotated nested sweep bounds after a radius change, negative-depth cut parameter propagation, and cutout X-position changes against actual B-rep faces; see [prebenchmark validation](prebenchmark-validation.md) for precise scope and the earlier interrupted run. Unsupported IGES/SAT exchange, cloud-file workflows, cavity containment, topology equivalence and arbitrary CAD designs remain outside this review.
 
 An independent source-level comparison of the wire change against `HEAD` found
 all 75 previously registered tool argument signatures and forwarded return

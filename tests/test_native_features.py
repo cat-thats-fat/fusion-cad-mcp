@@ -176,7 +176,9 @@ def test_duplicate_sketch_selector_refused(monkeypatch):
     assert calls == []
 
 
-def test_child_sweep_emits_proxy_tokens(monkeypatch):
+@pytest.mark.parametrize("path", ["Board:1", "Carrier:1+Board:1"])
+@pytest.mark.parametrize("missing_proxy", [False, True])
+def test_child_sweep_uses_occurrence_context_and_native_profile(monkeypatch, path, missing_proxy):
 
     class Native(SimpleNamespace):
         def __getattribute__(self, name):
@@ -188,6 +190,23 @@ def test_child_sweep_emits_proxy_tokens(monkeypatch):
             return SimpleNamespace(entityToken=self.proxy_token)
 
     adapter, component, calls, old_feature = fixture(monkeypatch)
+    path_curve = component.sketches.item(1).sketchCurves.sketchLines.item(0)
+    curve_proxy = SimpleNamespace(isValid=True)
+    observed = []
+
+    def proxy_for(occurrence):
+        observed.append(occurrence)
+        return None if missing_proxy else curve_proxy
+
+    path_curve.createForAssemblyContext = proxy_for
+    profile = component.sketches.item(0).profiles.item(0)
+    inputs = []
+
+    def capture_input(p, path, op):
+        inputs.append((p, path, op))
+        return (p, path, op)
+
+    component.features.sweepFeatures.createInput = capture_input
     import adsk.core
 
     native_body = Native(**vars(old_feature.bodies.item(0)), proxy_token="proxy-body")
@@ -198,7 +217,10 @@ def test_child_sweep_emits_proxy_tokens(monkeypatch):
         component.features.items.append(native_feature) or native_feature
     )
     occ = SimpleNamespace(
-        fullPathName="Board:1",
+        fullPathName=path,
+        transform2=SimpleNamespace(
+            asArray=lambda: [0, -1, 0, 5, 1, 0, 0, 3, 0, 0, 1, 1, 0, 0, 0, 1]
+        ),
         component=component,
         bRepBodies=Collection(),
         isReferencedComponent=False,
@@ -206,11 +228,20 @@ def test_child_sweep_emits_proxy_tokens(monkeypatch):
     top = root_with(name="Root", sketches=Collection(), features=Collection(), occurrences=[occ])
     top.occurrences = Collection([occ])
     adsk.core.Application.get().activeProduct.rootComponent = top
-    out = n.sweep(adapter, "Board:1 / profile", "Board:1 / path", ["line:0"], name="SweepTest")
+    out = n.sweep(adapter, path + " / profile", path + " / path", ["line:0"], name="SweepTest")
+    assert observed == [occ]
+    if missing_proxy:
+        assert out.error == "path_proxy_unavailable"
+        assert out.result["rollback"]["status"] == "verified"
+        assert calls == []
+        return
     assert out.ok, out.result
-    assert "|occ=Board:1|doc=" in out.result["feature_handle"]
+    assert "|occ=" + path + "|doc=" in out.result["feature_handle"]
     assert out.result["feature_handle"].endswith(":proxy-feature")
     assert out.result["bodies"][0]["handle"].endswith(":proxy-body")
+    assert calls[0][1] == [curve_proxy]
+    # Input creation must keep the profile native, as the live Fusion probe established.
+    assert inputs[0][0] is profile
 
 
 @pytest.mark.parametrize("name", [None, "", "   "])

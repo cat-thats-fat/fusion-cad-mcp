@@ -117,11 +117,17 @@ def _verify_bindings(manager, bindings):
     units = manager.defaultLengthUnits
     for parameter, requested in bindings:
         _require(parameter is not None and parameter.isValid, 'dimension_expression_mismatch',
-                 'Fusion did not retain a native feature parameter')
+                 'Fusion did not retain a native feature parameter', requested_expression=requested)
+        actual_expression = parameter.expression
         expected = manager.standardizeExpression(requested, units)
-        actual = manager.standardizeExpression(parameter.expression, units)
-        _require(expected and actual == expected, 'dimension_expression_mismatch',
-                 'A native dimension or extent lost its requested expression')
+        actual = manager.standardizeExpression(actual_expression, units)
+        if not expected or actual != expected:
+            try: parameter_name = getattr(parameter, 'name', None)
+            except Exception: parameter_name = None
+            raise _MutationError('dimension_expression_mismatch',
+                                 'A native dimension or extent lost its requested expression',
+                                 requested_expression=requested, actual_expression=actual_expression,
+                                 parameter_name=parameter_name)
 
 
 def _rectangle(sketch, anchor, width, height, width_expr, height_expr, centered):
@@ -180,8 +186,11 @@ def _rectangle(sketch, anchor, width, height, width_expr, height_expr, centered)
 
 def _circle(sketch, anchor, diameter, expression):
     center = anchor.geometry
-    circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(anchor, diameter / 2)
+    # Fusion 2706 moved a directly shared projected center without moving the
+    # resulting solid. A separate center with explicit coincidence rebuilt it.
+    circle = sketch.sketchCurves.sketchCircles.addByCenterRadius(P(center.x, center.y, 0), diameter / 2)
     _require(circle is not None, 'circle_failed', 'Fusion refused a boss circle')
+    _constraint(sketch.geometricConstraints.addCoincident(circle.centerSketchPoint, anchor))
     return _bind(sketch.sketchDimensions.addDiameterDimension(circle,
                  P(center.x + diameter, center.y + diameter, 0)), expression)
 
@@ -201,7 +210,10 @@ def _extrude(tx, profile, expression, name, *, target=None, direction='positive'
     feature.name = name
     native_extent = adsk.fusion.DistanceExtentDefinition.cast(feature.extentOne)
     _require(native_extent is not None, 'extrude_not_parametric', 'Fusion did not retain a distance extent')
-    return feature, (native_extent.distance, expression)
+    # Fusion 2706 stores a negative extent as the negation of the supplied
+    # formula. Check that the signed expression still references its drivers.
+    stored_expression = '-(' + expression + ')' if direction == 'negative' else expression
+    return feature, (native_extent.distance, stored_expression)
 
 
 def _positive_z(sketch):

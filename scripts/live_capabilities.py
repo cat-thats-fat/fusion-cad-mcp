@@ -165,6 +165,8 @@ class CapabilityFixture(Fixture):
             {"name": "case_wall", "expression": "2 mm", "units": "mm"},
             {"name": "case_floor", "expression": "2 mm", "units": "mm"},
             {"name": "boss_x", "expression": "-20 mm", "units": "mm"},
+            {"name": "port_x", "expression": "-4 mm", "units": "mm"},
+            {"name": "side_depth", "expression": "3 mm", "units": "mm"},
         ]))
         case = checked(placement.create_component(adapter, "Case"))["occurrence"]["path"]
         result = checked(primitives.create_parametric_enclosure(adapter, "Housing", "case_width", "case_depth",
@@ -186,7 +188,7 @@ class CapabilityFixture(Fixture):
         boss = checked(primitives.create_mounting_boss(adapter, "Mount", "boss_x", "-10 mm", "case_floor",
                        "6 mm", "3 mm", "8 mm", case, body))
         near(boss["added_volume_mm3"], 54 * math.pi)
-        cut = checked(primitives.create_cutout(adapter, "Port", body, "-4 mm", "-20 mm", "10 mm",
+        cut = checked(primitives.create_cutout(adapter, "Port", body, "port_x", "-20 mm", "10 mm",
                       "8 mm", "4 mm", "2 mm", "xz", "positive", case))
         near(cut["removed_volume_mm3"], 64)
         near(cut["cut_direction_component"], [0, 1, 0])
@@ -199,6 +201,25 @@ class CapabilityFixture(Fixture):
         near((sample[0] + 18)**2 + (sample[1] + 10)**2, 9)
         self.record("annular_boss_side_cutout_and_signed_anchor", {"boss_added_mm3": 54*math.pi,
                     "port_removed_mm3": 64, "edited_boss_center_mm": [-18, -10]})
+        checked(parameters.update_parameter(adapter, "port_x", "8 mm"))
+        port_faces = self.script("""
+            d=adsk.fusion.Design.cast(app.activeProduct)
+            components=[c for c in d.allComponents if c.name=='Case']
+            assert len(components)==1
+            bodies=[b for b in components[0].bRepBodies if b.name=='Housing']
+            assert len(bodies)==1
+            positions=[]
+            for face in bodies[0].faces:
+                plane=adsk.core.Plane.cast(face.geometry)
+                if not plane or abs(plane.normal.x)<0.99: continue
+                box=face.boundingBox
+                values=[box.minPoint.y,box.maxPoint.y,box.minPoint.z,box.maxPoint.z]
+                if all(math.isclose(a,b,abs_tol=1e-7) for a,b in zip(values,[-2,-1.8,0.6,1])):
+                    positions.append(box.minPoint.x*10)
+            print(json.dumps({'x_mm':sorted(positions)}))
+        """)
+        near(port_faces["x_mm"], [8, 16])
+        self.record("cutout_position_parameter_propagation", port_faces)
 
         before = self.script("""
             design=adsk.fusion.Design.cast(app.activeProduct)
@@ -223,25 +244,35 @@ class CapabilityFixture(Fixture):
         # Exercise opposite signs and a different native origin-plane frame.
         # The two profiles are on separate walls, so their removed volumes add.
         back = checked(primitives.create_cutout(adapter, "Back", variant["body"], "-4 mm", "25 mm", "12 mm",
-                       "8 mm", "4 mm", "3 mm", "xz", "negative", second))
+                       "8 mm", "4 mm", "side_depth", "xz", "negative", second))
         near(back["cut_direction_component"], [0, -1, 0])
         near(back["profile_corners_component_mm"], [[-4, 25, 12], [4, 25, 12],
                                                    [-4, 25, 8], [4, 25, 8]])
         near(back["removed_volume_mm3"], 96)
         right = checked(primitives.create_cutout(adapter, "Right", variant["body"], "40 mm", "-4 mm", "12 mm",
-                        "4 mm", "8 mm", "3 mm", "yz", "negative", second))
+                        "4 mm", "8 mm", "side_depth", "yz", "negative", second))
         near(right["cut_direction_component"], [-1, 0, 0])
         near(right["profile_corners_component_mm"], [[40, -4, 12], [40, -4, 8],
                                                     [40, 4, 12], [40, 4, 8]])
         near(right["removed_volume_mm3"], 96)
         near(checked(verify.volume(adapter, variant["body"]))["bodies"][0]["volume_mm3"], 25112-192)
+        checked(parameters.update_parameter(adapter, "side_depth", "2 mm"))
+        near(checked(verify.volume(adapter, variant["body"]))["bodies"][0]["volume_mm3"], 25112-128)
+        checked(parameters.update_parameter(adapter, "side_depth", "3 mm"))
+        near(checked(verify.volume(adapter, variant["body"]))["bodies"][0]["volume_mm3"], 25112-192)
         self.record("opposite_direction_and_yz_side_cutouts", {"removed_mm3": [96, 96],
                     "directions": [[0, -1, 0], [-1, 0, 0]],
+                    "edited_depth_mm": [2, 3], "edited_total_removed_mm3": [128, 192],
                     "yz_corners_component_mm": right["profile_corners_component_mm"]})
 
     def native_sweep(self):
         adapter = self.adapter
-        cable = checked(placement.create_component(adapter, "CableEnvelope"))["occurrence"]["path"]
+        frame = checked(placement.create_component(adapter, "CableFrame"))["occurrence"]["path"]
+        checked(assembly.unground_component(adapter, frame))
+        checked(placement.place_component(adapter, frame, [30, 70, 10], [0, 1, 0], [0, 0, 1]))
+        cable = checked(placement.create_component(adapter, "CableEnvelope", frame))["occurrence"]["path"]
+        checked(assembly.unground_component(adapter, cable))
+        checked(placement.place_component(adapter, cable, [4, 5, 6], relative_to=frame))
         checked(parameters.add_parameters(adapter, [{"name": "cable_radius", "expression": "2 mm", "units": "mm"}]))
         checked(sketch.create_sketch(adapter, "xy", "Cable Profile", cable))
         profile = cable + " / Cable Profile"
@@ -257,19 +288,20 @@ class CapabilityFixture(Fixture):
         near(result["bodies"][0]["bounds_mm"]["min"], [-2, -2, 0])
         near(result["bodies"][0]["bounds_mm"]["max"], [2, 2, 20])
         measured = checked(validation.validate_design(adapter, [{"type": "bounds",
-            "body": result["bodies"][0]["handle"], "min_mm": [-2, -2, 0], "max_mm": [2, 2, 20],
+            "body": result["bodies"][0]["handle"], "min_mm": [36, 72, 13], "max_mm": [56, 76, 17],
             "tolerance_mm": 0.0001}]))
         assert measured["checks"][0]["status"] == "pass"
         checked(parameters.update_parameter(adapter, "cable_radius", "3 mm"))
         native_body = cable + " / " + result["bodies"][0]["name"]
         near(checked(verify.volume(adapter, native_body))["bodies"][0]["volume_mm3"], 180 * math.pi)
         resized_bounds = checked(verify.bounding_box(adapter, native_body))["bodies"][0]["bbox_mm"]
-        near(resized_bounds["min"], [-3, -3, 0])
-        near(resized_bounds["max"], [3, 3, 20])
+        near(resized_bounds["min"], [36, 71, 12])
+        near(resized_bounds["max"], [56, 77, 18])
         duplicate = native_features.sweep(adapter, profile, path, ["line:0"], name="Cable Sweep")
         assert not duplicate.ok and duplicate.error == "feature_name_taken"
-        self.record("native_child_sweep_edit_and_handle_roundtrip", {"initial_volume_mm3": 80*math.pi,
-                    "edited_volume_mm3": 180*math.pi, "retry_error": duplicate.error})
+        self.record("native_nested_rotated_sweep_edit_and_handle_roundtrip", {"initial_volume_mm3": 80*math.pi,
+                    "edited_volume_mm3": 180*math.pi, "edited_root_bounds_mm": resized_bounds,
+                    "retry_error": duplicate.error})
 
 
 def main():

@@ -65,7 +65,7 @@ Availability depends on the Fusion API version. Full reference with signatures, 
 
 `rib` checks whether Fusion exposes a writable rib API and returns `rib_not_scriptable` if it does not. This refusal was verified on 2705.1.30; actual rib creation was verified on 2706.1.17. `is_flipped` controls the in-plane direction, and unhealthy features return an error with `model_may_have_changed`. `rebuild_feature` returns `safe_rebuild_unavailable` without changing the design.
 
-The capability upgrade has a [verification report](docs/prebenchmark-validation.md), [implementation plan](docs/prebenchmark-plan.md), and [test review](docs/prebenchmark-test-review.md). The earlier modernization has separate [historical evidence](docs/validation.md) and a [test-by-test review ledger](tests/audit/README.md). Historical modeling recipes retain version-specific observations and some retired API examples; use the current tools and Autodesk API documentation when adapting them.
+The capability upgrade has a [verification report](docs/prebenchmark-validation.md), [implementation plan](docs/prebenchmark-plan.md), and [test review](docs/prebenchmark-test-review.md). Its disposable Fusion fixtures cover the stated enclosure, boss, cutout, assembly and sweep workflows; results are not proof for arbitrary designs. An intermittent Autodesk empty-stdout issue remains unresolved, so inspect an uncertain write before retrying. The earlier modernization has separate [historical evidence](docs/validation.md) and a [test-by-test review ledger](tests/audit/README.md). Historical modeling recipes retain version-specific observations and some retired API examples; use the current tools and Autodesk API documentation when adapting them.
 
 ## Assembly and enclosure workflow
 

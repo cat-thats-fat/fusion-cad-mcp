@@ -585,26 +585,15 @@ class Fixture:
         )
 
     def document_scope(self, handle_a, handle_b):
-        second = self.script("""
-            doc=app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
-            doc.name='MCP Live Regression Scope'
-            print(json.dumps({'id':doc.creationId}))
-        """)["id"]
+        # A separate owned fixture lets the same-call guard protect this read
+        # while deliberately testing handles from another document.
+        second = Fixture(self.transport)
         try:
-            result = handle_tools.measure(self.adapter, handle_a, handle_b)
+            second.start()
+            result = handle_tools.measure(second.adapter, handle_a, handle_b)
             assert not result.ok and result.error == "handle_invalid"
         finally:
-            self.script(
-                f"""
-                docs=[app.documents.item(i) for i in range(app.documents.count)]
-                other=next(d for d in docs if d.creationId=={second!r})
-                assert other.name=='MCP Live Regression Scope'
-                other.close(False)
-                next(d for d in docs if d.creationId=={self.creation_id!r}).activate()
-                print(json.dumps({{'restored':True}}))
-            """,
-                guard=False,
-            )
+            second.close()
         self.record("cross_document_handle_refusal", {"error": "handle_invalid"})
 
     def io_checks(self):

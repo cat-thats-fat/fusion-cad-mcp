@@ -7,7 +7,7 @@ description: "Use this skill whenever the user wants to do CAD work through Auto
 
 Drive Autodesk Fusion safely and efficiently through an MCP server.
 
-> Built from production Fusion sessions plus a dedicated live test battery against Fusion 2704.1.23. Free to use and modify.
+> Includes historical observations and scoped live tests through Fusion 2706.1.17. See the validation report; these checks do not cover every design or version.
 
 ## Which server are you talking to?
 
@@ -86,6 +86,8 @@ Full catalog in `gotchas.md`. These bite first.
 **Edge lengths use Fusion curve length.** Axis-parallel filtering applies only to straight edges; `parallel_to="any"` can include curves. Use `query_geometry` for bounded semantic selection.
 
 **`add_hole` targets one body.** Provide a face handle and a point on that planar face, or omit the handle to select the nearest upward planar face containing the XY point. The Z coordinate selects among candidate faces. Child-component bodies are currently refused; inspect `actual_position_mm`.
+
+**Verify parameter propagation on actual bodies.** In Fusion 2706.1.17 a projected boss center moved in its sketch while the B-rep stayed stale until an explicit coincidence constraint was added. Check cylindrical faces, volumes and bounds after edits; the tested negative cut depth also required expression and B-rep readback.
 
 **Failures may leave changes.** Do not assume an exception or timeout rolled a script back. Inspect the design and reported mutation/rollback state before retrying; targeted cleanup has only the scope explicitly reported. Undo can also affect unrelated work, so inspect before using it.
 

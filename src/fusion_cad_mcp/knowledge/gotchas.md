@@ -2,6 +2,14 @@
 
 Failure modes from production sessions plus stress-test findings. Each entry: what happens, why, the fix.
 
+## A projected boss center can move while its solid stays stale (Fusion 2706.1.17)
+
+A projected anchor changed with its parameter and the circle shared the sketch point, but the extruded B-rep did not follow reliably. An explicit coincidence constraint between the projected point and circle center fixed the tested annular boss. Verify the actual cylindrical faces or body bounds after a parameter edit; sketch coordinates alone do not establish downstream solid movement. See Autodesk's [geometric constraint API](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_GeometricConstraints.htm).
+
+## Negative extent expression and position require B-rep readback (Fusion 2706.1.17)
+
+In the tested negative side-cut fixture Fusion stored the extent expression as `-(side_depth)`. Editing `side_depth` 3→2→3 mm changed total measured removed volume across two cuts 192→128→192 mm³. A cutout X-position edit -4→8 mm was verified against B-rep faces at 8 and 16 mm. Check both the actual expression and resulting geometry; a negative direction enum alone is not evidence of parameter propagation. See [one-sided extrusion](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_ExtrudeFeatureInput_setOneSideExtent.htm).
+
 ## Lock-badge display lag on standalone script-built sketches (G9 corrected 2026-05-31)
 
 A sketch that is built by a script AND is not immediately consumed by a downstream feature in the same script can be fully constrained AND have a working parametric link to user parameters, while its browser-tree icon shows NO lock badge until you enter edit mode once. After exiting edit mode the badge stays. `design.computeAll()` does NOT force the badge to update.
@@ -1206,7 +1214,7 @@ Some old sessions observed that an exception removed earlier work in the same ca
 
 ## `Path.create` requires an assembly-context proxy (2026-07-31)
 
-`adsk.fusion.Path.create(entity, chainOptions)` fails on ANY entity native to a component:
+In the tested Fusion builds, `adsk.fusion.Path.create(entity, chainOptions)` failed on the tested native child-component entities:
 
 ```
 RuntimeError: 2 : InternalValidationError : Utils::getObjectPath(sketchCurve, objPath, nullptr, contextPath)
@@ -1230,7 +1238,7 @@ Verified matrix, geometry inside a component occurrence:
 | proxied sketch line | OK |
 | proxied construction line | OK |
 
-Construction geometry is perfectly valid as a path. The proxy is the only thing that matters.
+In this fixture, child path curves required the selected occurrence proxy. A 2706.1.17 child sweep succeeded with proxied path curves and its native same-component profile; check returned geometry and parameter propagation for other contexts.
 
 Related: prefer a sketch line over a body edge as a pattern path. Any cut you make along that edge
 splits it into fragments, and the path silently stops covering the full span.
