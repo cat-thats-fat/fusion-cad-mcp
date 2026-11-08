@@ -52,8 +52,8 @@ Per-occurrence paths, transforms and flags remain intact. Pagination and selecte
 - Independent implementation and import-guidance reviews completed.
 - A live read-only assembly probe returned `inspect_assembly_parse_failed` with
   no stdout. A separate direct Autodesk print probe also returned
-  `success: true` with an empty message. This again reproduces the upstream
-  missing-stdout symptom, but does not establish its cause. The response-size correction is
+  `success: true` with an empty message. This again reproduces the missing-stdout
+  symptom, but does not establish its cause. The response-size correction is
   **not a fix for missing stdout**; successful live validation of the new
   inspection path was blocked. Fusion was not restarted and no open document
   was modified during these follow-up probes.
