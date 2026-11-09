@@ -617,6 +617,7 @@ def test_obj_retargeted_dependency_alias_is_refused(fusion, tmp_path):
     script = build_obj_import(str(source), None, "mm", None, "require_resources")
     alias.unlink()
     alias.symlink_to(outside, target_is_directory=True)
+    fusion.root.meshBodies = _Collection()
     env = io_tool._ok_runner(fusion.adapter, script, "import_geometry")
     assert env.error == "dependency_changed"
     assert env.result["mutation_state"] == "not_started"

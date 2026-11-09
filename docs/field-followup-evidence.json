@@ -124,6 +124,19 @@
       "ok": true,
       "closed_owned_documents": 8,
       "originals_intact": true
+    },
+    "dimensionless": {
+      "ok": true,
+      "unitless_self_comparison_passed": true,
+      "unitless_checkpoint_reopen_passed": true,
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 3,
+      "cleanup": {
+        "ok": true,
+        "closed_owned_documents": 3,
+        "originals_intact": true
+      }
     }
   },
   "workspace_regression": {
@@ -466,7 +479,7 @@
     ]
   },
   "automated": {
-    "passed": 1186,
+    "passed": 1187,
     "skipped": 1,
     "skip": "Windows symbolic-link privilege unavailable; separate native junction retarget rejection checked"
   },

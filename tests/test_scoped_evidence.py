@@ -465,3 +465,51 @@ def test_native_volume_capture_records_requested_accuracy():
         "value": 2000,
         "accuracy": "LowCalculationAccuracy",
     }
+
+
+def test_scoped_dimensionless_parameter_capture_and_comparison():
+    import inspect
+    from types import SimpleNamespace as NS
+
+    from fusion_cad_mcp import scoped_evidence
+    from fusion_cad_mcp.native_mesh import MESH_EVIDENCE_SCRIPT
+
+    class Collection:
+        count = 1
+
+        def item(self, index):
+            assert index == 0
+            return NS(name="ratio", isValid=True, expression="2", unit="")
+
+    scope = {
+        "version": 1,
+        "path": "root",
+        "sections": [
+            {
+                "kind": "parameter",
+                "names": ["ratio"],
+                "fields": ["expression", "units"],
+                "tolerances": {},
+            }
+        ],
+    }
+    namespace = {}
+    exec(
+        inspect.getsource(scoped_evidence).split("SCOPED_CAPTURE_SCRIPT =", 1)[0]
+        + MESH_EVIDENCE_SCRIPT
+        + scoped_evidence.SCOPED_CAPTURE_SCRIPT,
+        namespace,
+    )
+    entry = {"root": NS(), "design": NS(userParameters=Collection()), "document": NS(name="d")}
+    evidence = namespace["_capture_scoped"](entry, "h", scope)
+    assert evidence["records"][0]["fields"]["units"]["value"] == ""
+    assert compare_scoped_evidence(scope, evidence, evidence)["status"] == "passed"
+    assert compare_scoped_evidence(scope, evidence, copy.deepcopy(evidence))["status"] == "passed"
+    other = copy.deepcopy(evidence)
+    other["records"][0]["fields"]["units"]["value"] = "mm"
+    assert compare_scoped_evidence(scope, evidence, other)["status"] == "failed"
+    other["records"][0]["fields"]["units"]["value"] = None
+    assert compare_scoped_evidence(scope, other, other)["status"] == "failed"
+    other = copy.deepcopy(evidence)
+    other["records"][0]["fields"]["expression"]["value"] = ""
+    assert compare_scoped_evidence(scope, other, other)["status"] == "failed"

@@ -43,6 +43,7 @@ The opt-in [field harness](../scripts/live_field_followup.py) confirmed:
   points matched the known nested transform. A deliberate uncovered ray reported
   `no_hit`; interval filtering retained only the intended hit. Identical replay
   remeasured; changing occurrence pose made retained evidence stale.
+- A dimensionless parameter with native units `""` passed self-comparison and accepted F3D checkpoint/reopen. Invalid unit types and empty expressions remain rejected.
 - Reordered scoped records passed; an omitted record failed. A mesh checkpoint
   passed source/reopened comparison. A named thickness propagated 10 → 12 → 10 mm;
   actual face distance followed it and protected B-rep witnesses stayed intact.
@@ -93,7 +94,7 @@ in [the backlog](field-followup-backlog.md).
 
 ## Automated verification and review
 
-- **1,186 passed, 1 skipped** in the final full automated suite. The skipped case
+- **1,187 passed, 1 skipped** in the final full automated suite. The skipped case
   requires Windows symbolic-link privileges; an independent real Windows junction
   retarget test exercised rejection before native dispatch.
 - Ruff, whitespace validation, wheel build and installed-wheel knowledge checks
@@ -105,7 +106,10 @@ in [the backlog](field-followup-backlog.md).
 - Independent reviewers checked the implementation and tests. Their findings
   led to fixes for alias retargeting, conflicting dependency roles, malformed
   line endings, bounded file reads, incomplete import accounting and recompute
-  coverage for restored copies/build seeds.
+  coverage for restored copies/build seeds. Automated PR review also identified
+  empty units on dimensionless parameters; the correction passed offline and live
+  archive tests. CI exposed an incomplete setup in the locally skipped symlink
+  test; its fixture was corrected without weakening the dependency check.
 
 Unit doubles establish validation and control flow, not Fusion modeling behavior.
 Live tests establish only the fixture operations and inspected requirements above.

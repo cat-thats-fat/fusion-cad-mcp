@@ -241,19 +241,26 @@ def compare_scoped_evidence(scope, before, after, *, allow_rebind=False):
                 if field == "witness":
                     equal = _evidence_mesh_equal(x, y, section["tolerances"][field])
                 elif (
-                    field == "bounds_mm"
-                    and not (_evidence_valid_bounds(x) and _evidence_valid_bounds(y))
-                    or field == "transform_cm"
-                    and not (_evidence_valid_pose(x) and _evidence_valid_pose(y))
-                ) or field == "volume_mm3" and (
-                    not _evidence_finite(x) or not _evidence_finite(y) or x < 0 or y < 0
+                    (
+                        field == "bounds_mm"
+                        and not (_evidence_valid_bounds(x) and _evidence_valid_bounds(y))
+                        or field == "transform_cm"
+                        and not (_evidence_valid_pose(x) and _evidence_valid_pose(y))
+                    )
+                    or field == "volume_mm3"
+                    and (not _evidence_finite(x) or not _evidence_finite(y) or x < 0 or y < 0)
                 ):
                     equal = False
                 elif field in section["tolerances"]:
                     shape = {"bounds_mm": [2, 3], "transform_cm": [16]}.get(field, [])
                     equal = _evidence_numeric_equal(x, y, section["tolerances"][field], shape)
                 else:
-                    equal = isinstance(x, str) and bool(x) and x == y
+                    equal = (
+                        isinstance(x, str)
+                        and isinstance(y, str)
+                        and x == y
+                        and (bool(x) or (kind == "parameter" and field == "units"))
+                    )
                 if not equal:
                     add(kind, name, field, "different_or_invalid")
     unknown_reasons = {
