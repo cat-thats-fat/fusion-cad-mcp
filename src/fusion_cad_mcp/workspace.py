@@ -33,6 +33,7 @@ from .edit_contract import (
 from .envelope import Envelope, parse_status_json
 from .execution import execute_typed_script
 from .receipts import get_status
+from .scoped_evidence import compare_scoped_evidence, prepare_evidence_scope
 from .workspace_store import WorkspaceError, WorkspaceStore, content_key
 
 SCHEMA_VERSION = 1
@@ -150,10 +151,12 @@ def _checks(checks, *, inspection=False):
 
 
 def _inspect(adapter, handle, parameter, checks, operation_id=None, *, expected_expression=None,
-             recovery_probe=False):
+             recovery_probe=False, scope=None):
     payload = {"target_handle": handle, "parameter_name": parameter, "checks": checks}
     if expected_expression is not None:
         payload["expected_expression"] = expected_expression
+    if scope is not None:
+        payload["scope"] = scope
     return _call(adapter, "inspect", payload, operation_id, recovery_probe=recovery_probe)
 
 
@@ -246,11 +249,14 @@ def _roundtrip(checks, before, after):
         b, _, _, count_b = _contract_measurement(row, second)
         if a is None or b is None or count_a != count_b or not within_tolerance(b, a, row["tolerance"]):
             mismatches.add(row["id"])
-    return {
+    result = {
         "parameter_matches": _same_parameter(before["parameter"], after["parameter"]),
         "witness_mismatches": sorted(mismatches),
         "healthy": _healthy(before) and _healthy(after),
     }
+    if "recompute" in after:
+        result["recompute"] = after["recompute"]
+    return result
 
 
 def _roundtrip_passed(evidence):
@@ -320,10 +326,19 @@ def bind(adapter, document_name=None):
         return _error("invalid_input", exc)
 
 
-def inspect_target(adapter, target_handle, parameter_name, checks):
+def inspect_target(adapter, target_handle, parameter_name, checks, scope=None, baseline=None):
     try:
-        return Envelope(ok=True, result=_inspect(adapter, target_handle, parameter_name,
-                                                _checks(checks, inspection=True)))
+        if scope is not None:
+            scope = prepare_evidence_scope(scope)
+        elif baseline is not None:
+            raise ValueError("baseline requires scope")
+        result = _inspect(adapter, target_handle, parameter_name,
+                          _checks(checks, inspection=True), scope=scope)
+        if scope is not None:
+            result["evidence_status"] = compare_scoped_evidence(scope, result.get("evidence"), result.get("evidence"))
+        if baseline is not None:
+            result["evidence_comparison"] = compare_scoped_evidence(scope, baseline, result.get("evidence"))
+        return Envelope(ok=True, result=result)
     except NativeFailure as exc:
         return exc.envelope
     except (ValueError, OSError, TypeError) as exc:
@@ -649,21 +664,35 @@ def _open(adapter, artifact, operation_id):
 
 
 def _reopen_and_inspect(adapter, artifact, operation_id, parameter, checks, *, phase="roundtrip",
-                        expected_expression=None, confirmed=None):
+                        expected_expression=None, confirmed=None, scope=None):
     opened = None
+    stage = "open"
     archive_context = {**(confirmed or {}), "artifact_hash": artifact["hash"], "artifact_state": "available"}
     try:
         with _phase(f"{phase}-open", "working_document_open", confirmed=archive_context,
                     artifact_hash=artifact["hash"]):
             opened = _open(adapter, artifact, _child(operation_id, f"{phase}-open"))
+        stage = "recompute"
+        with _phase(f"{phase}-recompute", "working_document_mutation",
+                    confirmed={**archive_context, "target_handle": opened["target_handle"]},
+                    artifact_hash=artifact["hash"]):
+            recomputed = _call(adapter, "recompute", {"target_handle": opened["target_handle"]},
+                               _child(operation_id, f"{phase}-recompute"))
+            if recomputed.get("recomputed") is not True:
+                raise NativeFailure(Envelope(ok=False, error="recompute_result_unknown"),
+                                    operation_id=_child(operation_id, f"{phase}-recompute"))
+        stage = "check"
         with _phase(f"{phase}-check", "readback",
                     confirmed={**archive_context, "target_handle": opened["target_handle"]},
                     artifact_hash=artifact["hash"]):
             observed = _inspect(adapter, opened["target_handle"], parameter, checks,
-                                _child(operation_id, f"{phase}-check"), expected_expression=expected_expression)
+                                _child(operation_id, f"{phase}-check"), expected_expression=expected_expression,
+                                scope=scope)
+        observed["recompute"] = {"status": "completed", "target_handle": opened["target_handle"],
+                                 "receipt": _public_receipt(recomputed.get("receipt"))}
         return opened, observed, None
     except NativeFailure as exc:
-        if opened is None and not exc.not_started:
+        if (opened is None or stage == "recompute") and not exc.not_started:
             raise
         # A confirmed open or preflight refusal leaves a known archive. A lost
         # read-only probe can withhold verification without fencing writes.
@@ -692,9 +721,11 @@ def _pointer(store, branch, kind):
 
 
 def checkpoint(adapter, workspace_path, target_handle, branch, requirements, parameter_name,
-               operation_id=None, expected_previous=None, accepted=False):
+               operation_id=None, expected_previous=None, accepted=False, evidence_scope=None):
     try:
         checks = _checks(requirements)
+        if evidence_scope is not None:
+            evidence_scope = prepare_evidence_scope(evidence_scope)
         _branch(branch)
         if type(accepted) is not bool:
             raise ValueError("accepted must be boolean")
@@ -711,6 +742,8 @@ def checkpoint(adapter, workspace_path, target_handle, branch, requirements, par
         return _error("invalid_checkpoint", exc)
     request = dict(target_handle=target_handle, branch=branch, requirements=checks,
                    parameter_name=parameter_name, expected_previous=expected_previous, accepted=accepted)
+    if evidence_scope is not None:
+        request["evidence_scope"] = evidence_scope
     def worker(store, op):
         requested_kind = "accepted" if accepted else "wip"
         prior_wip = _pointer(store, branch, "wip")
@@ -720,21 +753,32 @@ def checkpoint(adapter, workspace_path, target_handle, branch, requirements, par
                     "expected_previous": expected_previous, "current": prior}, None, None, None
         source = {"target_handle": target_handle, **_SOURCE_ACTIONS}
         with _phase("before", "readback", confirmed=source):
-            before = _inspect(adapter, target_handle, parameter_name, checks, _child(op, "before"))
+            before = _inspect(adapter, target_handle, parameter_name, checks, _child(op, "before"), scope=evidence_scope)
         initial = _snapshot_checks(checks, before["measurements"])
         source["source_verification"] = initial["verification"]
         with _phase("export", "archive_output", confirmed={**source, "artifact_state": "unavailable"}):
             artifact = _export(adapter, store, target_handle, _child(op, "export"))
         opened, after, failure = _reopen_and_inspect(
             adapter, artifact, op, parameter_name, checks, confirmed={**source, "execution": "completed"},
+            scope=evidence_scope,
         )
         result = _snapshot_checks(checks, after["measurements"] if after else {})
         details = _roundtrip(checks, before, after) if after else failure
+        if evidence_scope is not None:
+            comparison = compare_scoped_evidence(evidence_scope, before.get("evidence"),
+                                                 after.get("evidence") if after else None,
+                                                 allow_rebind=True)
+            details["scoped_evidence"] = comparison
         details.update(source_verification=initial["verification"], archive_verification=result["verification"])
-        verification = _verification(initial["verification"], result["verification"],
+        scope_outcome = ("verified" if evidence_scope is None or comparison["status"] == "passed"
+                         else comparison["status"])
+        verification = _verification(initial["verification"], result["verification"], scope_outcome,
                                      complete=after is not None and _roundtrip_passed(details))
         passed = verification == "verified"
-        proof = _proof(artifact, _verifier(checks), result, passed, after)
+        verifier = _verifier(checks)
+        if evidence_scope is not None:
+            verifier = content_key({"verifier": verifier, "evidence_scope": evidence_scope})
+        proof = _proof(artifact, verifier, result, passed, after)
         kind = "accepted" if accepted and passed else "wip"
         response = {"execution": "completed", "verification": verification,
                     "artifact_hash": artifact["hash"], "artifact_state": "available",
@@ -771,7 +815,16 @@ def restore(adapter, workspace_path, branch, kind="accepted", operation_id=None)
         confirmed = {"artifact_hash": saved["artifact_hash"], "artifact_state": "available", "historical_kind": kind}
         with _phase("open", "working_document_open", confirmed=confirmed, artifact_hash=saved["artifact_hash"]):
             opened = _open(adapter, saved["artifact"], op)
+        target_context = {**confirmed, "target_handle": opened["target_handle"], "archive_open": "completed"}
+        with _phase("restore-recompute", "working_document_mutation", confirmed=target_context,
+                    artifact_hash=saved["artifact_hash"]):
+            recomputed = _call(adapter, "recompute", {"target_handle": opened["target_handle"]},
+                               _child(op, "restore-recompute"))
+            if recomputed.get("recomputed") is not True:
+                raise NativeFailure(Envelope(ok=False, error="recompute_result_unknown"),
+                                    operation_id=_child(op, "restore-recompute"))
         return {"execution": "completed", "verification": "not_run", "target_handle": opened["target_handle"],
+                "recompute": {"status": "completed", "receipt": _public_receipt(recomputed.get("receipt"))},
                 **confirmed, "next_step": "Inspect and check the new working copy before editing"}, saved["artifact_hash"], None, None
     return _managed(adapter, workspace_path, "restore", request, operation_id, worker)
 
@@ -853,6 +906,12 @@ def build(adapter, workspace_path, manifest_path="design.json", branch="main", o
         verifier = _verifier(checks, template["protected"])
         candidate = source["target_handle"]
         seed_context = {"seed_target_handle": candidate, "target_handle": candidate, "construction_calls": 0}
+        with _phase("seed-recompute", "working_document_mutation", confirmed=seed_context):
+            recomputed = _call(adapter, "recompute", {"target_handle": candidate}, _child(op, "seed-recompute"))
+            if recomputed.get("recomputed") is not True:
+                raise NativeFailure(Envelope(ok=False, error="recompute_result_unknown"),
+                                    operation_id=_child(op, "seed-recompute"))
+        seed_context["seed_recompute"] = {"status": "completed", "receipt": _public_receipt(recomputed.get("receipt"))}
         contract = {**template, "target_handle": candidate, "operation_id": _child(op, "edit")}
         witnesses = checks + contract["protected"]
         with _phase("seed-check", "readback", confirmed=seed_context):
@@ -888,6 +947,8 @@ def build(adapter, workspace_path, manifest_path="design.json", branch="main", o
                                                        result["measurements"] if result else {}),
                 "healthy": bool(result and _healthy(result)),
             }
+            if result and "recompute" in result:
+                details["recompute"] = result["recompute"]
             if failure:
                 details.update(failure)
             complete = result is not None and _environment(result) == environment and _roundtrip_passed(details)
@@ -980,9 +1041,10 @@ def status(adapter, workspace_path, operation_id=None):
             action = job["metadata"].get("action")
             phases = {
                 "edit": ("edit-readback", "rollback-readback"),
-                "checkpoint": ("before", "export", "roundtrip-open", "roundtrip-check"),
-                "build": ("seed-open", "seed-check", "edit", "edit-readback", "rollback-readback", "export", "roundtrip-open",
-                          "roundtrip-check", "cache-open", "cache-check"),
+                "checkpoint": ("before", "export", "roundtrip-open", "roundtrip-recompute", "roundtrip-check"),
+                "restore": ("restore-recompute",),
+                "build": ("seed-open", "seed-recompute", "seed-check", "edit", "edit-readback", "rollback-readback", "export", "roundtrip-open",
+                          "roundtrip-recompute", "roundtrip-check", "cache-open", "cache-recompute", "cache-check"),
             }.get(action, ())
             phase_receipts = {}
             for phase in phases:

@@ -976,13 +976,25 @@ def find_mesh_using_ray(
 @mcp.tool()
 def ray_collision_with_mesh(
     mesh_handle: str,
-    origin_mm: list,
-    direction: list,
+    origin_mm: list[float] | None = None,
+    direction: list[float] | None = None,
+    queries: list[dict] | None = None,
+    frame: str = "root",
+    tolerance_mm: float = 1e-6,
+    replay: dict | None = None,
 ) -> CallToolResult:
-    """NEW May 2026: cast a ray against ONE MeshBody, return all intersection points.
-    mesh_handle: handle of a mesh body (e.g. from find_mesh_using_ray or list_body_entities).
+    """Intersect one mesh with a legacy ray or bounded batch of reproducible probes.
+    Supply either origin_mm/direction, queries, or replay. Batch queries specify
+    origin_mm, direction, start_mm, end_mm and selection ('all', 'nearest', 'farthest').
+    frame is 'root' or 'local'; travel and tolerance are mm. No-hit means missing
+    coverage, not free space. Returned witnesses can be replayed only against
+    matching source geometry and pose. Mesh handles come from inspect_assembly
+    include=['meshes'], import_geometry or find_mesh_using_ray.
     """
-    return _tool_result(ht.ray_collision_with_mesh(_get_adapter(), mesh_handle, origin_mm, direction))
+    return _tool_result(ht.ray_collision_with_mesh(
+        _get_adapter(), mesh_handle, origin_mm, direction, queries=queries,
+        frame=frame, tolerance_mm=tolerance_mm, replay=replay,
+    ))
 
 
 @mcp.tool()
@@ -1229,14 +1241,24 @@ def export(
 
 
 @mcp.tool()
-def import_geometry(format: str, path: str, target_component: str | None = None) -> CallToolResult:
+def import_geometry(format: str, path: str, target_component: str | None = None,
+                    operation_id: str | None = None, units: str | None = None,
+                    dependency_roots: list[str] | None = None,
+                    appearance_policy: str = "require_resources") -> CallToolResult:
     """Import geometry from a file into the active design.
-    format in {step, iges, sat, smt, f3d}.
+    format in {step, iges, sat, smt, f3d, obj}.
     path: absolute path to an existing file.
     Returns imported object identities, source hash, units, and target frame.
     target_component accepts a unique component or occurrence path.
+    OBJ requires units in {mm, cm, m, in, inch}. Dependencies must remain within
+    its resolved directory or explicitly supplied dependency_roots. OBJ appearance
+    policy is require_resources or geometry_only; file presence does not verify
+    texture display. Retain operation_id before dispatch for safe status lookup.
     """
-    return _tool_result(io_tools.import_geometry(_get_adapter(), format, path, target_component))
+    return _tool_result(io_tools.import_geometry(
+        _get_adapter(), format, path, target_component, operation_id=operation_id,
+        units=units, dependency_roots=dependency_roots, appearance_policy=appearance_policy,
+    ))
 
 
 # ---------- Escape hatch ----------
@@ -1301,13 +1323,14 @@ def reconcile_operation(operation_id: str, expected_document: str, acknowledgeme
 def inspect_assembly(component: str | None = None, include: list[str] | None = None,
                      limit: int = 50, offset: int = 0, detail: str = "full",
                      fields: list[str] | None = None, health_filter: str | None = None) -> CallToolResult:
-    """Read bounded assembly structure, occurrence transforms, bodies, sketches, features and joints.
+    """Read bounded assembly structure, occurrence transforms, B-reps, meshes, sketches, features and joints.
     component is root (default) or a unique occurrence path. include selects occurrences, bodies,
-    sketches, features, joints or as_built_joints. Occurrences lists the selected subtree's descendants;
+    meshes, sketches, features, joints or as_built_joints. Occurrences lists the selected subtree's descendants;
     limit (1..200) and offset bound each section. Frames and units accompany measurements.
     Reads shared definitions without editing them. Does not recompute or move the timeline.
     detail=summary returns counts; full returns paginated items. fields selects handles,
-    transforms, health and bounds (None=all, []=none). health_filter=non_healthy includes
+    transforms, health and bounds (None=these defaults, []=none); opt-in mesh_geometry adds
+    a bounded native node/index digest, not appearance verification. health_filter=non_healthy includes
     warning/error/unknown sketches and features only. Pagination includes next_offset.
     """
     return _tool_result(inspect_tools.inspect_assembly(_get_adapter(), component, include, limit,
@@ -1340,7 +1363,10 @@ def query_geometry(body: str, kind: str, filters: dict | None = None, limit: int
 def validate_design(checks: list[dict]) -> CallToolResult:
     """Read-only mechanical checks (1..50). Each check is one of:
     {type:'clearance', body_a, body_b, min_mm}; {type:'interference', body_a, body_b, max_overlap_mm3?:0};
-    {type:'bounds', body, min_mm:[x,y,z], max_mm:[x,y,z], tolerance_mm?:0}.
+    {type:'bounds', body, min_mm:[x,y,z], max_mm:[x,y,z], tolerance_mm?:0};
+    {type:'face_distance', face_a, face_b, min_mm?, max_mm?, tolerance_mm}.
+    Face distance requires current distinct face handles and at least one bound. It returns native
+    minimum distance and witness points in root mm, not global wall thickness. Reacquire faces after edits.
     Body selectors accept names, occurrence-qualified names or body handles. Clearance uses B-rep
     measurement plus interference. Bounds are conservative root-axis boxes, not cavity containment.
     Read result.passed and each status: pass, violation or unavailable. No unchecked result passes.
@@ -1472,7 +1498,8 @@ def workspace_bind(document_name: str | None = None) -> CallToolResult:
 
 @mcp.tool()
 def workspace_inspect(
-    target_handle: str, parameter_name: str, checks: list[dict[str, Any]]
+    target_handle: str, parameter_name: str, checks: list[dict[str, Any]],
+    scope: dict[str, Any] | None = None, baseline: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Read a length parameter and declared geometry measurements on a bound target.
 
@@ -1481,9 +1508,13 @@ def workspace_inspect(
     for occurrences. Metrics include body_extent, body_volume, occurrence_translation,
     clearance and interference. Units are 'mm' for length and 'mm^3' for volume.
     Use the measured expression, value and scoped geometry to declare an edit baseline.
+    Optional scope version 1 declares path and exact named section inventories
+    (kind, names, fields, tolerances). Supply a prior evidence snapshot as baseline
+    for strict comparison without recomputing or changing geometry.
     """
     return _tool_result(
-        workspace.inspect_target(_get_adapter(), target_handle, parameter_name, checks)
+        workspace.inspect_target(_get_adapter(), target_handle, parameter_name, checks,
+                                 scope=scope, baseline=baseline)
     )
 
 
@@ -1522,17 +1553,21 @@ def workspace_checkpoint(
     operation_id: str | None = None,
     expected_previous: str | None = None,
     accepted: bool = False,
+    evidence_scope: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Archive a bound self-contained design as an immutable local F3D checkpoint.
 
     By default record a WIP checkpoint. Accepted promotion requires the declared
     checks to pass on the bound target and on a freshly reopened archive. Use
     expected_previous to guard the branch reference when publishing.
+    evidence_scope requests the same strict named evidence inventory used by
+    workspace_inspect and compares it after archive reopen, including mesh witnesses.
     """
     return _tool_result(
         workspace.checkpoint(
             _get_adapter(), workspace_path, target_handle, branch, requirements, parameter_name,
             operation_id=operation_id, expected_previous=expected_previous, accepted=accepted,
+            evidence_scope=evidence_scope,
         )
     )
 

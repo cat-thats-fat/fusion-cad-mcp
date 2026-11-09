@@ -150,3 +150,135 @@ def test_oversized_integer_returns_invalid_input_without_dispatch(check):
     from tests._assembly_fakes import NoScriptAdapter
     result = validate_design(NoScriptAdapter(), [check])
     assert result.error == "invalid_input"
+
+
+def face_pair_check(*, a="left", b="right", occurrence=None, **bounds):
+    suffix = (f"|occ={occurrence}" if occurrence else "") + "|doc=646f63"
+    return {
+        "type": "face_distance", "face_a": f"face:box/face[0]{suffix}:{a}",
+        "face_b": f"face:box/face[1]{suffix}:{b}", "tolerance_mm": 0,
+        **bounds,
+    }
+
+
+def _face_pair_adapter(monkeypatch, *, distance=10):
+    adapter = Adapter(monkeypatch, [], distance=distance)
+    owner = NS(parentComponent=adapter.root)
+    faces = {
+        token: NS(objectType="adsk::fusion::BRepFace", body=owner, assemblyContext=None, token=token)
+        for token in ("left", "right")
+    }
+    adapter.design.findEntityByToken = lambda token: [faces[token]] if token in faces else []
+    return adapter, faces
+
+
+def test_same_body_face_distance_uses_both_tolerance_boundaries(monkeypatch):
+    adapter, faces = _face_pair_adapter(monkeypatch)
+    checks = [face_pair_check(min_mm=10.5, tolerance_mm=0.5),
+              face_pair_check(max_mm=9.5, tolerance_mm=0.5),
+              face_pair_check(min_mm=10.5, max_mm=11, tolerance_mm=0.499),
+              face_pair_check(max_mm=9.5, tolerance_mm=0.499)]
+
+    result = validate_design(adapter, checks).result
+
+    assert not result["passed"]
+    assert [row["status"] for row in result["checks"]] == ["pass", "pass", "violation", "violation"]
+    assert result["checks"][0]["evidence"] == {
+        "minimum_distance_mm": 10, "closest_point_a_mm": [10, 20, 30],
+        "closest_point_b_mm": [10, 20, 40], "frame": "root", "units": "mm",
+        "method": "Fusion MeasureManager.measureMinimumDistance",
+    }
+    assert all(call.args == (faces["left"], faces["right"])
+               for call in adapter.app.measureManager.measureMinimumDistance.call_args_list)
+    adapter.design.analyzeInterference.assert_not_called()
+
+
+def test_face_distance_allows_zero_for_distinct_faces_at_shared_edge(monkeypatch):
+    adapter, _ = _face_pair_adapter(monkeypatch, distance=0)
+
+    result = validate_design(adapter, [face_pair_check(min_mm=0, max_mm=0)]).result
+
+    assert result["passed"]
+    evidence = result["checks"][0]["evidence"]
+    assert evidence["minimum_distance_mm"] == 0
+    assert evidence["closest_point_a_mm"] == evidence["closest_point_b_mm"]
+
+
+def test_face_distance_uses_nested_root_proxies(monkeypatch):
+    adapter, native_faces = _face_pair_adapter(monkeypatch)
+    occurrence = NS(fullPathName="Parent:1+Box:2")
+    child_component = NS(name="Box")
+    owner = NS(parentComponent=child_component)
+    adapter.root.allOccurrences = Collection([occurrence])
+    proxies = []
+    for i, face in enumerate(native_faces.values()):
+        proxy = NS(body=owner, assemblyContext=occurrence, location=point(4 + i, 5, 6))
+        face.body = owner
+        face.createForAssemblyContext = Mock(return_value=proxy)
+        proxies.append(proxy)
+    measure = adapter.app.measureManager.measureMinimumDistance
+    measure.side_effect = lambda a, b: NS(value=b.location.x - a.location.x,
+                                           positionOne=a.location, positionTwo=b.location)
+
+    result = validate_design(adapter, [face_pair_check(occurrence=occurrence.fullPathName, min_mm=10)]).result
+
+    assert result["passed"]
+    measure.assert_called_once_with(*proxies)
+    for face in native_faces.values():
+        face.createForAssemblyContext.assert_called_once_with(occurrence)
+    assert result["checks"][0]["evidence"]["closest_point_b_mm"] == [50, 50, 60]
+
+    unscoped_occurrence = validate_design(adapter, [face_pair_check(min_mm=0)]).result
+    assert unscoped_occurrence["checks"][0]["reason"]["error"] == "face_root_context_unavailable"
+    assert measure.call_count == 1
+
+
+def test_face_distance_unavailable_for_alias_stale_and_ambiguous_handles(monkeypatch):
+    adapter, faces = _face_pair_adapter(monkeypatch)
+    candidates = {"left": [faces["left"]], "alias": [faces["left"]], "ambiguous": list(faces.values())}
+    adapter.design.findEntityByToken = lambda token: candidates.get(token, [])
+    other_doc = face_pair_check(b="alias", min_mm=0)
+    other_doc["face_a"] = other_doc["face_a"].replace("646f63", "616263")
+    checks = [face_pair_check(b="alias", min_mm=0), face_pair_check(b="gone", min_mm=0),
+              face_pair_check(b="ambiguous", min_mm=0), other_doc]
+
+    result = validate_design(adapter, checks).result
+
+    assert not result["passed"]
+    assert all(row["status"] == "unavailable" for row in result["checks"])
+    assert result["checks"][0]["reason"] == "same_face"
+    assert [row["reason"]["detail"]["reason"] for row in result["checks"][1:]] == [
+        "not_found_in_active_doc", "ambiguous_token", "document_scope_mismatch",
+    ]
+    adapter.app.measureManager.measureMinimumDistance.assert_not_called()
+
+
+@pytest.mark.parametrize("distance", [None, NS(value=float("nan")), NS(value=1, positionOne=None)])
+def test_face_distance_unavailable_on_invalid_native_measurement(monkeypatch, distance):
+    adapter, _ = _face_pair_adapter(monkeypatch)
+    adapter.app.measureManager.measureMinimumDistance.return_value = distance
+
+    env = validate_design(adapter, [face_pair_check(min_mm=0)])
+
+    assert env.ok and not env.result["passed"]
+    row = env.result["checks"][0]
+    assert row["status"] == "unavailable"
+    assert row["reason"]["error"] == "face_distance_unavailable"
+
+
+@pytest.mark.parametrize("update", [
+    {"face_a": "box"}, {"face_a": "face:unscoped:left"}, {"face_b": "body:box|doc=646f63:right"},
+    {"min_mm": 11, "max_mm": 10}, {"min_mm": None}, {"tolerance_mm": -1}, {"tolerance_mm": False},
+])
+def test_face_distance_rejects_invalid_scope_or_numeric_requirements(update):
+    with pytest.raises(ValueError):
+        build_validate_design([{**face_pair_check(min_mm=0), **update}])
+
+
+def test_face_distance_requires_explicit_bound_and_tolerance():
+    with pytest.raises(ValueError, match="requires min_mm or max_mm"):
+        build_validate_design([face_pair_check()])
+    missing_tolerance = face_pair_check(min_mm=0)
+    del missing_tolerance["tolerance_mm"]
+    with pytest.raises(ValueError, match="tolerance_mm"):
+        build_validate_design([missing_tolerance])

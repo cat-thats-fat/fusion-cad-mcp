@@ -14,6 +14,7 @@ from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
 from ..execution import execute_typed_script
 from ..handles import emit_scope_expr
+from ..native_mesh import MESH_EVIDENCE_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 
 
@@ -63,6 +64,7 @@ def _script(body: str, params: dict[str, Any]) -> str:
         + emit_scope_expr()
         + "\n"
         + _HELPERS
+        + MESH_EVIDENCE_SCRIPT
         + "\n"
         + body
     )
@@ -70,7 +72,9 @@ def _script(body: str, params: dict[str, Any]) -> str:
 
 _HELPERS = """
 def _items(collection):
-    return [collection.item(i) for i in range(collection.count)]
+    if hasattr(collection, 'item'):
+        return [collection.item(i) for i in range(collection.count)]
+    return list(collection)
 def _vec(p, scale=1):
     return [p.x * scale, p.y * scale, p.z * scale]
 def _box(b):
@@ -332,26 +336,27 @@ def build_inspect_assembly(
     if component is not None and (not isinstance(component, str) or not component):
         raise ValueError("component must be a nonempty selector")
     if include is None:
-        include = ["occurrences", "bodies", "sketches", "features", "joints"]
+        include = ["occurrences", "bodies", "meshes", "sketches", "features", "joints"]
     if (
         not isinstance(include, list)
         or not include
         or any(
-            x not in ("occurrences", "bodies", "sketches", "features", "joints", "as_built_joints")
+            x not in ("occurrences", "bodies", "meshes", "sketches", "features", "joints", "as_built_joints")
             for x in include
         )
     ):
         raise ValueError("include must contain supported sections")
     if detail not in ("full", "summary"):
         raise ValueError("detail must be full or summary")
-    allowed_fields = ("handles", "transforms", "health", "bounds")
+    default_fields = ("handles", "transforms", "health", "bounds")
+    allowed_fields = (*default_fields, "mesh_geometry")
     if fields is not None and (not isinstance(fields, list) or any(x not in allowed_fields for x in fields)):
         raise ValueError("fields must contain supported detail groups")
     if health_filter not in (None, "non_healthy"):
         raise ValueError("health_filter must be non_healthy or None")
     return _script(
         _ASSEMBLY, {"component": component, "include": list(dict.fromkeys(include)), "limit": limit,
-                    "offset": offset, "detail": detail, "fields": list(allowed_fields) if fields is None else fields,
+                    "offset": offset, "detail": detail, "fields": list(default_fields) if fields is None else fields,
                     "health_filter": health_filter}
     )
 
@@ -423,7 +428,9 @@ def run(_ctx):
                 values = [item for item in all_occurrences if _under(item, occ)]
             else:
                 attr = 'asBuiltJoints' if section == 'as_built_joints' else section
-                collection = (occ.bRepBodies if occ else comp.bRepBodies) if section == 'bodies' else getattr(comp, attr)
+                if section == 'bodies': collection = occ.bRepBodies if occ else comp.bRepBodies
+                elif section == 'meshes': collection = occ.meshBodies if occ else comp.meshBodies
+                else: collection = getattr(comp, attr)
                 values = _items(collection)
             if P['health_filter'] == 'non_healthy' and section in ('sketches', 'features'):
                 values = [obj for obj in values if _state(obj)['health_state'] != 0]
@@ -433,13 +440,24 @@ def run(_ctx):
                 if section == 'occurrences':
                     out.append(_occ_entry(obj, all_occurrences)); continue
                 entry = {'name': obj.name, 'type': _type(obj)}
-                if section == 'bodies':
+                if section in ('bodies', 'meshes'):
                     if 'bounds' in P['fields']:
                         try: entry['bounding_box_mm'] = _box(obj)
                         except Exception as exc: entry['bounds_unavailable'] = str(exc)
                     if 'handles' in P['fields']:
-                        try: entry['handle'] = _handle('body', obj.name, obj, occ)
+                        try: entry['handle'] = _handle('mesh_body' if section == 'meshes' else 'body', obj.name, obj, occ)
                         except Exception as exc: entry['handle_unavailable'] = str(exc)
+                    if section == 'meshes':
+                        entry['appearance_verification'] = 'unknown'
+                        try:
+                            native = obj.nativeObject or obj
+                            mesh = native.mesh
+                            entry['geometry_counts'] = {'nodes': mesh.nodeCount, 'triangles': mesh.triangleCount,
+                                                        'quads': mesh.quadCount, 'polygons': mesh.polygonCount}
+                        except Exception as exc: entry['geometry_unavailable'] = str(exc)
+                        if 'mesh_geometry' in P['fields']:
+                            try: entry['geometry_witness'] = _mesh_witness(obj, occ)
+                            except Exception as exc: entry['witness_unavailable'] = str(exc)
                 elif section in ('sketches', 'features'):
                     if 'health' in P['fields']: entry['health'] = _state(obj)
                     entry['selector'] = (occ.fullPathName + ' / ' if occ else '') + obj.name

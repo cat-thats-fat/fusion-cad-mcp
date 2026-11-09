@@ -13,7 +13,10 @@ names. Mesh ray searches return scoped mesh handles for collision checks.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import re
 import textwrap
 
 from ..adapter import FusionAdapter
@@ -27,6 +30,7 @@ from ..handles import (
     parse_handle,
 )
 from ..health import FEATURE_HEALTH_CHECK, FEATURE_HEALTH_SCRIPT
+from ..native_mesh import MESH_EVIDENCE_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 from .sketch import SKETCH_RESOLVER_SCRIPT
 
@@ -207,24 +211,273 @@ def find_mesh_using_ray(
 
 # ---------- ray_collision_with_mesh (NEW May 2026) ----------
 
+_RAY_METHOD = "fusion_mesh_ray_v1"
+_RAY_DEFAULT_TOLERANCE_MM = 1e-6
+_RAY_SOURCE_FIELDS = {
+    "document_sha256", "mesh_name", "occurrence_path", "entity_token_sha256", "geometry_sha256",
+    "transform_sha256",
+}
+_RAY_LIMITS = {
+    "queries": 32, "hits_per_query": 32, "native_hits_per_query": 4096,
+    "mesh_nodes": 1_000_000, "mesh_facets": 1_000_000, "facet_queries": 8_000_000,
+}
+
+
+def _ray_number(value, label):
+    try:
+        if type(value) in (int, float) and math.isfinite(value):
+            return float(value)
+    except OverflowError:
+        pass
+    raise ValueError(f"{label} must be a finite number")
+
+
+def _ray_vector(value, label):
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f"{label} must have three coordinates")
+    return [_ray_number(coordinate, label) for coordinate in value]
+
+
+def _ray_query(query):
+    required = {"origin_mm", "direction", "start_mm", "end_mm"}
+    if not isinstance(query, dict) or not required <= query.keys() <= required | {"selection"}:
+        raise ValueError("each ray requires origin_mm, direction, start_mm, and end_mm")
+    origin = _ray_vector(query["origin_mm"], "origin_mm")
+    direction = _ray_vector(query["direction"], "direction")
+    if not any(direction):
+        raise ValueError("direction must be nonzero")
+    start = _ray_number(query["start_mm"], "start_mm")
+    end = _ray_number(query["end_mm"], "end_mm")
+    if not 0 <= start < end:
+        raise ValueError("ray interval must satisfy 0 <= start_mm < end_mm")
+    selection = query.get("selection", "all")
+    if selection not in ("all", "nearest", "farthest"):
+        raise ValueError("selection must be all, nearest, or farthest")
+    return {"origin_mm": origin, "direction": direction, "start_mm": start, "end_mm": end, "selection": selection}
+
+
+def _prepare_ray_source(source):
+    if not isinstance(source, dict) or source.keys() != _RAY_SOURCE_FIELDS:
+        raise ValueError("replay requires a returned mesh source identity")
+    for key in ("document_sha256", "entity_token_sha256", "geometry_sha256", "transform_sha256"):
+        if not isinstance(source[key], str) or not re.fullmatch(r"[a-f0-9]{64}", source[key]):
+            raise ValueError(f"invalid source {key}")
+    for key in ("mesh_name", "occurrence_path"):
+        if not isinstance(source[key], str) or len(source[key]) > 4096:
+            raise ValueError(f"invalid source {key}")
+    return source
+
+
+def _ray_witness_digest(source, frame, tolerance_mm, query):
+    binding = [_RAY_METHOD, source, frame, tolerance_mm, query]
+    return hashlib.sha256(json.dumps(binding, sort_keys=True, allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _build_batch_rays(mesh_handle, queries, frame, tolerance_mm, replay):
+    expected = None
+    if replay is not None:
+        if queries is not None:
+            raise ValueError("supply queries or replay")
+        if not isinstance(replay, dict) or replay.get("method") != _RAY_METHOD:
+            raise ValueError("replay requires a returned ray witness")
+        expected = _prepare_ray_source(replay.get("source"))
+        queries = [replay.get("query")]
+        frame, tolerance_mm = replay.get("frame"), replay.get("tolerance_mm")
+    if frame not in ("root", "local"):
+        raise ValueError("frame must be root or local")
+    tolerance_mm = _ray_number(tolerance_mm, "tolerance_mm")
+    if tolerance_mm < 0:
+        raise ValueError("tolerance_mm must be nonnegative")
+    if not isinstance(queries, list) or not 1 <= len(queries) <= _RAY_LIMITS["queries"]:
+        raise ValueError(f"queries must contain between 1 and {_RAY_LIMITS['queries']} rays")
+    prepared = [_ray_query(query) for query in queries]
+    if replay is not None and replay.get("query_sha256") != _ray_witness_digest(expected, frame, tolerance_mm, prepared[0]):
+        raise ValueError("replay source, frame, tolerance, and query must match the retained witness")
+    scope = parse_handle(mesh_handle)["path"].split("|")[1:]
+    if not any(part.startswith("doc=") for part in scope):
+        raise ValueError("bounded rays require a document-scoped mesh handle")
+    occurrence_path = next((part[4:] for part in scope if part.startswith("occ=")), None)
+    resolver = textwrap.indent(emit_resolve(mesh_handle, var="mesh"), "    ")
+    return (
+        _header() + "\nimport hashlib, math, struct\n" + MESH_EVIDENCE_SCRIPT
+        + f"\n_QUERIES = {prepared!r}\n_FRAME = {frame!r}"
+        + f"\n_TOLERANCE_MM = {tolerance_mm!r}\n_EXPECTED_SOURCE = {expected!r}"
+        + f"\n_OCCURRENCE_PATH = {occurrence_path!r}\n_METHOD = {_RAY_METHOD!r}\n_LIMITS = {_RAY_LIMITS!r}\n"
+        + "\ndef _resolve_ray_mesh(design, errors):\n    def print(value): errors.append(json.loads(value))\n"
+        + resolver + "    return mesh\n" + _BATCH_RAY_SCRIPT
+    )
+
+
+_BATCH_RAY_SCRIPT = '''
+def _ray_unit(direction):
+    scale = max(map(abs, direction))
+    scaled = [value / scale for value in direction]
+    length = math.hypot(*scaled)
+    return [value / length for value in scaled]
+
+def _ray_document(app):
+    doc = app.activeDocument
+    if not doc.creationId: raise ValueError('active document identity unavailable')
+    key = [str(doc.creationId), str(doc.dataFile.id) if doc.dataFile else None]
+    return hashlib.sha256(json.dumps(key).encode('utf-8')).hexdigest()
+
+def _ray_source(app, design, mesh):
+    occurrence = mesh.assemblyContext
+    if getattr(occurrence, 'fullPathName', None) != _OCCURRENCE_PATH:
+        raise ValueError('mesh occurrence scope mismatch')
+    if occurrence is None and mesh.parentComponent != design.rootComponent:
+        raise ValueError('child mesh requires its occurrence-scoped handle')
+    native = mesh.nativeObject if occurrence is not None else mesh
+    if native is None or not native.isValid: raise ValueError('native mesh unavailable')
+    token = native.entityToken
+    if not isinstance(token, str) or not token: raise ValueError('native mesh identity unavailable')
+    collection = native.parentComponent.meshBodies
+    names = (collection.item(i).name for i in range(collection.count))
+    if sum(name == native.name for name in names) != 1:
+        raise ValueError('mesh name is missing or ambiguous in its component')
+    original = native.mesh
+    display = native.displayMesh
+    facets = max(original.triangleCount + original.quadCount + original.polygonCount, display.triangleCount)
+    if original.nodeCount > _LIMITS['mesh_nodes'] or facets > _LIMITS['mesh_facets'] or facets * len(_QUERIES) > _LIMITS['facet_queries']:
+        raise ValueError('mesh exceeds bounded ray work limits')
+    witness = _mesh_witness(native, occurrence)
+    pose = witness['occurrence_transform_cm']
+    source = {'document_sha256': _ray_document(app), 'mesh_name': native.name,
+              'occurrence_path': _OCCURRENCE_PATH or '',
+              'entity_token_sha256': hashlib.sha256(token.encode('utf-8')).hexdigest(),
+              'geometry_sha256': witness['geometry_sha256'],
+              'transform_sha256': hashlib.sha256(struct.pack('>16d', *pose)).hexdigest()}
+    return native, source, pose
+
+def _ray_pose(pose):
+    if _FRAME == 'local' or _OCCURRENCE_PATH is None:
+        return None, None
+    matrix = adsk.core.Matrix3D.create()
+    if not matrix.setWithArray(pose): raise ValueError('mesh transform unavailable')
+    inverse = matrix.copy()
+    if not inverse.invert(): raise ValueError('mesh transform cannot be inverted')
+    return matrix, inverse
+
+def _ray_points(mesh, query, unit, pose, inverse):
+    origin = adsk.core.Point3D.create(*(value / 10 for value in query['origin_mm']))
+    direction = adsk.core.Vector3D.create(*unit)
+    if inverse is not None and (not origin.transformBy(inverse) or not direction.transformBy(inverse)):
+        raise ValueError('could not transform query into mesh-local frame')
+    points = mesh.calculateCollisionsWithRay(origin, direction)
+    if points is None: raise ValueError('Fusion returned no native ray result')
+    if len(points) > _LIMITS['native_hits_per_query']:
+        return None
+    candidates = []
+    for point in points:
+        if pose is not None and not point.transformBy(pose):
+            raise ValueError('could not transform hit into root frame')
+        point_mm = [point.x * 10, point.y * 10, point.z * 10]
+        offset = [p - o for p, o in zip(point_mm, query['origin_mm'])]
+        travel = math.fsum(p * d for p, d in zip(offset, unit))
+        if not math.isfinite(travel) or not all(map(math.isfinite, point_mm)):
+            raise ValueError('nonfinite native ray hit')
+        if not query['start_mm'] <= travel <= query['end_mm']:
+            continue
+        if math.hypot(*(p - travel * d for p, d in zip(offset, unit))) > _TOLERANCE_MM:
+            raise ValueError('native hit lies outside the ray tolerance')
+        candidates.append((travel, point_mm))
+    return sorted(candidates)
+
+def _ray_observation(mesh, query, pose, inverse):
+    unit = _ray_unit(query['direction'])
+    result = {'direction_unit': unit, 'hits': [], 'selected_hit_indices': [],
+              'contact_classification': 'unavailable'}
+    try:
+        points = _ray_points(mesh, query, unit, pose, inverse)
+    except Exception as exc:
+        return dict(result, status='unavailable', reason=str(exc))
+    if points is None:
+        return dict(result, status='truncated', reason='native_hit_limit')
+    hits = result['hits']
+    for travel, point_mm in points:
+        if hits and travel - hits[-1]['travel_mm'] <= _TOLERANCE_MM:
+            hits[-1]['coincident_returns'] += 1
+        elif len(hits) == _LIMITS['hits_per_query']:
+            return dict(result, status='truncated', reason='reported_hit_limit')
+        else:
+            hits.append({'travel_mm': travel, 'point_mm': point_mm, 'coincident_returns': 1})
+    if not hits:
+        return dict(result, status='no_hit')
+    if any(hit['coincident_returns'] > 1 for hit in hits):
+        return dict(result, status='ambiguous', reason='coincident_native_returns')
+    selection = query['selection']
+    indices = {'all': list(range(len(hits))), 'nearest': [0], 'farthest': [len(hits) - 1]}
+    return dict(result, status='hits', selected_hit_indices=indices[selection])
+
+def run(_ctx):
+    app = adsk.core.Application.get()
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if design is None:
+        print(json.dumps({'ok': False, 'error': 'no_active_design'})); return
+    errors = []
+    try:
+        mesh = _resolve_ray_mesh(design, errors)
+        if mesh is None or not mesh.isValid:
+            detail = errors[0] if errors else {'error': 'handle_invalid'}
+            if _EXPECTED_SOURCE is not None:
+                detail = {'ok': True, 'replay': {'status': 'stale', 'reason': 'mesh_handle_invalid', 'detail': detail}}
+            else:
+                detail['ok'] = False
+            print(json.dumps(detail)); return
+        native, source, matrix = _ray_source(app, design, mesh)
+        if _EXPECTED_SOURCE is not None and source != _EXPECTED_SOURCE:
+            differences = [field for field in source if source[field] != _EXPECTED_SOURCE[field]]
+            print(json.dumps({'ok': True, 'replay': {'status': 'stale', 'reason': 'source_changed',
+                                                    'differences': differences}, 'source': source})); return
+        pose, inverse = _ray_pose(matrix)
+    except Exception as exc:
+        detail = {'reason': 'mesh_source_unavailable', 'detail': str(exc)}
+        if _EXPECTED_SOURCE is not None:
+            print(json.dumps({'ok': True, 'replay': {'status': 'unavailable', **detail}})); return
+        print(json.dumps({'ok': False, 'error': 'mesh_source_unavailable', **detail})); return
+    counts = dict.fromkeys(('hits', 'no_hit', 'ambiguous', 'unavailable', 'truncated'), 0)
+    witnesses = []
+    for query in _QUERIES:
+        observation = _ray_observation(native, query, pose, inverse)
+        counts[observation['status']] += 1
+        binding = [_METHOD, source, _FRAME, _TOLERANCE_MM, query]
+        digest = hashlib.sha256(json.dumps(binding, sort_keys=True, allow_nan=False).encode('utf-8')).hexdigest()
+        witnesses.append({'method': _METHOD, 'source': source, 'frame': _FRAME,
+                          'tolerance_mm': _TOLERANCE_MM, 'query': query, 'query_sha256': digest,
+                          'evidence': observation})
+    result = {'ok': True, 'source': source, 'frame': _FRAME, 'units': 'mm',
+              'occurrence_transform_cm': matrix, 'tolerance_mm': _TOLERANCE_MM,
+              'limits': _LIMITS, 'coverage': {'queried': len(witnesses), **counts}, 'queries': witnesses}
+    if _EXPECTED_SOURCE is not None:
+        status = witnesses[0]['evidence']['status']
+        result['replay'] = {'status': 'remeasured' if status in ('hits', 'no_hit', 'ambiguous') else 'unavailable'}
+    print(json.dumps(result))
+'''
+
 
 def build_ray_collision_with_mesh(
     mesh_handle: str,
-    origin_mm: list[float],
-    direction: list[float],
+    origin_mm: list[float] | None = None,
+    direction: list[float] | None = None,
+    queries: list[dict] | None = None,
+    frame: str = "root",
+    tolerance_mm: float = _RAY_DEFAULT_TOLERANCE_MM,
+    replay: dict | None = None,
 ) -> str:
-    if len(origin_mm) != 3:
-        raise ValueError("origin_mm must be [x, y, z] in mm")
-    if len(direction) != 3:
-        raise ValueError("direction must be [dx, dy, dz]")
-    ox, oy, oz = (v / 10.0 for v in origin_mm)
-    dx, dy, dz = direction
     kind = parse_handle(mesh_handle)["kind"]
     if kind not in {"mesh_body", "body"}:
         raise ValueError("mesh_handle must be a mesh_body handle")
     # Older callers supplied mesh tokens using the generic body prefix.
     if kind == "body":
         mesh_handle = "mesh_body:" + mesh_handle.split(":", 1)[1]
+    if queries is not None or replay is not None:
+        if origin_mm is not None or direction is not None:
+            raise ValueError("supply either origin_mm and direction or a bounded batch or replay")
+        return _build_batch_rays(mesh_handle, queries, frame, tolerance_mm, replay)
+    if frame != "root" or tolerance_mm != _RAY_DEFAULT_TOLERANCE_MM:
+        raise ValueError("frame and tolerance_mm apply to bounded queries")
+    ox, oy, oz = (v / 10 for v in _ray_vector(origin_mm, "origin_mm"))
+    dx, dy, dz = _ray_vector(direction, "direction")
     resolve = _indent4(emit_resolve(mesh_handle, var="_mesh"))
 
     return f"""\
@@ -252,15 +505,25 @@ def run(_ctx):
 def ray_collision_with_mesh(
     adapter: FusionAdapter,
     mesh_handle: str,
-    origin_mm: list[float],
-    direction: list[float],
+    origin_mm: list[float] | None = None,
+    direction: list[float] | None = None,
+    queries: list[dict] | None = None,
+    frame: str = "root",
+    tolerance_mm: float = _RAY_DEFAULT_TOLERANCE_MM,
+    replay: dict | None = None,
 ) -> Envelope:
+    if (queries is None and origin_mm is None and direction is None
+            and isinstance(replay, dict) and isinstance(replay.get("method"), str)
+            and replay["method"] != _RAY_METHOD):
+        return Envelope(ok=True, result={"ok": True, "replay": {"status": "unavailable", "reason": "witness_method_unavailable"}})
     try:
-        parse_handle(mesh_handle)
-        script = build_ray_collision_with_mesh(mesh_handle, origin_mm, direction)
+        script = build_ray_collision_with_mesh(mesh_handle, origin_mm, direction, queries, frame, tolerance_mm, replay)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "ray_collision_with_mesh", read_only=True)
+    env = _ok_runner(adapter, script, "ray_collision_with_mesh", read_only=True)
+    if env.ok and (queries is not None or replay is not None):
+        env.message = ""
+    return env
 
 
 # ---------- fillet_edges (UI selection style) ----------

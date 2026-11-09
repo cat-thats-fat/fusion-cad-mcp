@@ -64,6 +64,11 @@ def run(_ctx):
 
     # Parametric-only: these two raise on a direct design, features.count does not.
     unavailable = {}
+    try:
+        state['mesh_bodies_count'] = root.meshBodies.count
+    except Exception as exc:
+        state['mesh_bodies_count'] = None
+        unavailable['mesh_bodies_count'] = str(exc)
     _fill(state, unavailable, "parameters_count", lambda: design.userParameters.count)
     _fill(state, unavailable, "timeline_count", lambda: design.timeline.count)
     state["unavailable"] = unavailable

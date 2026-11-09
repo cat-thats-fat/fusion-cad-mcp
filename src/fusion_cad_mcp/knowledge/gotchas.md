@@ -2012,3 +2012,12 @@ sketch had been rebuilt and its profiles classified. In that historical session 
 
 Compute expensive geometry first, assert on it, and keep the reporting to plain `%s` and single-value
 `%f` until the script has proven itself. Complicated reporting can fail after geometry has changed, leaving an uncertain outcome.
+
+
+## OBJ appearance and partial import are separate outcomes
+
+OBJ units are not self-describing for this tool: provide `units`. Its local dependency manifest write occurs during preflight, and its hashes establish file bytes, not UVs, embedded images, material assignment or observed display. `geometry_only` permits missing appearance files without claiming full fidelity. The filesystem can change after rehash and before Fusion reads it. Read the complete failure envelope and receipt; targeted mesh cleanup does not guarantee all native effects were reversed, and an uncertain import keeps its write barrier.
+
+## Scoped evidence, faces and sampled rays have limited scope
+
+A scoped inventory checks the named fields and tolerances only; checkpoint reopen comparison is not an atomic `workspace_edit` baseline guard. Reacquire current face handles after topology changes or recompute. A selected face-pair minimum may be zero at a shared edge and is not a global thickness result. Batch mesh rays have finite ranges and report missing, ambiguous or truncated coverage; replay binds source and pose but does not establish clearance outside the sampled rays.

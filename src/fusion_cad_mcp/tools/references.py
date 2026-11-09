@@ -149,6 +149,17 @@ def run(_ctx):
                            'max_mm': [box.maxPoint.x*10,box.maxPoint.y*10,box.maxPoint.z*10]})
     except Exception as exc:
         bounds = []; bounds_error = str(exc)
+    mesh_bounds = []; mesh_count = None; mesh_error = None
+    try:
+        meshes = occ.meshBodies if occ else comp.meshBodies
+        meshes = [meshes.item(i) for i in range(meshes.count)] if hasattr(meshes, 'item') else list(meshes)
+        mesh_count = len(meshes)
+        for i in range(min(mesh_count, 128)):
+            mesh = meshes[i]; box = mesh.boundingBox
+            mesh_bounds.append({'mesh': mesh.name, 'min_mm': [box.minPoint.x*10,box.minPoint.y*10,box.minPoint.z*10],
+                                'max_mm': [box.maxPoint.x*10,box.maxPoint.y*10,box.maxPoint.z*10]})
+    except Exception as exc:
+        mesh_bounds = []; mesh_error = str(exc)
     matrix = None; matrix_error = None
     if occ:
         try: matrix = list(occ.transform2.asArray())
@@ -158,6 +169,8 @@ def run(_ctx):
                       'component_to_root_matrix_cm': matrix, 'component_to_root_error': matrix_error,
                       'body_bounds_frame': 'root', 'body_bounds': bounds, 'body_bounds_error': bounds_error,
                       'body_count': body_count, 'bounds_truncated': body_count > 128 if body_count is not None else None,
+                      'mesh_bounds_frame': 'root', 'mesh_bounds': mesh_bounds, 'mesh_bounds_error': mesh_error,
+                      'mesh_count': mesh_count, 'mesh_bounds_truncated': mesh_count > 128 if mesh_count is not None else None,
                       'changed': DATA is not None and before != attr.value}))
 """
 

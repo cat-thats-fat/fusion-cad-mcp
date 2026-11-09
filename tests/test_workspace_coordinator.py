@@ -94,6 +94,8 @@ def _build_responder(action, payload):
     if action == "inspect":
         value = 60 if payload["target_handle"] == "seed" and "expected_expression" not in payload else 70
         return {**_info(payload["checks"], value), "parameter_matches_expected": True}
+    if action == "recompute":
+        return {"recomputed": True, "environment": ENV}
     if action == "edit":
         checks = payload["requirements"] + payload["protected"]
         baseline = _info(checks, 60)["measurements"]
@@ -153,7 +155,7 @@ def test_build_dispatch_consumes_frozen_bytes_and_conflicts_on_changed_asset(pro
     assert meta["inputs"]["seed"]["sha256"] == hashlib.sha256(b"synthetic seed").hexdigest()
     (root / "design.json").write_bytes(manifest_bytes)
     assert workspace.build(adapter, root, operation_id=op).error == "operation_conflict"
-    assert [action for action, _, _ in adapter.calls] == ["open", "inspect", "edit"]
+    assert [action for action, _, _ in adapter.calls] == ["open", "recompute", "inspect", "edit"]
 
 
 def test_receipted_refusal_replays_history_while_unknown_write_fences_next_job(project):
@@ -242,7 +244,7 @@ def test_build_stops_before_export_when_callback_changes_revert(project):
     assert result.result["verification"] == "failed" and result.result["artifact_state"] == "unavailable"
     assert result.result["construction"]["parameter"]["value_mm"] == 70
     assert result.result["parameter"]["value_mm"] == 60
-    assert [action for action, _, _ in adapter.calls] == ["open", "inspect", "edit", "inspect"]
+    assert [action for action, _, _ in adapter.calls] == ["open", "recompute", "inspect", "edit", "inspect"]
     assert WorkspaceStore(root / ".fusion").list_checkpoints() == []
 
 
@@ -295,7 +297,7 @@ def test_build_export_failure_keeps_confirmed_construction(project, failure):
         assert "staging_output" not in phase
     replay = workspace.build(adapter, root, operation_id=op)
     assert replay.result["construction"] == out.result["construction"]
-    assert [action for action, _, _ in adapter.calls] == ["open", "inspect", "edit", "inspect", "export"]
+    assert [action for action, _, _ in adapter.calls] == ["open", "recompute", "inspect", "edit", "inspect", "export"]
 
 
 def test_build_readback_timeout_retains_completed_edit_and_archive_as_wip(project):
@@ -376,7 +378,7 @@ def test_cache_reuse_checks_expected_formula_before_promotion(project):
     assert hit.result["verification"] == "incomplete"
     assert hit.result["publication"]["references"] == ["wip"]
     assert WorkspaceStore(root / ".fusion").checkout("main", "accepted")["operation_id"] == first.result["operation_id"]
-    assert [action for action, _, _ in adapter.calls] == ["open", "inspect", "open", "inspect"]
+    assert [action for action, _, _ in adapter.calls] == ["open", "recompute", "inspect", "open", "recompute", "inspect"]
 
 
 def test_check_only_change_reuses_geometry_and_publishes_fresh_evidence(project):
@@ -535,3 +537,146 @@ def test_inline_rollback_requires_independent_baseline_confirmation(project, cas
         assert job["state"] == "uncertain"
         blocked = workspace.edit(adapter, root, {**contract, "operation_id": _op()})
         assert blocked.error == "workspace_write_blocked"
+
+
+def test_checkpoint_scoped_inventory_mismatch_cannot_publish_accepted(project):
+    root, _ = project
+    scope = {
+        "version": 1,
+        "path": "root",
+        "sections": [
+            {"kind": "feature", "names": ["Feature"], "fields": ["health"], "tolerances": {}}
+        ],
+    }
+
+    def respond(action, payload):
+        response = _build_responder(action, payload)
+        if action == "inspect":
+            name = "Feature" if payload["target_handle"] == "source" else "Renamed"
+            response["evidence"] = {
+                "version": 1,
+                "scope": scope,
+                "binding": {"document": "fixture", "target_handle": payload["target_handle"]},
+                "counts": {"feature": 1},
+                "records": [
+                    {
+                        "kind": "feature",
+                        "name": name,
+                        "fields": {
+                            "health": {"status": "available", "units": "state", "value": "healthy"}
+                        },
+                    }
+                ],
+            }
+        return response
+
+    out = workspace.checkpoint(
+        NativeDouble(respond),
+        root,
+        "source",
+        "main",
+        [CHECK],
+        "width",
+        operation_id=_op(),
+        accepted=True,
+        evidence_scope=scope,
+    )
+    assert out.result["verification"] == "failed"
+    assert out.result["checkpoint_kind"] == "wip"
+    assert out.result["roundtrip_details"]["scoped_evidence"]["status"] == "failed"
+
+
+def test_uncertain_reopen_recompute_keeps_writer_barrier(project):
+    root, _ = project
+    operation_id = _op()
+
+    def respond(action, payload):
+        if action == "recompute":
+            return Envelope(
+                ok=False, error="transport_timeout", state={"execution_outcome": "unknown"}
+            )
+        return _build_responder(action, payload)
+
+    adapter = NativeDouble(respond)
+    result = workspace.checkpoint(
+        adapter, root, "source", "main", [CHECK], "width", operation_id=operation_id, accepted=True
+    )
+    assert not result.ok
+    assert result.result["verification"] == "incomplete"
+    assert result.result["phase_failure"]["phase"] == "roundtrip-recompute"
+    assert result.result["phase_failure"]["outcome"] == "unknown"
+    assert [action for action, _, _ in adapter.calls] == ["inspect", "export", "open", "recompute"]
+    assert WorkspaceStore(root / ".fusion").get_job(operation_id)["state"] == "uncertain"
+
+
+@pytest.mark.parametrize('action, phases', [
+    ('checkpoint', ['roundtrip-recompute']),
+    ('build', ['seed-recompute', 'roundtrip-recompute', 'cache-recompute']),
+    ('restore', ['restore-recompute']),
+])
+def test_status_exposes_recompute_phase_receipts(monkeypatch, action, phases):
+    from types import SimpleNamespace
+    operation_id = _op()
+    job = {'metadata': {'action': action}}
+    monkeypatch.setattr(workspace, '_store', lambda _: SimpleNamespace(get_job=lambda _: job))
+    receipts = {workspace._child(operation_id, phase): phase for phase in phases}
+    def get_status(identifier, journal_dir=None):
+        if identifier in receipts:
+            return Envelope(ok=True, result={'operation_id': identifier, 'status': 'completed'})
+        return Envelope(ok=False, result={})
+    monkeypatch.setattr(workspace, 'get_status', get_status)
+    result = workspace.status(SimpleNamespace(), '.', operation_id)
+    assert result.ok
+    assert set(result.result['phase_receipts']) == set(phases)
+    for phase in phases:
+        assert result.result['phase_receipts'][phase] == {
+            'operation_id': workspace._child(operation_id, phase), 'status': 'completed'}
+
+
+def test_restore_recomputes_owned_copy_before_return(project):
+    root, _ = project
+    initial = workspace.checkpoint(NativeDouble(_build_responder), root, 'source', 'main', [CHECK], 'width',
+                                   operation_id=_op(), accepted=True)
+    assert initial.ok and initial.result['verification'] == 'verified'
+    adapter = NativeDouble(_build_responder)
+    result = workspace.restore(adapter, root, 'main', operation_id=_op())
+    assert result.ok and result.result['verification'] == 'not_run'
+    assert result.result['recompute']['status'] == 'completed'
+    assert [action for action, _, _ in adapter.calls] == ['open', 'recompute']
+    assert adapter.calls[1][1]['target_handle'] == result.result['target_handle']
+
+
+def test_uncertain_restore_recompute_retains_target_and_barrier(project):
+    root, _ = project
+    initial = workspace.checkpoint(NativeDouble(_build_responder), root, 'source', 'main', [CHECK], 'width',
+                                   operation_id=_op(), accepted=True)
+    assert initial.ok
+    def respond(action, payload):
+        if action == 'recompute':
+            return Envelope(ok=False, error='transport_timeout', state={'execution_outcome': 'unknown'})
+        return _build_responder(action, payload)
+    op = _op()
+    adapter = NativeDouble(respond)
+    result = workspace.restore(adapter, root, 'main', operation_id=op)
+    assert not result.ok and result.result['verification'] == 'incomplete'
+    assert result.result['target_handle'] == 'candidate'
+    assert result.result['execution'] == 'unknown' and result.result['archive_open'] == 'completed'
+    assert result.result['phase_failure']['phase'] == 'restore-recompute'
+    assert WorkspaceStore(root / '.fusion').get_job(op)['state'] == 'uncertain'
+    assert [action for action, _, _ in adapter.calls] == ['open', 'recompute']
+
+
+def test_uncertain_seed_recompute_blocks_build_before_inspection(project):
+    root, _ = project
+    def respond(action, payload):
+        if action == 'recompute':
+            return Envelope(ok=False, error='transport_timeout', state={'execution_outcome': 'unknown'})
+        return _build_responder(action, payload)
+    op = _op()
+    adapter = NativeDouble(respond)
+    result = workspace.build(adapter, root, operation_id=op)
+    assert not result.ok and result.result['verification'] == 'incomplete'
+    assert result.result['target_handle'] == 'seed'
+    assert result.result['phase_failure']['phase'] == 'seed-recompute'
+    assert WorkspaceStore(root / '.fusion').get_job(op)['state'] == 'uncertain'
+    assert [action for action, _, _ in adapter.calls] == ['open', 'recompute']

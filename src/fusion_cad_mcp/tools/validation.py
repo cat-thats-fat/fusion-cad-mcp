@@ -61,20 +61,38 @@ def _prepare(checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[s
             if any(a > b for a, b in zip(low, high, strict=True)):
                 raise ValueError("min_mm coordinates must not exceed max_mm")
             numeric = {"min_mm": low, "max_mm": high, "tolerance_mm": _number(check.get("tolerance_mm", 0), "tolerance_mm")}
+        elif kind == "face_distance":
+            required = {"face_a", "face_b", "tolerance_mm"}
+            allowed = required | {"type", "min_mm", "max_mm"}
+            bounds = {field: _number(check[field], field) for field in ("min_mm", "max_mm") if field in check}
+            if not bounds:
+                raise ValueError("face_distance requires min_mm or max_mm")
+            if bounds.get("min_mm", 0) > bounds.get("max_mm", math.inf):
+                raise ValueError("min_mm must not exceed max_mm")
+            numeric = {**bounds, "tolerance_mm": _number(check.get("tolerance_mm"), "tolerance_mm")}
         else:
             raise ValueError(f"checks[{index}].type is unsupported")
         if set(check) - allowed or not required.issubset(check):
             raise ValueError(f"checks[{index}] has missing or unsupported fields")
-        selectors = ("body",) if kind == "bounds" else ("body_a", "body_b")
+        selectors = {
+            "bounds": ("body",), "face_distance": ("face_a", "face_b"),
+        }.get(kind, ("body_a", "body_b"))
         item = {"type": kind, **numeric}
         for field in selectors:
             value = check[field]
             if not isinstance(value, str) or not value:
                 raise ValueError(f"checks[{index}].{field} must be a nonempty selector")
-            if is_handle(value):
+            if kind == "face_distance":
+                handle = parse_handle(value)
+                if handle["kind"] != "face" or not any(
+                    part.startswith("doc=") for part in handle["path"].split("|")[1:]
+                ):
+                    raise ValueError(f"checks[{index}].{field} must be a document-scoped face handle")
+                handles.setdefault(value, f"_entity_handle_{len(handles)}")
+            elif is_handle(value):
                 if parse_handle(value)["kind"] != "body":
                     raise ValueError(f"checks[{index}].{field} must be a body handle")
-                handles.setdefault(value, f"_body_handle_{len(handles)}")
+                handles.setdefault(value, f"_entity_handle_{len(handles)}")
             item[field] = value
         prepared.append(item)
     return prepared, handles
@@ -101,14 +119,66 @@ def _point(p):
     if not all(math.isfinite(x) for x in result): raise ValueError('non-finite point')
     return result
 
-def _body(design, root, selector):
-    if selector not in _HANDLES:
-        return _select_body(root, selector)
+def _resolve_check_handle(design, selector):
     errors = []
     entity = _HANDLES[selector](design, errors)
     if entity is None:
         return None, errors[0] if errors else {'error': 'handle_invalid'}
     return entity, None
+
+def _body(design, root, selector):
+    if selector not in _HANDLES:
+        return _select_body(root, selector)
+    return _resolve_check_handle(design, selector)
+
+def _face_distance(measure, a, b, spec):
+    result = {'type': 'face_distance', 'check': spec}
+    context_a = getattr(a, 'assemblyContext', None)
+    context_b = getattr(b, 'assemblyContext', None)
+    if getattr(context_a, 'fullPathName', None) == getattr(context_b, 'fullPathName', None) and a == b:
+        return dict(result, status='unavailable', reason='same_face')
+    try:
+        distance = measure.measureMinimumDistance(a, b)
+        if distance is None or not getattr(distance, 'isValid', True):
+            raise ValueError('Fusion could not measure minimum distance')
+        distance_mm = distance.value * 10
+        if not math.isfinite(distance_mm) or distance_mm < 0:
+            raise ValueError('invalid minimum distance')
+        evidence = {
+            'minimum_distance_mm': distance_mm,
+            'closest_point_a_mm': _point(distance.positionOne),
+            'closest_point_b_mm': _point(distance.positionTwo),
+            'frame': 'root', 'units': 'mm',
+            'method': 'Fusion MeasureManager.measureMinimumDistance',
+        }
+    except Exception as exc:
+        return dict(result, status='unavailable', reason={
+            'error': 'face_distance_unavailable', 'detail': str(exc),
+        })
+    tolerance = spec['tolerance_mm']
+    passes = spec.get('min_mm', 0) - tolerance <= distance_mm <= spec.get('max_mm', math.inf) + tolerance
+    return dict(result, status='pass' if passes else 'violation', evidence=evidence)
+
+def _face_pair_check(design, root, measure, spec):
+    faces = []
+    for field in ('face_a', 'face_b'):
+        handle = spec[field]
+        face, error = _resolve_check_handle(design, handle)
+        if not error and not getattr(face, 'isValid', True):
+            error = {'error': 'face_invalid'}
+        if not error:
+            occurrence_path = next((part[4:] for part in handle.rsplit(':', 1)[0].split('|')[1:]
+                                    if part.startswith('occ=')), None)
+            context = getattr(face, 'assemblyContext', None)
+            if getattr(context, 'fullPathName', None) != occurrence_path or (
+                context is None and face.body.parentComponent != root
+            ):
+                error = {'error': 'face_root_context_unavailable'}
+        if error:
+            return {'type': 'face_distance', 'status': 'unavailable', 'reason': error,
+                    'check': spec, 'target': field}
+        faces.append(face)
+    return _face_distance(measure, faces[0], faces[1], spec)
 
 def _interference(design, a, b):
     if not getattr(a, 'isSolid', False) or not getattr(b, 'isSolid', False):
@@ -131,6 +201,8 @@ def _interference(design, a, b):
 
 def _check(design, root, measure, spec):
     kind = spec['type']
+    if kind == 'face_distance':
+        return _face_pair_check(design, root, measure, spec)
     names = ['body'] if kind == 'bounds' else ['body_a', 'body_b']
     bodies = []
     for field in names:

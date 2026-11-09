@@ -31,7 +31,7 @@ _IMPORT_FACTORIES = {
     "f3d": "createFusionArchiveImportOptions",
 }
 EXPORT_FORMATS = set(_MESH_EXPORT_FACTORIES) | set(_COMPONENT_EXPORT_FACTORIES)
-IMPORT_FORMATS = set(_IMPORT_FACTORIES)
+IMPORT_FORMATS = set(_IMPORT_FACTORIES) | {"obj"}
 
 STL_REFINEMENT = {
     "low": "MeshRefinementLow",
@@ -154,6 +154,7 @@ def build_export(
         scope_lookup = f"""\
     geometry, error = _select_body(root, {body!r})
     if error:
+        error["mutation_state"] = "not_started"
         print(json.dumps(error))
         return
 """
@@ -163,6 +164,7 @@ def build_export(
         scope_lookup = f"""\
     occurrence, error = _select_occurrence(root, {component!r})
     if error:
+        error["mutation_state"] = "not_started"
         print(json.dumps(error))
         return
 """
@@ -273,6 +275,8 @@ def build_import_geometry(
     fmt = format.lower()
     if fmt not in IMPORT_FORMATS:
         raise ValueError(f"format must be one of {sorted(IMPORT_FORMATS)}, got {format!r}")
+    if fmt == "obj":
+        raise ValueError("OBJ requires bundle preflight")
     factory = _IMPORT_FACTORIES[fmt]
     occurrence_handle = emit_make_handle("occurrence", "entry['path'] + context_suffix", "item")
     body_handle = emit_make_handle("body", "entry['path'] + context_suffix", "item")
@@ -364,16 +368,28 @@ def run(_ctx):
 
 
 def import_geometry(
-    adapter: FusionAdapter, format: str, path: str, target_component: str | None = None
+    adapter: FusionAdapter, format: str, path: str, target_component: str | None = None,
+    operation_id: str | None = None, units: str | None = None,
+    dependency_roots: list[str] | None = None, appearance_policy: str = "require_resources",
 ) -> Envelope:
     ok, err = _validate_path(path)
     if not ok:
         return Envelope(ok=False, error="invalid_path", message=err or "")
     try:
-        script = build_import_geometry(format, path, target_component)
+        if format.lower() == "obj":
+            from .mesh_import import build_obj_import
+            script = build_obj_import(path, target_component, units, dependency_roots, appearance_policy)
+        else:
+            if units is not None or dependency_roots is not None or appearance_policy != "require_resources":
+                raise ValueError("OBJ-specific options require format=obj")
+            script = build_import_geometry(format, path, target_component)
     except ValueError as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
-    return _ok_runner(adapter, script, "import_geometry")
+    env = _ok_runner(adapter, script, "import_geometry", operation_id=operation_id)
+    if format.lower() == "obj":
+        env.state = {**(env.state or {}), "local_manifest_write_occurred": True,
+                     "external_write_may_have_occurred": True}
+    return env
 
 
 __all__ = [

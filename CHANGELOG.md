@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — Scoped evidence and mesh references
+
+- Extend workspace inspection/checkpoints with strict, bounded entity inventories
+  and declared numeric tolerances. Reopened owned copies have a separate recorded
+  recompute phase; source inspection stays read-only.
+- Add native selected-face distance requirements with root-frame witness points.
+- Import local OBJ bundles with explicit units, dependency provenance, scoped
+  placement, operation receipts and exact accounting of created mesh bodies.
+- Inspect meshes separately from B-reps and verify native mesh witnesses through
+  F3D checkpoints. Extend mesh rays with bounded batches, finite intervals and
+  source-bound replay.
+- Classify proven export lookup refusals before filesystem writes correctly.
+- Keep 104 tools and the existing Python escape hatch. See the
+  [validation report](docs/field-followup-validation.md) for native tests and limits.
+
 ## Unreleased
 
 ### Added: the Claude skill ships from this repo
