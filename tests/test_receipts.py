@@ -150,6 +150,95 @@ def test_missing_terminal_never_claims_success_or_replays(tmp_path):
     assert not no_doc.ok
 
 
+def test_unknown_workspace_dispatch_keeps_fence_despite_generic_probe(monkeypatch, tmp_path):
+    send, calls = mock_send(monkeypatch)
+    op, probe = str(uuid.uuid4()), str(uuid.uuid4())
+    context = {"kind": "workspace", "target_handle": "bound-work-copy", "action": "edit"}
+    dispatched = []
+
+    def lose_response(script, *, read_only=False):
+        manifest = json.loads((tmp_path / (op + ".json")).read_text())
+        assert manifest["receipt_context"] == context
+        dispatched.append(script)
+        return Envelope(ok=False, error="transport_timeout")
+
+    args = dict(journal_dir=tmp_path, receipt_context=context)
+    result = r.run_typed(lose_response, SCRIPT, "endpoint", 1, op, **args)
+    assert result.state["execution_outcome"] == "unknown"
+    status = r.get_status(op, journal_dir=tmp_path).result
+    assert status["status"] == "unknown" and status["document_creation_id"] is None
+    assert status["receipt_context"] == context
+    assert r.run_typed(
+        send, SCRIPT, "endpoint", 1, probe, read_only=True, journal_dir=tmp_path
+    ).ok
+    refused = r.reconcile(
+        op,
+        endpoint="endpoint",
+        expected_document="doc-1",
+        probe_operation_id=probe,
+        acknowledgement=True,
+        allow_missing_identity=True,
+        evidence="checked current tab",
+        journal_dir=tmp_path,
+    )
+    assert refused.error == "workspace_reconciliation_required"
+    assert refused.state["operation_id"] == op
+    assert not (tmp_path / (op + ".reconciled.json")).exists()
+    blocked = r.run_typed(send, SCRIPT, "endpoint", 1, journal_dir=tmp_path)
+    assert blocked.error == "receipt_barrier" and blocked.state["barrier_operation_id"] == op
+    assert r.run_typed(lose_response, SCRIPT, "endpoint", 1, op, **args).error == "receipt_unresolved"
+    assert len(dispatched) == 1 and calls == [True]
+
+    send(dispatched[0])
+    assert r.get_status(op, journal_dir=tmp_path).result["status"] == "completed"
+    replay = r.run_typed(lose_response, SCRIPT, "endpoint", 1, op, **args)
+    assert replay.ok and replay.state["recovered_from_receipt"] is True
+    assert len(dispatched) == 1 and calls == [True, False]
+    assert r.run_typed(send, SCRIPT, "endpoint", 1, journal_dir=tmp_path).ok
+
+
+def test_workspace_receipt_context_is_part_of_request_identity(monkeypatch, tmp_path):
+    send, calls = mock_send(monkeypatch)
+    op = str(uuid.uuid4())
+    context = {"kind": "workspace", "target_handle": "branch", "action": "edit"}
+    args = (send, SCRIPT, "endpoint", 1, op)
+    assert r.run_typed(*args, journal_dir=tmp_path, receipt_context=context).ok
+    reordered = dict(reversed(list(context.items())))
+    assert r.run_typed(*args, journal_dir=tmp_path, receipt_context=reordered).ok
+    for changed in (
+        None,
+        {**context, "action": "export"},
+        {**context, "target_handle": "other"},
+    ):
+        result = r.run_typed(*args, journal_dir=tmp_path, receipt_context=changed)
+        assert result.error == "receipt_conflict"
+    assert calls == [False]
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"kind": "other", "target_handle": "branch"},
+        {"kind": "workspace"},
+        {"kind": "workspace", "target_handle": " "},
+        {"kind": "workspace", "target_handle": "Ã©" * 257},
+        {"kind": "workspace", "target_handle": "branch", "action": ""},
+        {"kind": "workspace", "target_handle": "branch", "extra": True},
+    ],
+)
+def test_invalid_receipt_context_refused_before_dispatch(tmp_path, context):
+    result = r.run_typed(
+        lambda *a, **k: pytest.fail("must not dispatch"),
+        SCRIPT,
+        "endpoint",
+        1,
+        journal_dir=tmp_path,
+        receipt_context=context,
+    )
+    assert result.error == "receipt_invalid_input"
+    assert not list(tmp_path.iterdir())
+
+
 def test_crashed_process_leaves_durable_write_barrier(tmp_path):
     op = str(uuid.uuid4())
     code = """import os,sys
@@ -371,7 +460,7 @@ def test_serialized_read_only_waits_for_active_call(monkeypatch, tmp_path):
     assert calls == [False]
 
 
-def test_terminal_persists_before_output_failure(monkeypatch, tmp_path):
+def test_receipt_execution_does_not_use_broken_stdout(monkeypatch, tmp_path):
     send, _ = mock_send(monkeypatch)
     op = str(uuid.uuid4())
 
@@ -382,7 +471,7 @@ def test_terminal_persists_before_output_failure(monkeypatch, tmp_path):
         ns = {"print": fail}
         exec(script, ns)
         ns["run"](None)
-        pytest.fail("print should fail")
+        return Envelope(ok=True, message="")
 
     out = r.run_typed(broken_output, SCRIPT, "endpoint", 1, op, journal_dir=tmp_path)
     assert out.ok and out.state["recovered_from_receipt"] is True
@@ -709,3 +798,32 @@ def test_shadowed_json_refused_before_dispatch(tmp_path):
     )
     assert result.error == "receipt_invalid_input"
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+@pytest.mark.parametrize("raises", [False, True])
+def test_terminal_followed_by_failure_is_unknown_and_never_replayed(monkeypatch, tmp_path, read_only, raises):
+    send, calls = mock_send(monkeypatch)
+    operation_id = str(uuid.uuid4())
+    def conflicting(script, *, read_only=False):
+        env = send(script, read_only=read_only)
+        manifest = json.loads((tmp_path / f"{operation_id}.json").read_text())
+        r._atomic_write(tmp_path / f"{operation_id}.failed.json", {
+            "version": 1, "id": operation_id, "fingerprint": manifest["fingerprint"],
+            "endpoint_hash": manifest["endpoint_hash"], "exception_type": "RecursionError",
+        })
+        if raises:
+            raise RuntimeError("transport reported failure")
+        return env
+    args = (conflicting, SCRIPT, "endpoint", 1, operation_id)
+    result = r.run_typed(*args, read_only=read_only, journal_dir=tmp_path)
+    assert not result.ok and result.error == "receipt_unresolved"
+    assert result.state["execution_outcome"] == "unknown"
+    status = r.get_status(operation_id, journal_dir=tmp_path)
+    assert status.result["status"] == "unknown"
+    again = r.run_typed(*args, read_only=read_only, journal_dir=tmp_path)
+    assert not again.ok and again.state["execution_outcome"] == "unknown"
+    assert calls == [read_only]
+    if not read_only:
+        blocked = r.run_typed(send, SCRIPT, "endpoint", 1, journal_dir=tmp_path)
+        assert blocked.error == "receipt_barrier"

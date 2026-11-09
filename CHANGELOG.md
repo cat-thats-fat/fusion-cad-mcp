@@ -46,6 +46,13 @@ evaluated `root.features.count` successfully and only failed at
 `design.userParameters`, so `features_count` is not parametric-only and stays
 populated in both modes.
 
+## 0.4.0
+
+- Added nine Workspace V1 MCP tools and the `fusion-cad-workspace` CLI for guarded length-parameter edits, local F3D checkpoints, WIP and accepted pointers, and verified cache reuse.
+- Workspace verification compares a fresh bound read after the edit callback and checks archived candidates after reopen. Trusted Python recipes use the same declared checks. The build cache covers the built-in parameter recipe.
+- Receipt-backed scripts return through the local journal without a final native stdout write. Conflicting terminal and failure records leave execution unknown and keep the write barrier.
+- Live validation on Fusion Personal 2706.1.17 covered parameter propagation, checkpoint restore, cache reuse, scoped rollback and late completion after timeout. [Workspace validation](docs/workspace-validation.md)
+
 ## 0.2.2
 
 ### Fixed: a clean install pulled `mcp` 2.x and could not start

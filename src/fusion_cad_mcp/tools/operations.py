@@ -35,6 +35,15 @@ def reconcile_operation(adapter, operation_id: str, expected_document: str,
     if status.result.get("status") not in {"unknown", "declared_failure_unreconciled"}:
         return Envelope(ok=False, error="reconciliation_not_required", result=status.result,
                         message="This receipt does not have an unresolved write outcome")
+    if status.result.get("receipt_context", {}).get("kind") == "workspace":
+        return Envelope(
+            ok=False,
+            error="workspace_reconciliation_required",
+            result=status.result,
+            message="This managed operation requires workspace-bound recovery; its write barrier remains in place",
+            state={"operation_id": operation_id, "execution_outcome": "unknown",
+                   "model_may_have_changed": True, "retry_safe": False},
+        )
     recorded = status.result.get("document_creation_id")
     if not expected_document or (recorded != expected_document
                                 and not (recorded is None and allow_missing_identity is True)):

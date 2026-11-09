@@ -84,9 +84,9 @@ Tools use a common envelope. The MCP response includes the same envelope in JSON
 ```python
 {
   "ok": bool,              # always present
-  "message": str,          # raw stdout from the generated script
+  "message": str,          # result text, diagnostics, or raw execute stdout
   "result": dict | None,   # the tool's payload
-  "state": dict | None,    # reserved; no tool populates this today
+  "state": dict | None,    # execution and receipt metadata when available
   "image": dict | None,    # {data: <base64>, mime_type: "image/png"}
   "error": str | None,     # error code, present only when ok is False
   "traceback": str | None  # Fusion traceback, when one exists
@@ -902,7 +902,7 @@ Every entry carries `path` and `name`. A per-body failure becomes `{path, error}
 
 Errors: `no_active_design`, `body_not_found` (only when a filter matched nothing), `<tool>_parse_failed`.
 
-**These are the ground truth for verification.** Bounding box catches orientation errors that screenshots hide; volume catches missed cuts and wrong participant bodies. Pair them after every body-adding feature.
+**These are scoped numeric witnesses.** Bounding boxes can reveal orientation errors and volume can reveal missed cuts or wrong participant bodies. Compare them with explicit expectations and tolerances, alongside task-specific geometry checks; matching bounds and volume do not prove identical geometry or correct function.
 
 ## `audit_feature_health(component_name=None, include_healthy=False)`
 
@@ -990,7 +990,9 @@ Save the viewport to an absolute `.png` path in an existing directory. Dimension
 
 ## `get_operation_status(operation_id)` / `reconcile_operation(operation_id, expected_document, acknowledgement, evidence, allow_missing_identity=False)`
 
-Trusted JSON-status modeling and inspection scripts use local receipts and automatic operation IDs; visual/timeline operations, native operations and raw `execute` are not covered. The finite journal admits 2,000 operation manifests: 1,968 normal slots and 32 reserved for recovery probes; capacity exhaustion refuses new receipt-backed work. Selected write tools also accept explicit canonical UUIDs. Check the returned operation ID and status after a lost response. A receipt records the script declaration, not proof of current geometry or rollback. Unknown or declared-failure writes can block later writes until explicit reconciliation; inspect read-only state and the recorded document identity first. Reconciliation requires acknowledgement, bounded evidence and a fresh matching document probe. `allow_missing_identity=True` explicitly permits recovery when the original receipt lacks document identity; this is weaker evidence and does not establish which document was originally affected. Reconciliation releases the barrier and does not prove success, rollback, or that a timed-out Fusion execution has stopped. Raw `execute` is uninstrumented and has no receipt guarantee. `insert_component`'s existing `operation_id` is its component-level duplicate guard, distinct from receipt IDs.
+Trusted JSON-status modeling and inspection scripts return through local receipts and use automatic operation IDs. Selected write tools also accept explicit canonical UUIDs. The journal admits 1,968 normal operation manifests and reserves 32 slots for recovery probes. After a lost response, inspect the operation record and current design. A terminal declaration and a failure marker for the same operation leave the outcome unknown and keep the write barrier.
+
+For an unresolved workspace job, use `workspace_status` and the supported `workspace_recover` path. Other instrumented writes use `reconcile_operation` with acknowledgement, bounded evidence and a fresh matching document probe. `allow_missing_identity=True` allows a weaker recovery path when the original document identity is unavailable. Establish model state and execution termination independently of reconciliation. `insert_component` uses its `operation_id` as a component-level duplicate guard, separate from receipt IDs.
 
 ## `get_capabilities()`
 
@@ -1022,9 +1024,73 @@ Errors: `corpus_not_built`, `patterns_not_found`, `gotchas_not_found`, `empty_qu
 
 ---
 
+# Local workspace V1
+
+Workspace paths are absolute paths on the Fusion host. The workspace keeps a local ledger and hash-addressed F3D archives in `.fusion/`. The `branch` argument selects a workspace checkpoint label. Git tracks source files separately.
+
+## `workspace_init(workspace_path)`
+
+Create local workspace storage, a `design.json` starter and `assets/` directory. Initialize Git metadata if needed and ignore `.fusion/`. Runs offline.
+
+## `workspace_bind(document_name=None)`
+
+Bind the active document or a unique exact document name. Returns `result.target_handle` for this open instance in the current Fusion session. A bound user document can be inspected and captured as a checkpoint. Use an owned copy returned by checkpoint, restore or build for managed writes. Before measuring or editing, activate the bound design and leave it idle in its root context at the end of its parametric timeline.
+
+## `workspace_inspect(target_handle, parameter_name, checks)`
+
+Read `result.parameter.expression` and `result.parameter.value_mm` for a numeric length user parameter, plus health and `result.measurements` keyed by check ID. Each check supplies a unique `id`, `metric`, `entities`, `frame: "root"`, `units` and `axis` where listed below. Use the measurements to fill the edit baseline.
+
+| Metric | `entities` | `units` | `axis` |
+|---|---|---|---|
+| `body_extent` | One body | `mm` | `x`, `y` or `z` |
+| `body_volume` | One solid body | `mm^3` | Omit |
+| `occurrence_translation` | One exact occurrence path | `mm` | `x`, `y` or `z` |
+| `clearance` | Two distinct solid bodies | `mm` | Omit |
+| `interference` | Two distinct solid bodies | `mm^3` | Omit |
+
+Body selectors are `root / BodyName` or `<full occurrence path> / BodyName`. An occurrence path looks like `Parent:1+Mount:2`. `body_extent` measures the precise root-axis B-rep box. `clearance` combines minimum distance with an interference check. `interference` measures total overlap volume.
+
+## `workspace_edit(workspace_path, contract, custom_script=None)`
+
+`contract` requires `operation_id` (canonical UUID), `target_handle`, `parameter_name`, the requested unit-bearing `expression`, `expected_expression`, `expected_value_mm`, `value_tolerance_mm` and `requirements`. `protected` is optional. The lists together allow up to 32 uniquely identified checks. At least one requirement must be a `body_extent` check.
+
+Each requirement adds `baseline`, `baseline_tolerance`, `expected`, `comparator` (`eq`, `ge` or `le`) and `tolerance` to an inspection check. A protected check uses the same fields except `expected` and `comparator`. Its post-edit value must match its measured pre-edit value within `tolerance`. Thresholds and tolerances use the declared units. The bridge rechecks the prior expression, numeric value, health and geometry guards in the bound copy before the edit.
+
+Supply `custom_script` to implement the edit in trusted Python when scripting fits the task. Define one top-level `run(_ctx)` with one positional argument. The context contains `app`, `document`, `design` and `root`. Apply the requested expression and raise on failure. The recipe runs with Fusion's Python access. Independent expression readback, health and geometry measurements determine the result.
+
+Read `result.execution` and `result.verification` separately. A completed edit can have a failed or incomplete verification. Rows include baseline, result, delta, threshold, units, tolerance, evidence classification and status. Unavailable required measurements prevent verified status. Reuse the original UUID to look up historical evidence. Use a fresh UUID and fresh guards for a new edit.
+
+## `workspace_checkpoint(workspace_path, target_handle, branch, requirements, parameter_name, operation_id=None, expected_previous=None, accepted=False)`
+
+Capture a bound self-contained design into an immutable F3D and open a fresh workspace-owned copy. `requirements` use the edit requirement shape. Checkpoint thresholds apply to both the source and reopened archive. Set `accepted=True` to request accepted promotion. It requires passing checks and matching roundtrip evidence. A retained archive with failed or incomplete verification is eligible for the WIP pointer. Read `checkpoint_kind`, `roundtrip_passed` and `target_handle` in the result.
+
+Use `expected_previous=None` for a new pointer. To replace one, pass its current SHA-256 digest from `workspace_status`.
+
+## `workspace_restore(workspace_path, branch, kind="accepted", operation_id=None)`
+
+Verify the archive digest and open a fresh working document from the selected `accepted` or `wip` pointer. Recovery uses archive import and bypasses Fusion Undo. Inspect the returned handle for current evidence before the next edit.
+
+## `workspace_build(workspace_path, manifest_path="design.json", branch="main", operation_id=None)`
+
+Read a schema 1 JSON manifest with a relative `seed` F3D path, `edit` parameter and expression guards, `requirements`, optional `protected` and optional `script` Python path. Keep the manifest, seed and script inside the workspace. The bridge supplies the handle and operation UUID. The built-in parameter recipe supports cache reuse for matching seed and edit inputs in a compatible executor. Reopen the cached archive and run current verification requirements on each hit. Managed Python recipes use the same checks and produce a fresh build. Known failed or incomplete candidates can retain WIP archives. Accepted publication requires passing roundtrip evidence.
+
+## `workspace_status(workspace_path, operation_id=None)`
+
+Read workspace checkpoint pointers and recent jobs. Pass an operation UUID for its ledger and receipt evidence. Runs offline. The records describe historical results.
+
+## `workspace_recover(workspace_path, operation_id)`
+
+Recover a late guarded edit using its clean terminal receipt and a fresh probe of the same bound document. The probe can use reserved journal capacity. Preserve the original UUID and active target. A failed custom recipe with unresolved effects stays fenced. A replay returns historical evidence without dispatching the original mutation.
+
+---
+
 # `execute(script)`
 
-The escape hatch, and the only tool with no validation of any kind.
+A first-class custom Python path. Use it for missing capabilities or whenever scripting better fits the task than a premade tool, including coordinated edits and specialized inspection. It remains available even when a typed tool covers part or all of the operation; the agent can choose or combine either approach.
+
+Raw execution has no automatic target validation, operation receipts or general rollback guarantee. Check the intended target and starting state, bound the edit, then measure the actual geometry against selected requirements with explicit units and tolerances. Report the evidence and any unknowns. For a guarded V1 numeric length parameter edit on a workspace-owned copy, `workspace_edit` accepts a trusted Python recipe and evaluates the same declared checks as the built-in edit.
+
+Direct raw execution bypasses receipt-backed writer coordination. Keep unresolved mutations fenced: do not use raw execution to resume writes or replay them before establishing completion and recovery evidence.
 
 ```python
 import adsk.core, adsk.fusion
@@ -1040,10 +1106,10 @@ def run(_ctx):
 Rules that are not optional:
 
 1. The entry point must be exactly `def run(_ctx):`. No other name works.
-2. **Do not wrap the body in try/except.** Exceptions come back as the tool error with a full traceback; catching them destroys the traceback and turns a 30-second fix into a long debug.
+2. **Preserve failures.** Let exceptions propagate. Use `try/finally` for cleanup or re-raise caught exceptions with their traceback; do not swallow errors or print success after a failed edit.
 3. `print()` is the return channel. Stdout becomes the response `message`.
 4. **A failure can leave changes.** Inspect the document and reported outcome before retrying; raw execution has no general rollback guarantee.
 
-Internal units are **centimeters**. `Point3D.create` takes cm and `parameter.value` returns cm. Use `ValueInput.createByString("30 mm")` for anything human-readable and let Fusion convert; multiply by 10 only when printing.
+Internal units depend on the quantity: lengths use **cm**, angles use **radians**, and volumes use **cm³**. `Point3D.create` takes cm; numeric parameter values use their quantity's internal units. Prefer unit-bearing expressions such as `ValueInput.createByString("30 mm")`. Convert length to mm with ×10 and volume to mm³ with ×1000; do not apply a length conversion to other quantities.
 
-Reach for `execute` when no typed tool covers the operation. Reach for `find_api` first, then `find_pattern`, before writing it from scratch.
+Choose `execute` whenever custom scripting is the better fit. Check `find_api` before using unfamiliar APIs and `find_pattern` for reusable examples. There is no requirement to try or exhaust typed tools first.

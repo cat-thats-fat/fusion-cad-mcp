@@ -57,9 +57,37 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _fingerprint(endpoint: str, script: str, read_only: bool) -> str:
+def _workspace_context(context: dict[str, Any]) -> dict[str, str]:
+    if (
+        not isinstance(context, dict)
+        or context.get("kind") != "workspace"
+        or context.keys() - {"kind", "target_handle", "action"}
+    ):
+        raise ValueError("receipt_context must describe a workspace target")
+    normalized = {"kind": "workspace"}
+    for key, limit in (("target_handle", 512), ("action", 64)):
+        if key == "action" and key not in context:
+            continue
+        value = context.get(key)
+        if (
+            not isinstance(value, str)
+            or len(value) > limit
+            or not value.strip()
+            or len(value.encode("utf-8")) > limit
+        ):
+            raise ValueError(f"receipt_context {key} must contain 1 to {limit} UTF-8 bytes")
+        normalized[key] = value
+    return normalized
+
+
+def _fingerprint(
+    endpoint: str, script: str, read_only: bool, receipt_context: dict[str, str] | None = None
+) -> str:
+    request = [endpoint, script, read_only]
+    if receipt_context is not None:
+        request.append(receipt_context)
     return _hash(
-        json.dumps([endpoint, script, read_only], ensure_ascii=True, separators=(",", ":"))
+        json.dumps(request, ensure_ascii=True, separators=(",", ":"))
     )
 
 
@@ -323,7 +351,6 @@ def run(_ctx):
         if len(_receipt_outputs) != 1 or not isinstance(_receipt_outputs[0], dict) or type(_receipt_outputs[0].get('ok')) is not bool:
             raise ValueError('typed script did not emit exactly one boolean-status result')
         _receipt_write('terminal', {'document_creation_id': doc_id, 'declared_result': _receipt_outputs[0]})
-        print(_receipt_json.dumps(_receipt_outputs[0]))
     except BaseException as exc:
         try: _receipt_write('failed', {'document_creation_id': doc_id, 'exception_type': type(exc).__name__})
         except Exception: pass
@@ -345,6 +372,8 @@ def _entry(root: Path, operation_id: str) -> dict[str, Any] | None:
         or not math.isfinite(base["created_at"])
     ):
         raise ValueError("invalid receipt identity")
+    if "receipt_context" in base:
+        base["receipt_context"] = _workspace_context(base["receipt_context"])
     for kind in ("started", "terminal", "failed", "reconciled", "not_started"):
         item = _read(root / (operation_id + "." + kind + ".json"))
         if item is not None:
@@ -369,7 +398,11 @@ def _entry(root: Path, operation_id: str) -> dict[str, Any] | None:
 
 
 def _unresolved(entry: dict[str, Any]) -> bool:
-    if "reconciled" in entry or "not_started" in entry:
+    if "reconciled" in entry:
+        return False
+    if "failed" in entry:
+        return True
+    if "not_started" in entry:
         return False
     terminal = entry.get("terminal")
     if not isinstance(terminal, dict) or not isinstance(terminal.get("declared_result"), dict):
@@ -408,6 +441,8 @@ def get_status(operation_id: str, *, journal_dir: str | os.PathLike[str] | None 
             if "reconciled" in entry
             else "not_started"
             if "not_started" in entry
+            else "unknown"
+            if terminal and "failed" in entry
             else "declared_not_started"
             if terminal
             and terminal["declared_result"].get("mutation_state") == "not_started"
@@ -431,6 +466,11 @@ def get_status(operation_id: str, *, journal_dir: str | os.PathLike[str] | None 
                 ),
                 "endpoint_hash": entry["endpoint_hash"],
                 "request_fingerprint": entry["fingerprint"],
+                **(
+                    {"receipt_context": entry["receipt_context"]}
+                    if "receipt_context" in entry
+                    else {}
+                ),
                 "original_document_identity_unavailable": (entry.get("reconciled") or {}).get(
                     "original_document_identity_unavailable"
                 ),
@@ -496,6 +536,15 @@ def reconcile(
                 )
             if not _unresolved(entry):
                 raise ValueError("operation is already resolved")
+            if "receipt_context" in entry:
+                return _operation_error(
+                    "workspace_reconciliation_required",
+                    "Inspect the operation with get_operation_status. Releasing its write barrier "
+                    "requires workspace-bound recovery.",
+                    operation_id,
+                    read_only=False,
+                    outcome="unknown",
+                )
             actual = (entry.get("started") or {}).get("document_creation_id")
             if actual and actual != expected_document:
                 raise ValueError("recorded document identity mismatched")
@@ -548,6 +597,11 @@ def reconcile(
 def _terminal_result(
     entry: dict[str, Any], operation_id: str, *, read_only: bool, recovered: bool
 ) -> Envelope:
+    if "failed" in entry:
+        return _operation_error(
+            "receipt_unresolved", "Terminal and failure records conflict; outcome is unknown",
+            operation_id, read_only=read_only, outcome="unknown",
+        )
     result = entry["terminal"]["declared_result"]
     state = {
         "operation_id": operation_id,
@@ -614,6 +668,7 @@ def run_typed(
     journal_dir: str | os.PathLike[str] | None = None,
     *,
     recovery_probe: bool = False,
+    receipt_context: dict[str, Any] | None = None,
 ) -> Envelope:
     supplied_operation_id = operation_id is not None
     try:
@@ -636,9 +691,10 @@ def run_typed(
             raise ValueError("read_only must be boolean")
         if type(recovery_probe) is not bool or (recovery_probe and not read_only):
             raise ValueError("recovery_probe requires a read-only internal probe")
+        context = _workspace_context(receipt_context) if receipt_context is not None else None
         root = _root(journal_dir)
         endpoint_hash = _hash(endpoint)
-        fingerprint = _fingerprint(endpoint, script, read_only)
+        fingerprint = _fingerprint(endpoint, script, read_only, context)
         instrumented = _instrument(script, root, operation_id, fingerprint, endpoint_hash)
     except (ValueError, SyntaxError, OverflowError) as exc:
         return _error("receipt_invalid_input", str(exc))
@@ -654,6 +710,7 @@ def run_typed(
                     if (
                         existing.get("fingerprint") != fingerprint
                         or existing.get("endpoint_hash") != endpoint_hash
+                        or existing.get("receipt_context") != context
                     ):
                         return _operation_error(
                             "receipt_conflict",
@@ -742,6 +799,7 @@ def run_typed(
                         "recovery_probe": recovery_probe,
                         "state": "dispatch_recorded",
                         "created_at": time.time(),
+                        **({"receipt_context": context} if context is not None else {}),
                     },
                 )
             dispatched = True
@@ -778,6 +836,7 @@ def run_typed(
                 and (env.state or {}).get("execution_outcome") == "not_started"
                 and entry
                 and "started" not in entry
+                and "failed" not in entry
             ):
                 _atomic_write(
                     root / (operation_id + ".not_started.json"),

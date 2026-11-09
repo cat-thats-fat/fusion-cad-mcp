@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fusion-cad-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "Robust MCP server for driving Autodesk Fusion. Wraps Fusion's MCP at 127.0.0.1:27182 with named, agent-friendly tools."
 readme = "README.md"
 license = { text = "MIT" }
@@ -48,6 +48,7 @@ dev = [
 
 [project.scripts]
 fusion-cad-mcp = "fusion_cad_mcp.server:main"
+fusion-cad-workspace = "fusion_cad_mcp.workspace_cli:main"
 
 # src/fusion_cad_mcp/knowledge/*.md ships with the wheel automatically, since
 # it lives inside the package tree. That is what makes find_pattern /

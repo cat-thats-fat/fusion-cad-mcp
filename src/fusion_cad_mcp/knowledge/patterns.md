@@ -4,8 +4,52 @@
 
 Begin with `doc_state` and `inspect_assembly`; resolve repeated names with occurrence-qualified paths. Create or insert local components, then set and read back absolute placement. Add named parameters and build explicit enclosure, boss, cutout or sweep features. Import reference geometry separately and attach only known component-local mounts/connectors/keep-outs with `set_reference_metadata`; inspect the selected occurrence transform and root-frame bounds. Re-query topology after edits. Validate explicit clearance, interference and root-axis bounding boxes with `validate_design`; an unavailable check is not a pass, and an AABB pass does not prove irregular cavity containment. The primitives do not plan a complete design. If an instrumented edit outcome is unknown, retain its operation ID, query its receipt and inspect the document. Reconcile with explicit evidence before releasing a write barrier; reconciliation does not prove that timed-out execution stopped or that the operation succeeded. Raw execute is uninstrumented. For a new constrained rectangle use `create_parametric_rectangle`, and preview large rigid groups before creating them.
 
+## Guarded workspace edit and checkpoint
 
-Historical Python recipes for `fusion_mcp_execute` scripts. Some examples retain retired APIs such as `ExtrudeFeatureInput.setDistanceExtent` and `ConstructionPlaneInput.setByDistanceOnPath`. These are version-specific records, not proof of compatibility with the installed build. Prefer the current named tools and check Autodesk's current API documentation before adapting a recipe. Every snippet assumes the standard `run()` wrapper:
+Bind and inspect a user document, then capture it with `workspace_checkpoint`. For a known-good starting point, set `accepted=True` and verify the initial requirements after archive reopen. Use the returned owned copy, or call `workspace_restore` to open another copy of an accepted or WIP checkpoint. Keep the selected copy active and take fresh baseline measurements with `workspace_inspect`.
+
+This `workspace_edit` contract describes a width edit on a root body named `Blank`. Substitute the returned working-copy handle, generate a new UUID and fill the baseline from inspection. The `protected` entry checks the thickness against its measured pre-edit value.
+
+```json
+{
+  "operation_id": "12345678-1234-4234-9234-123456789abc",
+  "target_handle": "<working-copy handle>",
+  "parameter_name": "blankWidth",
+  "expression": "70 mm",
+  "expected_expression": "60 mm",
+  "expected_value_mm": 60,
+  "value_tolerance_mm": 0.01,
+  "requirements": [
+    {
+      "id": "blank-width", "metric": "body_extent", "entities": ["root / Blank"],
+      "frame": "root", "units": "mm", "axis": "x", "baseline": 60,
+      "baseline_tolerance": 0.01, "comparator": "eq", "expected": 70, "tolerance": 0.01
+    }
+  ],
+  "protected": [
+    {
+      "id": "blank-thickness", "metric": "body_extent", "entities": ["root / Blank"],
+      "frame": "root", "units": "mm", "axis": "z", "baseline": 5,
+      "baseline_tolerance": 0.01, "tolerance": 0.01
+    }
+  ]
+}
+```
+
+Choose a managed Python recipe when an existing native routine, coordinated edit or specialized operation fits the task. Supply it as `custom_script` with the same contract. Use the bound context and apply the requested expression from within `run`. This minimal version shows the entry point.
+
+```python
+def run(_ctx):
+    parameter = _ctx["design"].userParameters.itemByName("blankWidth")
+    if parameter is None:
+        raise RuntimeError("blankWidth is missing")
+    parameter.expression = "70 mm"
+```
+
+The bridge independently checks expression, health and the declared geometry after the callback returns. Use `workspace_checkpoint` with `accepted=True` to request publication of a verified candidate after archive reopen. A known check failure can be retained as WIP. Keep the UUID and use `workspace_status` for an uncertain write. `workspace_recover` requires a clean late terminal receipt and a matching current target. A failed custom recipe with unresolved effects stays fenced. To start from a recorded design, restore a fresh document from the archive.
+
+
+Historical Python recipes for `fusion_mcp_execute` scripts. Custom scripting is a first-class option whenever it better fits the task, including where typed tools overlap. Some examples retain retired APIs such as `ExtrudeFeatureInput.setDistanceExtent` and `ConstructionPlaneInput.setByDistanceOnPath`. These are version-specific records, not proof of compatibility with the installed build. Check Autodesk's current API documentation before adapting a recipe, and reuse typed tools or helpers where useful. Every snippet assumes the standard `run()` wrapper:
 
 ```python
 import adsk.core, adsk.fusion
@@ -17,7 +61,7 @@ def run(_context: str):
     # paste snippet here
 ```
 
-Internal units are cm. `ValueInput.createByString('30 mm')` accepts unit suffixes and Fusion converts.
+Internal length units are cm, angles are radians and volumes are cm³. `ValueInput.createByString('30 mm')` accepts unit suffixes and Fusion converts. Use the conversion appropriate to each measured quantity.
 
 ## Table of contents
 

@@ -1,0 +1,889 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-09",
+  "package_version": "0.4.0",
+  "fusion_version": "2706.1.17",
+  "license": "Personal",
+  "workspace_executor_sha256": "b154bd37e6e121ce05d11422e5ae5abf5a3380dcc426b1cb9a16a7bf3dc55cd4",
+  "scope": "Disposable synthetic fixtures; declared measurements only. Existing-document witnesses cover dirty flags, root body bounds and volumes, root body/occurrence/timeline counts, and native reference validity.",
+  "workspace_checks": [
+    {
+      "name": "fixture_created",
+      "status": "passed",
+      "evidence": {
+        "prior_document_count": 8,
+        "environment": {
+          "fusion_version": "2706.1.17",
+          "registry_version": 1
+        },
+        "health": {
+          "healthy": 4,
+          "warning": 0,
+          "error": 0,
+          "unknown": 0
+        }
+      }
+    },
+    {
+      "name": "baseline_brep",
+      "status": "passed",
+      "evidence": {
+        "width_mm": 60.0,
+        "volume_mm3": 9000.0,
+        "parameter": {
+          "expression": "60 mm",
+          "units": "mm",
+          "value_mm": 60.0
+        }
+      }
+    },
+    {
+      "name": "parameter_propagation",
+      "status": "passed",
+      "evidence": {
+        "checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 60.0,
+            "result": 70.0,
+            "delta": 10.0,
+            "comparator": "eq",
+            "expected": 70.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 9000.0,
+            "result": 10500.0,
+            "delta": 1500.0,
+            "comparator": "eq",
+            "expected": 10500.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "canary",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Protected"
+            ],
+            "protected": true,
+            "method": "BRepBody.volume",
+            "baseline": 1000.0,
+            "result": 1000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 1000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "pose",
+            "metric": "occurrence_translation",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "PCB:1"
+            ],
+            "axis": "x",
+            "protected": true,
+            "method": "Occurrence.transform2",
+            "baseline": 20.0,
+            "result": 20.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 20.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ],
+        "timings_ms": {
+          "baseline": 6.880900007672608,
+          "edit": 69.37070000276435,
+          "measure": 2.273799997055903,
+          "feedback_total": 463.32080000138376
+        }
+      }
+    },
+    {
+      "name": "duplicate_operation_returns_history",
+      "status": "passed",
+      "evidence": {
+        "redispatched": false,
+        "current_width_mm": 70
+      }
+    },
+    {
+      "name": "stale_parameter_refused",
+      "status": "passed",
+      "evidence": {
+        "mutation_state": "not_started"
+      }
+    },
+    {
+      "name": "unresolved_entity_refused",
+      "status": "passed",
+      "evidence": {
+        "mutation_state": "not_started"
+      }
+    },
+    {
+      "name": "invalid_geometry_targeted_rollback",
+      "status": "passed",
+      "evidence": {
+        "recovery": {
+          "status": "rollback_verified",
+          "rollback_status": "verified",
+          "witness_status": "passed"
+        },
+        "resulting_width_mm": 70
+      }
+    },
+    {
+      "name": "failed_requirement_retains_candidate",
+      "status": "passed",
+      "evidence": {
+        "checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 70.0,
+            "result": 75.0,
+            "delta": 5.0,
+            "comparator": "eq",
+            "expected": 80.0,
+            "tolerance": 0.01,
+            "status": "failed",
+            "classification": "exact",
+            "reason": "outside_tolerance"
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 10500.0,
+            "result": 11250.0,
+            "delta": 750.0,
+            "comparator": "eq",
+            "expected": 11250.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "canary",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Protected"
+            ],
+            "protected": true,
+            "method": "BRepBody.volume",
+            "baseline": 1000.0,
+            "result": 1000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 1000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "pose",
+            "metric": "occurrence_translation",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "PCB:1"
+            ],
+            "axis": "x",
+            "protected": true,
+            "method": "Occurrence.transform2",
+            "baseline": 20.0,
+            "result": 20.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 20.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "custom_python_with_trusted_readback",
+      "status": "passed",
+      "evidence": {
+        "checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 75.0,
+            "result": 70.0,
+            "delta": -5.0,
+            "comparator": "eq",
+            "expected": 70.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 11250.0,
+            "result": 10500.0,
+            "delta": -750.0,
+            "comparator": "eq",
+            "expected": 10500.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "canary",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Protected"
+            ],
+            "protected": true,
+            "method": "BRepBody.volume",
+            "baseline": 1000.0,
+            "result": 1000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 1000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "pose",
+            "metric": "occurrence_translation",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "PCB:1"
+            ],
+            "axis": "x",
+            "protected": true,
+            "method": "Occurrence.transform2",
+            "baseline": 20.0,
+            "result": 20.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 20.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "small_fixture_feedback_latency",
+      "status": "passed",
+      "evidence": {
+        "samples_ms": [
+          428.781099995831,
+          424.2143000010401,
+          405.4321000003256,
+          410.74740000476595,
+          408.7444000033429,
+          427.1584999951301,
+          439.58109999948647,
+          440.70999999530613,
+          434.0799000055995,
+          406.4982000127202,
+          391.9462000048952,
+          410.2024000021629,
+          426.51520000072196,
+          421.232599997893,
+          395.11270000366494,
+          428.2482999988133,
+          423.433500007377,
+          434.77039999561384,
+          404.31420000095386,
+          428.9138999884017
+        ],
+        "p95_ms": 439.58109999948647,
+        "declared_budget_ms": 10000,
+        "setup_and_archive_excluded": true
+      }
+    },
+    {
+      "name": "seed_exported",
+      "status": "passed",
+      "evidence": {
+        "bytes": 91564
+      }
+    },
+    {
+      "name": "accepted_checkpoint_roundtrip",
+      "status": "passed",
+      "evidence": {
+        "bytes": 91548,
+        "checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 60.0,
+            "result": 60.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 60.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 9000.0,
+            "result": 9000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 9000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "verified_build_reused",
+      "status": "passed",
+      "evidence": {
+        "miss_total_ms": 2363.8773999991827,
+        "hit_total_ms": 1565.6017000001157,
+        "same_archive": true,
+        "hit_construction_calls": 0,
+        "hit_checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 60.0,
+            "result": 70.0,
+            "delta": 10.0,
+            "comparator": "eq",
+            "expected": 70.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 9000.0,
+            "result": 10500.0,
+            "delta": 1500.0,
+            "comparator": "eq",
+            "expected": 10500.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "canary",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Protected"
+            ],
+            "protected": true,
+            "method": "BRepBody.volume",
+            "baseline": 1000.0,
+            "result": 1000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 1000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "pose",
+            "metric": "occurrence_translation",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "PCB:1"
+            ],
+            "axis": "x",
+            "protected": true,
+            "method": "Occurrence.transform2",
+            "baseline": 20.0,
+            "result": 20.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 20.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "changed_checks_reverify_cached_geometry",
+      "status": "passed",
+      "evidence": {
+        "construction_calls": 0,
+        "verification": "failed",
+        "accepted_pointer_preserved": true,
+        "checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 60.0,
+            "result": 70.0,
+            "delta": 10.0,
+            "comparator": "eq",
+            "expected": 80.0,
+            "tolerance": 0.01,
+            "status": "failed",
+            "classification": "exact",
+            "reason": "outside_tolerance"
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 9000.0,
+            "result": 10500.0,
+            "delta": 1500.0,
+            "comparator": "eq",
+            "expected": 10500.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "canary",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Protected"
+            ],
+            "protected": true,
+            "method": "BRepBody.volume",
+            "baseline": 1000.0,
+            "result": 1000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 1000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "pose",
+            "metric": "occurrence_translation",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "PCB:1"
+            ],
+            "axis": "x",
+            "protected": true,
+            "method": "Occurrence.transform2",
+            "baseline": 20.0,
+            "result": 20.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 20.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "changed_parameter_rebuilds",
+      "status": "passed",
+      "evidence": {
+        "construction_calls": 1,
+        "checks": [
+          {
+            "id": "width",
+            "metric": "body_extent",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "root / Editable"
+            ],
+            "axis": "x",
+            "protected": false,
+            "method": "BRepBody.preciseBoundingBox",
+            "baseline": 60.0,
+            "result": 65.0,
+            "delta": 5.0,
+            "comparator": "eq",
+            "expected": 65.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "volume",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Editable"
+            ],
+            "protected": false,
+            "method": "BRepBody.volume",
+            "baseline": 9000.0,
+            "result": 9750.0,
+            "delta": 750.0,
+            "comparator": "eq",
+            "expected": 9750.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "canary",
+            "metric": "body_volume",
+            "frame": "root",
+            "units": "mm^3",
+            "entities": [
+              "root / Protected"
+            ],
+            "protected": true,
+            "method": "BRepBody.volume",
+            "baseline": 1000.0,
+            "result": 1000.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 1000.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          },
+          {
+            "id": "pose",
+            "metric": "occurrence_translation",
+            "frame": "root",
+            "units": "mm",
+            "entities": [
+              "PCB:1"
+            ],
+            "axis": "x",
+            "protected": true,
+            "method": "Occurrence.transform2",
+            "baseline": 20.0,
+            "result": 20.0,
+            "delta": 0.0,
+            "comparator": "eq",
+            "expected": 20.0,
+            "tolerance": 0.01,
+            "status": "passed",
+            "classification": "exact",
+            "reason": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "custom_recipe_checked_without_cache_admission",
+      "status": "passed",
+      "evidence": {
+        "repeated_construction_calls": 2,
+        "verification": "verified",
+        "cacheable": false
+      }
+    },
+    {
+      "name": "restore_preserves_source_and_work_in_progress",
+      "status": "passed",
+      "evidence": {
+        "restored_width_mm": 70,
+        "ongoing_width_mm": 64,
+        "original_source_width_mm": 60,
+        "fresh_documents": true
+      }
+    },
+    {
+      "name": "wrong_active_target_and_unowned_binding_refused",
+      "status": "passed",
+      "evidence": {
+        "no_geometry_edit": true
+      }
+    },
+    {
+      "name": "ambiguous_document_name_refused",
+      "status": "passed",
+      "evidence": {
+        "no_parameter_change": true
+      }
+    },
+    {
+      "name": "closed_native_target_refused",
+      "status": "passed",
+      "evidence": {
+        "identity_reconstruction": false
+      }
+    },
+    {
+      "name": "real_timeout_late_completion_recovered",
+      "status": "passed",
+      "evidence": {
+        "bounded_response_ms": 392.4321000085911,
+        "retry_blocked": true,
+        "recovered_without_replay": true,
+        "original_uncertainty_retained": true,
+        "subsequent_edit_verified": true
+      }
+    },
+    {
+      "name": "partial_custom_failure_is_fenced",
+      "status": "passed",
+      "evidence": {
+        "width_restored_mm": 60.0,
+        "partial_change_remains": true,
+        "recovery": "unresolved_partial",
+        "retries_blocked": true,
+        "generic_reconciliation_refused": true,
+        "receipt_barrier": true,
+        "terminal_failure_confirmed": true,
+        "checkpoint_count": 0
+      }
+    },
+    {
+      "name": "partial_fixture_disposed_by_test_harness",
+      "status": "passed",
+      "evidence": {
+        "automatic_recovery": false,
+        "uncertain_ledger_retained": true
+      }
+    },
+    {
+      "name": "original_documents_preserved",
+      "status": "passed",
+      "evidence": {
+        "owned_documents_closed": 15,
+        "original_document_count": 8,
+        "originals_intact": true,
+        "original_active_restored": true
+      }
+    }
+  ],
+  "existing_tool_regression": {
+    "fusion_version": "2706.1.17",
+    "checks": [
+      {
+        "name": "constrained_rectangles",
+        "status": "passed",
+        "evidence": {
+          "planes": 3,
+          "centered_non_xy": true
+        }
+      },
+      {
+        "name": "parameter_receipt_and_brep",
+        "status": "passed",
+        "evidence": {
+          "width_mm": 50,
+          "volume_mm3": 6952.0,
+          "duplicate_redispatched": false,
+          "conflict_refused": true,
+          "recovered_from_receipt": true
+        }
+      },
+      {
+        "name": "rigid_membership_and_compact_inspection",
+        "status": "passed",
+        "evidence": {
+          "selected": 2,
+          "actual": 2,
+          "descendants": 3,
+          "preview_count": 3,
+          "page_size": 1
+        }
+      },
+      {
+        "name": "native_descendant_membership",
+        "status": "passed",
+        "evidence": {
+          "actual": 3,
+          "suppressed": false
+        }
+      },
+      {
+        "name": "non_idempotent_duplicate_refusal",
+        "status": "passed",
+        "evidence": {
+          "actual_occurrences": 7,
+          "expected_without_duplicate": 7
+        }
+      },
+      {
+        "name": "viewport_local_png",
+        "status": "passed",
+        "evidence": {
+          "width": 1200,
+          "height": 800,
+          "bytes": 96943,
+          "camera_restored": true
+        }
+      },
+      {
+        "name": "archive_reopen",
+        "status": "passed",
+        "evidence": {
+          "same_volume": true,
+          "source_hash_matches": true,
+          "bytes": 184870,
+          "previous_document_preserved": true
+        }
+      },
+      {
+        "name": "recovery_barrier",
+        "status": "passed",
+        "evidence": {
+          "blocked_write": true,
+          "read_available": true,
+          "explicit_reconciliation": true
+        }
+      },
+      {
+        "name": "fixture_cleanup",
+        "status": "passed",
+        "evidence": {
+          "closed": 2,
+          "previous_restored": true
+        }
+      }
+    ]
+  },
+  "privacy": "Document names, native handles, operation identifiers and host paths omitted."
+}

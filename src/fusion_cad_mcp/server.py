@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from . import workspace
 from .adapter import DEFAULT_URL, FusionAdapter
 from .envelope import Envelope
 from .receipts import get_status
@@ -1449,10 +1451,148 @@ def sweep(sketch: str, path_sketch: str, path_entities: list[str], name: str,
     return _tool_result(native_tools.sweep(_get_adapter(), sketch, path_sketch, path_entities, profile_index, name))
 
 
+# ---------- Local workspaces ----------
+
+
+@mcp.tool()
+def workspace_init(workspace_path: str) -> CallToolResult:
+    """Initialize local workspace storage at an absolute host path. Works with Fusion closed."""
+    return _tool_result(workspace.initialize(workspace_path))
+
+
+@mcp.tool()
+def workspace_bind(document_name: str | None = None) -> CallToolResult:
+    """Probe the active document or a unique exact document name for a target handle.
+
+    The handle identifies this open Fusion document instance. Use it while the document
+    and Fusion session remain open. Later operations check the bound active target.
+    """
+    return _tool_result(workspace.bind(_get_adapter(), document_name=document_name))
+
+
+@mcp.tool()
+def workspace_inspect(
+    target_handle: str, parameter_name: str, checks: list[dict[str, Any]]
+) -> CallToolResult:
+    """Read a length parameter and declared geometry measurements on a bound target.
+
+    Each check supplies id, metric, entities, frame='root', units and any axis. Use
+    'root / Body' or '<full occurrence path> / Body' for bodies and exact full paths
+    for occurrences. Metrics include body_extent, body_volume, occurrence_translation,
+    clearance and interference. Units are 'mm' for length and 'mm^3' for volume.
+    Use the measured expression, value and scoped geometry to declare an edit baseline.
+    """
+    return _tool_result(
+        workspace.inspect_target(_get_adapter(), target_handle, parameter_name, checks)
+    )
+
+
+@mcp.tool()
+def workspace_edit(
+    workspace_path: str, contract: dict[str, Any], custom_script: str | None = None
+) -> CallToolResult:
+    """Guard, apply and check one numeric length user parameter edit on a bound target.
+
+    Contract fields are operation_id (UUID), target_handle, parameter_name, expression
+    (explicit length units), expected_expression, expected_value_mm, value_tolerance_mm,
+    requirements and optional protected. Start with workspace_inspect check selectors.
+    Add baseline, baseline_tolerance, tolerance, comparator ('eq', 'ge' or 'le') and
+    expected for each requirement, including a body_extent check. Protected checks use
+    the measured baseline as the post-edit expectation and omit comparator and expected.
+    Read execution and verification independently. Verified evidence covers the declared checks.
+
+    Optional custom_script defines run(_ctx) and implements the edit in trusted Python.
+    Its context contains app, document, design and root. The script must apply the
+    requested parameter expression.
+    It runs with Fusion's Python access. Independent readback verifies the declared
+    checks. The V1 build cache covers the declared parameter-edit recipe.
+    """
+    return _tool_result(
+        workspace.edit(_get_adapter(), workspace_path, contract, custom_script=custom_script)
+    )
+
+
+@mcp.tool()
+def workspace_checkpoint(
+    workspace_path: str,
+    target_handle: str,
+    branch: str,
+    requirements: list[dict[str, Any]],
+    parameter_name: str,
+    operation_id: str | None = None,
+    expected_previous: str | None = None,
+    accepted: bool = False,
+) -> CallToolResult:
+    """Archive a bound self-contained design as an immutable local F3D checkpoint.
+
+    By default record a WIP checkpoint. Accepted promotion requires the declared
+    checks to pass on the bound target and on a freshly reopened archive. Use
+    expected_previous to guard the branch reference when publishing.
+    """
+    return _tool_result(
+        workspace.checkpoint(
+            _get_adapter(), workspace_path, target_handle, branch, requirements, parameter_name,
+            operation_id=operation_id, expected_previous=expected_previous, accepted=accepted,
+        )
+    )
+
+
+@mcp.tool()
+def workspace_restore(
+    workspace_path: str, branch: str, kind: str = "accepted", operation_id: str | None = None
+) -> CallToolResult:
+    """Verify a branch checkpoint's archive hash and open a new working document.
+
+    kind selects 'accepted' or 'wip'. Use the returned handle for later scoped operations.
+    """
+    return _tool_result(
+        workspace.restore(_get_adapter(), workspace_path, branch, kind=kind, operation_id=operation_id)
+    )
+
+
+@mcp.tool()
+def workspace_build(
+    workspace_path: str,
+    manifest_path: str = "design.json",
+    branch: str = "main",
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """Run a V1 workspace manifest or reuse a compatible verified artifact.
+
+    Cached archives are opened as working documents and checked against the manifest.
+    The V1 build cache covers the declared parameter-edit recipe.
+    """
+    return _tool_result(
+        workspace.build(
+            _get_adapter(), workspace_path, manifest_path=manifest_path,
+            branch=branch, operation_id=operation_id,
+        )
+    )
+
+
+@mcp.tool()
+def workspace_status(workspace_path: str, operation_id: str | None = None) -> CallToolResult:
+    """Read recorded workspace state and an optional operation receipt without a Fusion call."""
+    return _tool_result(workspace.status(_get_adapter(), workspace_path, operation_id=operation_id))
+
+
+@mcp.tool()
+def workspace_recover(workspace_path: str, operation_id: str) -> CallToolResult:
+    """Recover a late guarded edit using its completed receipt and fresh bound checks.
+
+    An unresolved operation keeps the workspace write barrier. Recovery rechecks the
+    original operation's declared requirements on its open target.
+    """
+    return _tool_result(workspace.recover(_get_adapter(), workspace_path, operation_id))
+
+
 @mcp.tool()
 def execute(script: str) -> CallToolResult:
-    """Raw Python passthrough. The script must define `def run(_ctx):` as entry point.
+    """Custom Python whenever it fits better than a typed tool, or for missing capabilities.
+    Typed tools need not be tried first. Scripts must define `def run(_ctx):`.
     Use print() for any data to return; stdout becomes the response message.
+    Raw execution has no automatic target checks or operation receipts. Verify
+    the intended target and resulting geometry; a successful reply is not proof.
     """
     return _tool_result(execute_tool.run(_get_adapter(), script))
 

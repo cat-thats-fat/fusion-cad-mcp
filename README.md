@@ -2,11 +2,11 @@
 
 An MCP server that gives Autodesk Fusion a named, typed tool surface: `create_sketch`, `extrude`, `add_hole`, `create_joint`, and `export`.
 
-Fusion ships its own MCP server, but it exposes four broad tools that take raw Python. That works, and it means every call is an opportunity to get the Fusion API wrong. This sits in front of it and turns the common operations into validated tools with structured errors, so an agent can do CAD without carrying a large prose skill in context.
+Fusion ships its own MCP server with broad tools for Python execution and queries. This package adds validated tools with structured errors for common operations. Custom Python remains a first-class option whenever an agent judges it better suited than a premade tool, including operations outside the typed surface. Agents can combine both approaches.
 
-**Status: beta (0.3.0), 95 typed tools.** Automated tests cover validation, generated scripts, transport, and selected Fusion workflows. Check results and feature health in the active design; not every operation is verified against every Fusion version.
+**Status: 0.4.0 beta, 104 tools.** Automated tests cover validation, generated scripts and transport. The live Workspace V1 report covers guarded edits, archive verification and recovery on Fusion Personal 2706.1.17. [Workspace validation](docs/workspace-validation.md)
 
-The [0.3.0 reliability report](docs/reliability-validation.md) records durable local results, explicit rigid-group scope, compact inspection, constrained rectangles and local archive/image workflows. Nine live Fusion checks passed while native stdout was empty; the upstream output lifecycle remains unresolved.
+The 0.3.0 reliability report records earlier work on local receipts, rigid-group scope, compact inspection, constrained rectangles and archive and image workflows. [0.3.0 reliability report](docs/reliability-validation.md)
 
 ## Requirements
 
@@ -16,7 +16,7 @@ The [0.3.0 reliability report](docs/reliability-validation.md) records durable l
 
 ## Install
 
-**Using Codex?** Follow the [local Codex setup](CONNECT.md#codex) for an isolated Python environment, the `fusion_cad` MCP registration, and the companion skill. The [setup verification](docs/codex-setup-validation.md) records 88 discovered tools and successful read-only calls to live Fusion; the intermittent empty-output issue remains unresolved.
+**Using Codex?** Follow the setup guide for an isolated Python environment, the `fusion_cad` MCP registration, and the companion skill. The earlier setup verification records 88 discovered tools and successful read-only calls to live Fusion. [Local Codex setup](CONNECT.md#codex) · [Earlier setup verification](docs/codex-setup-validation.md)
 
 **Not a developer?** Start with [AI-SETUP-PROMPT.md](AI-SETUP-PROMPT.md). Paste its guided prompt into your assistant to install, connect, and verify a first model in an empty design.
 
@@ -48,7 +48,7 @@ MCP client (Codex, Claude, Cursor, Cline, ...)
         -> adsk.fusion / adsk.core
 ```
 
-Many modeling tools generate a Python script and run it through Fusion's `execute`. It is a peer of Autodesk's bridge, not a replacement, so anything you can do in the Fusion API you can still do here via the `execute` escape hatch.
+Many modeling tools generate a Python script and run it through Fusion's `execute`. Agents can choose raw `execute` directly when a coordinated script or specialized API call fits the task. Raw scripts need their own target checks and geometric verification, and currently have no automatic operation receipts or general rollback guarantee.
 
 ## The tools
 
@@ -65,15 +65,36 @@ Availability depends on the Fusion API version. Full reference with signatures, 
 | Handles and measurement | `list_body_entities`, `measure`, `fillet_edges`, `chamfer_edges`, `project_to_sketch`, `find_mesh_using_ray`, `ray_collision_with_mesh` |
 | Verify and visualize | `bounding_box`, `volume`, `mass`, `center_of_mass`, `audit_feature_health`, `inspect_assembly`, `inspect_feature`, `query_geometry`, `validate_design`, `screenshot`, `save_viewport`, `set_view`, `screenshot_compare_with_marker` |
 | Import, export, knowledge | `export`, `import_geometry`, `open_local_archive`, `get_operation_status`, `reconcile_operation`, `get_capabilities`, `find_tool`, `find_gotcha`, `find_pattern`, `find_api`, `set_reference_metadata`, `get_reference_metadata` |
-| Escape hatch | `execute` |
+| Local workspace V1 | `workspace_init`, `workspace_bind`, `workspace_inspect`, `workspace_edit`, `workspace_checkpoint`, `workspace_restore`, `workspace_build`, `workspace_status`, `workspace_recover` |
+| Custom Python | `execute` |
 
 `rib` checks whether Fusion exposes a writable rib API and returns `rib_not_scriptable` if it does not. This refusal was verified on 2705.1.30; actual rib creation was verified on 2706.1.17. `is_flipped` controls the in-plane direction, and unhealthy features return an error with `model_may_have_changed`. `rebuild_feature` returns `safe_rebuild_unavailable` without changing the design.
 
-The capability upgrade has a [verification report](docs/prebenchmark-validation.md), [implementation plan](docs/prebenchmark-plan.md), and [test review](docs/prebenchmark-test-review.md). Its disposable Fusion fixtures cover the stated enclosure, boss, cutout, assembly and sweep workflows; results are not proof for arbitrary designs. An intermittent Autodesk empty-stdout issue remains unresolved, so inspect an uncertain write before retrying. The earlier modernization has separate [historical evidence](docs/validation.md) and a [test-by-test review ledger](tests/audit/README.md). Historical modeling recipes retain version-specific observations and some retired API examples; use the current tools and Autodesk API documentation when adapting them.
+The capability upgrade's disposable Fusion fixtures cover enclosure, boss, cutout, assembly and sweep workflows. Historical modeling recipes retain version-specific observations and some retired API examples. Use the current tools and Autodesk API documentation when adapting them. [Verification report](docs/prebenchmark-validation.md) · [Implementation plan](docs/prebenchmark-plan.md) · [Test review](docs/prebenchmark-test-review.md)
+
+An accumulation of Autodesk's sanitized stdout writers caused recursive output failure in the tested session. Receipt-backed tools now publish their result without a final native stdout call and treat conflicting receipt records as unknown. Upstream writer accumulation can still affect raw script output. Inspect an uncertain write before retrying. [Output investigation](docs/workspace-validation.md#receipt-output-failure)
+
+The earlier modernization has separate evidence and a test-by-test review. [Historical evidence](docs/validation.md) · [Review ledger](tests/audit/README.md)
 
 The initial [field feedback and follow-up](docs/field-feedback.md) records working
 inspection flows, corrected import guidance and reduced duplicate inspection
 output. That pass did not exercise detailed redesign or export reliability.
+
+## Local workspaces
+
+Workspace V1 runs one guarded edit of an existing numeric length user parameter in a self-contained parametric F3D. It recomputes the model and reports the parameter readback and selected root-frame geometry as baseline, result and delta. Requirements specify the comparison, units and tolerance. Protected checks compare against the measured baseline. Read `execution` and `verification` independently. A completed edit can fail a requirement or have incomplete measurements. A verified result covers the declared checks.
+
+Use `workspace_init` with an absolute host path. Bind an existing document with `workspace_bind` for inspection and checkpoint capture. Create an F3D checkpoint with `workspace_checkpoint` and use the fresh working copy it opens, or open another copy later with `workspace_restore`. Managed edits require a workspace-owned copy. Its target handle stays valid for that open document in the current Fusion session. A restore opens a new document from hash-checked bytes and bypasses Fusion Undo.
+
+The workspace stores immutable F3D blobs, a job ledger, and separate `wip` and `accepted` branch pointers under `.fusion/`. Git can track the manifest and recipe inputs while `.fusion/` stays local. A checkpoint can advance an accepted pointer only after its declared checks pass on the bound design and the reopened archive. The manifest build path can reuse a verified artifact for matching inputs and a compatible executor. It opens and checks the artifact against the current requirements before accepting it.
+
+The optional managed Python recipe runs inside the bound workspace copy and implements the requested expression edit. Use it when native Python fits the operation better, including when a typed call also exists. The recipe runs with Fusion's Python access. Verification comes from the coordinator's independent readback. The build cache covers the built-in parameter recipe.
+
+If a reply is uncertain, retain the operation UUID and check `workspace_status`. Use `workspace_recover` for a clean late edit receipt and fresh readback. Failed custom recipes with an unknown model state keep the write barrier in V1. Treat stored results as historical evidence and inspect the bound document for current geometry.
+
+The CLI uses the same operations. `init` and `status` work with Fusion closed. `inspect`, `edit` and `checkpoint` take JSON request files. The example includes a seed specification and runnable manifest. [Workspace example](examples/workspace/README.md) · [Workspace tool reference](src/fusion_cad_mcp/knowledge/tools.md#local-workspace-v1)
+
+Broader build recipes, mechanical interface contracts and richer change analysis remain proposed work.
 
 ## Assembly and enclosure workflow
 
@@ -85,14 +106,14 @@ Import supplied geometry with `import_geometry`, or open a local F3D as a separa
 
 Use `query_geometry` to find current faces, edges or vertices with bounded results; its `near` filter compares a **sample point**, not minimum distance to the geometry. Topology and handles can change after edits; feature-face provenance is incomplete, and generic feature dependencies are unavailable. Use `validate_design` for explicit clearance, interference and root-axis bounds checks. A bounds pass does not prove containment in an irregular cavity; review each `pass`, `violation` or `unavailable` result and `passed`.
 
-A failed or timed-out write may have partially changed the design. Trusted JSON-status modeling and inspection scripts have local receipts; visual/timeline operations, native operations and raw `execute` are outside that coverage. The finite journal holds 2,000 operation manifests: 1,968 normal slots and 32 reserved for recovery probes and refuses new receipt-backed work when full; retain the operation ID, query `get_operation_status`, and inspect the current document and any reported rollback before deciding what happened. An unresolved write can block subsequent writes until `reconcile_operation` records explicit acknowledgement and evidence. Reconciliation releases the barrier; it does not prove success, rollback, or that timed-out Fusion execution stopped. Raw `execute` is uninstrumented and has no receipt or general rollback guarantee.
+A failed or timed-out write may have partially changed the design. Trusted JSON-status scripts have local receipts. The journal holds 1,968 normal operation manifests and reserves 32 slots for recovery probes. If a reply is uncertain, retain the operation ID and inspect the current document. Use `workspace_status` and `workspace_recover` for workspace jobs. For other instrumented calls, use `get_operation_status` and, when needed, `reconcile_operation` with explicit acknowledgement and evidence. Confirm the actual result and execution state independently of reconciliation. Visual and timeline operations, native operations and raw `execute` use their own result paths.
 
 ## Every tool returns the same envelope
 
 ```python
 {
   "ok": bool,
-  "message": str,          # stdout from the generated script
+  "message": str,          # result text, diagnostics, or raw execute stdout
   "result": dict | None,   # the payload
   "image": dict | None,    # base64 PNG, for screenshots
   "error": str | None,     # error code when ok is False
@@ -145,8 +166,8 @@ fallback inside `find_api`.
 ## The agent skill
 
 `SKILL.md` in this repo is the agent-facing companion to the server: which tool
-to reach for, the six rules that prevent most failures, and how to fall back to
-raw scripts. It reads alongside the same `tools.md`, `patterns.md` and
+to reach for, the six rules that prevent most failures, and how to choose typed
+tools, custom Python, or both. It reads alongside the same `tools.md`, `patterns.md` and
 `gotchas.md` the knowledge tools search, so there is one copy of each.
 
 From a checkout, install it into a Claude skills directory:

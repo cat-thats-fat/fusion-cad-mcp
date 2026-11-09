@@ -105,9 +105,10 @@ Keep these points in mind while we work:
 - If a Fusion-specific error comes up, use the find_gotcha tool. It searches a
   catalog of known Fusion API failure modes, including several that report
   success while doing the wrong thing.
-- Intermittent missing script output is unresolved. A write may have completed
-  despite an empty reply or timeout. Inspect the actual model before retrying;
-  do not assume cancellation or rollback.
+- Autodesk's raw script output can fail when capture writers accumulate.
+  Receipt-backed tools return through their local journal. If a write's reply
+  is empty or times out, keep the operation ID and inspect the actual model
+  before retrying.
 ```
 
 ## Step 3: try it
@@ -131,7 +132,7 @@ Ask it to screenshot as it goes. Watching each step is how you catch a wrong tur
 
 **"It worked, then everything broke after I restarted Fusion."** The adapter re-handshakes on a rejected session. Check that Fusion's listener is enabled, inspect the error, and reconnect the MCP client if needed; persistent failures alone do not identify which layer failed.
 
-**"A script returned empty output or timed out."** See the known limitation in [CONNECT.md](CONNECT.md#troubleshooting). Inspect the model before retrying a write. Restarting Fusion restored output in recorded runs, but the cause remains unresolved; protect unsaved work before restarting.
+**"A script returned empty output or timed out."** Keep the operation ID and inspect the actual model before retrying a write. The troubleshooting guide explains how to check receipt-backed calls and raw script output. [Troubleshooting](CONNECT.md#troubleshooting)
 
 **"My client says the command was not found."** Configure the absolute virtual-environment Python path from step 4 with arguments `-m fusion_cad_mcp.server`. Confirm that interpreter still exists; a client may not inherit your shell's PATH.
 

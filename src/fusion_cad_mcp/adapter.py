@@ -535,13 +535,28 @@ class FusionAdapter:
             read_only=read_only,
         )
 
-    def execute_typed_script(self, script: str, *, read_only: bool = False,
-                             operation_id: str | None = None, recovery_probe: bool = False) -> Envelope:
+    def execute_typed_script(
+        self,
+        script: str,
+        *,
+        read_only: bool = False,
+        operation_id: str | None = None,
+        recovery_probe: bool = False,
+        receipt_context: dict[str, Any] | None = None,
+    ) -> Envelope:
         """Execute a generated JSON-status script with a durable local receipt."""
         from .receipts import run_typed
 
-        return run_typed(self.execute_script, script, self.url, self.timeout,
-                         operation_id=operation_id, read_only=read_only, recovery_probe=recovery_probe)
+        return run_typed(
+            self.execute_script,
+            script,
+            self.url,
+            self.timeout,
+            operation_id=operation_id,
+            read_only=read_only,
+            recovery_probe=recovery_probe,
+            receipt_context=receipt_context,
+        )
 
     def execute_document_op(self, operation: str, **object_args: Any) -> Envelope:
         """Run a document-level op: save, close, open. See Fusion MCP schema."""

@@ -1,19 +1,19 @@
 ---
 name: fusion-cad
-description: "Use this skill whenever the user wants to do CAD work through Autodesk Fusion, either via the fusion-cad-mcp server (named tools: create_sketch, add_rectangle, extrude, add_hole, fillet_edges, create_joint, export, and so on) or via Autodesk's own Fusion MCP (fusion_mcp_execute, fusion_mcp_read, fusion_mcp_update, fusion_mcp_electronics_read). Covers parametric constrained sketches, extrudes, holes, fillets, chamfers, shells, multi-body modeling, assemblies and components, as-built joints, motion (hinges, sliders), print-in-place mechanisms and print orientation, exports to STL/3MF/STEP, undo/redo, screenshots, API documentation lookup, and explicit camera control. Trigger on any mention of Fusion 360, the Fusion MCP, .f3d/.f3z/.step files, parametric CAD design, building or editing 3D models programmatically, sketches, extrudes, fillets, counterbore holes, components, joints, hinges, sliders, assemblies, print-in-place parts, print orientation, or when the user asks to model a bracket, tray, mount, panel, organizer, rack mount, or any functional 3D-printed product. Use even if the user does not name the MCP explicitly: if they ask Claude to design something in Fusion or build a part, this skill applies."
+description: "Use for creating, editing, inspecting or verifying CAD in Autodesk Fusion through fusion-cad-mcp or Autodesk's Fusion MCP. Covers native parametric geometry, constraints, assemblies, joints, reference components, measurements, guarded edits, local F3D checkpoints, exports and custom Python scripting. Use for Fusion/Fusion 360, its MCP or Python API, and Fusion workflows involving F3D/F3Z/STEP designs, including functional parts and electronics enclosures."
 ---
 
 # Fusion CAD
 
 Drive Autodesk Fusion safely and efficiently through an MCP server.
 
-> Includes historical observations and scoped live tests through Fusion 2706.1.17. See the validation report; these checks do not cover every design or version.
+> Includes historical observations and scoped live tests on Fusion Personal 2706.1.17. The repository's workspace validation report describes the measured fixtures and results.
 
 ## Which server are you talking to?
 
 This matters before anything else, because the tool surface is completely different.
 
-**`fusion-cad-mcp` (this project).** named, typed tools: `create_sketch`, `extrude`, `add_hole`, `create_joint`. Each one validates arguments, returns a structured envelope, and encodes the gotchas so you do not have to. **Prefer this whenever it is available.**
+**`fusion-cad-mcp` (this project).** named, typed tools: `create_sketch`, `extrude`, `add_hole`, `create_joint`. Each one validates arguments, returns a structured envelope, and encodes common API gotchas. Use a typed tool when it fits the task well. **Custom Python through `execute` is always an available option for the agent to choose**, including when a typed tool exists but scripting is better suited to the intended scope, API options, inspection, or efficiency. Mix both approaches as useful; there is no requirement to exhaust typed tools first.
 
 **Autodesk's own Fusion MCP.** Four fat tools that take raw Python or query objects:
 
@@ -34,17 +34,17 @@ Load on demand. This file is the operating manual; those are the depth.
 |---|---|---|
 | `tools.md` | Tool reference: signatures, exact enums, return keys, error codes | Before calling a tool whose arguments you are not sure of |
 | `gotchas.md` | Failure-mode catalog, each with symptom and fix | When something behaves unexpectedly, or before a risky operation |
-| `patterns.md` | Reusable Python for `execute` | When no typed tool covers the operation |
+| `patterns.md` | Reusable Python for `execute` | When custom scripting is useful, including alternatives to typed tools |
 
 Call `get_capabilities` offline first to check package version, corpus availability, import formats and receipt scope. The server can also search these without loading them: `find_tool`, `find_gotcha`, `find_pattern`, and `find_api` for Autodesk's API help. **These work with Fusion closed.**
 
 ## Six rules that prevent most failures
 
 1. **Parametric first.** Every dimension that might change goes in `add_parameters` and gets referenced by name. Hardcoded numbers in sketches are forbidden. Re-running should be safe.
-2. **One feature per call.** Faster debugging, cleaner timeline, scoped failures.
+2. **Bound the edit scope.** Small operations simplify diagnosis. A cohesive custom script can combine steps when that better serves the task; keep explicit targets, postconditions and a recovery boundary.
 3. **Name everything.** Sketches, features, bodies, planes. Name-addressing is how you reach things later, and an unnamed timeline is unreadable when something breaks.
 4. **Assert profiles after every sketch.** `assert_profiles(sketch, expected)`. A self-intersecting polygon returns 2 profiles rather than raising, and that is the only signal you get.
-5. **Verify with numbers, not pictures.** `bounding_box` and `volume` after every body-adding feature. Screenshots deceive about orientation and sometimes render blank; volume tracks intended geometry to under 1 mm3 and catches missed cuts that look fine on screen.
+5. **Verify with numbers, not pictures.** Use `bounding_box`, `volume` and task-specific geometry checks after body edits. Compare with expected values using explicit units and tolerances; bounds and volume are scoped witnesses, not a complete correctness proof. Screenshots can hide orientation errors or render blank.
 6. **Count entities across anything that replicates.** Patterns, mirrors, joins. Position and volume can all be correct while the count is wrong. This is not hypothetical: an unset pattern direction two silently tripled body counts with every other check passing.
 
 ## The two things every tool shares
@@ -80,13 +80,25 @@ Use `create_component`, `insert_component` and `place_component` for local assem
 
 `set_reference_metadata` stores user-provided mount, connector and keep-out data on a component definition in component-local mm. `get_reference_metadata` returns that data, the selected occurrence transform, and root-frame body bounds. Shared or linked definitions refuse edits. `validate_design` checks explicit bounds, interference and minimum clearance; inspect every status and `passed`. Axis-aligned bounds do not establish cavity containment.
 
+## Guarded workspace edits
+
+Use the workspace tools when a local F3D checkpoint, scoped evidence or recoverable operation record would help. V1 supports one existing numeric length user parameter in a self-contained parametric design.
+
+1. Call `workspace_init` on an absolute path. Bind a source document with `workspace_bind` for inspection and checkpoint capture. Use the fresh workspace-owned copy from `workspace_checkpoint`, `workspace_restore` or `workspace_build` for managed edits.
+2. Call `workspace_inspect` on the active bound copy and retain the exact prior expression, resolved value in mm and named baseline measurements. Use `root / Body` or `<full occurrence path> / Body` and root-frame units. Include a `body_extent` requirement with axis and an explicit tolerance.
+3. Call `workspace_edit` with the handle, a new operation UUID, the unit-bearing expression and the baseline guards. A trusted Python `run(_ctx)` recipe can implement the requested edit when a script fits better. Use the supplied document and design. Independent readback determines verification.
+4. Read `execution`, `verification` and the per-check baseline, result and delta. Check protected witnesses and any unknowns. Accepted checkpoint publication requires passing checks after archive reopen. For another attempt, restore a fresh document from the selected checkpoint and capture its baseline again.
+5. If execution is uncertain, keep the original UUID and call `workspace_status`. `workspace_recover` uses a clean late edit receipt and fresh bound readback. Conflicting receipt records or failed custom recipes with unresolved effects keep the write barrier. Inspect the affected copy and keep the original operation record.
+
+See `tools.md` for workspace signatures and `patterns.md` for a guarded edit contract and managed Python example.
+
 ## Traps that cost the most time
 
 Full catalog in `gotchas.md`. These bite first.
 
 **Assembly scope matters.** Sketch operations can resolve occurrence-qualified names; ambiguous names and edits to shared component definitions are refused. Not every feature tool supports child components. Verify the owning component and use explicit occurrence paths where supported.
 
-**Internal units are centimeters.** Tools convert for you at the boundary, so you pass and receive mm. Raw scripts do not: `Point3D.create` takes cm, and `parameter.value` returns cm. Use `ValueInput.createByString("30 mm")` and let Fusion convert.
+**Units depend on the quantity.** Typed geometry tools document their input/output units, commonly mm. Raw Fusion uses cm for length, radians for angles and cm³ for volume; a numeric parameter value uses its quantity's internal units. `Point3D.create` takes cm. Prefer unit-bearing expressions such as `ValueInput.createByString("30 mm")` and use quantity-specific conversions for readback.
 
 **Edge lengths use Fusion curve length.** Axis-parallel filtering applies only to straight edges; `parallel_to="any"` can include curves. Use `query_geometry` for bounded semantic selection.
 
@@ -106,9 +118,13 @@ Full catalog in `gotchas.md`. These bite first.
 
 ## Writing raw scripts
 
-Instrumented JSON-status scripts use local receipts. Preserve the operation ID, inspect status and the document after an uncertain write, and explicitly reconcile with evidence before releasing a write barrier. Reconciliation is not proof that the operation succeeded, rolled back, or stopped after timeout. Raw `execute` is uninstrumented.
+Instrumented JSON-status scripts return through local receipts. Preserve the operation ID and inspect status and the document after an uncertain write. Use workspace recovery for workspace jobs and explicit evidence for reconciliation of other instrumented calls. Establish the actual model result and execution state independently. Raw `execute` uses Autodesk's script output path.
 
-`execute` is the escape hatch, and it is the only tool with no validation. Reach for it when no typed tool covers the operation, after checking `find_api` and `find_pattern`.
+`execute` is a first-class custom scripting path, available for operations missing from the typed surface and whenever the agent judges Python a better fit than a premade tool. Useful cases include coordinated native edits, specialized inspection, and reusable build recipes. Reuse existing helpers where they fit, and consult `find_api` for unfamiliar APIs and `find_pattern` for adaptable examples.
+
+Raw `execute` currently has no automatic target validation, operation receipt, or general rollback guarantee. Supply explicit target checks and measure the resulting geometry for the selected requirements, with units and tolerances. Report baseline, result and differences where relevant. Verification requires measurements and their comparisons. To apply the guarded V1 parameter-edit contract to a trusted recipe, use `workspace_edit` with `custom_script` on a workspace-owned copy.
+
+Direct raw execution also bypasses receipt-backed writer coordination. Do not use that bypass to resume writes or replay a mutation while its outcome is unresolved; inspect status and establish recovery evidence first.
 
 ```python
 import adsk.core, adsk.fusion
@@ -122,14 +138,15 @@ def run(_ctx):
 ```
 
 1. The entry point must be exactly `def run(_ctx):`. No other name works. (Autodesk's `fusion_mcp_execute` uses `def run(_context: str):`.)
-2. **Never wrap the body in try/except.** Exceptions return as the tool error with a full traceback; catching them destroys it.
+2. **Preserve failures.** Let exceptions propagate; use `try/finally` for cleanup or re-raise caught exceptions with their traceback. Do not swallow an exception or print success after a failed edit.
 3. `print()` is the return channel; stdout becomes `message`.
 4. Print the bounding box after any extrude.
 
-Fusion's MCP has intermittently lost expected stdout during live tests. An empty
-reply or timeout does not prove a write failed; inspect the actual design before
-retrying. A raw script that intentionally prints nothing can validly return an
-empty message.
+Autodesk's capture writers accumulated in one tested session and caused recursive
+stdout failure. Receipt-backed calls avoid the final native stdout write. Raw
+scripts still use that output path. After an empty reply or timeout, inspect the
+actual design before retrying a write. A deliberately silent raw script can
+validly return an empty message.
 
 Look the API up before writing against an unfamiliar method. `find_api` costs one call; a failed round trip plus debugging costs far more. Always pass a category when using Autodesk's `apiDocumentation` query, since omitting it returns success with empty data.
 

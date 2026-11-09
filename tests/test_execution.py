@@ -71,7 +71,7 @@ def test_reconcile_requires_fresh_matching_receipted_probe(monkeypatch):
     reconcile.assert_not_called()
 
 
-@pytest.mark.parametrize("evidence", ["é" * 1025, "\ud800"])
+@pytest.mark.parametrize("evidence", ["Ã©" * 1025, "\ud800"])
 def test_reconcile_rejects_oversized_or_invalid_utf8_before_probe(monkeypatch, evidence):
     from fusion_cad_mcp.tools import operations
 
@@ -100,3 +100,30 @@ def test_receipt_status_exposes_recorded_read_only_flag(monkeypatch, tmp_path, r
     monkeypatch.setattr(receipts, "_entry", lambda *args: entry)
     status = receipts.get_status("00000000-0000-4000-8000-000000000001", journal_dir=tmp_path)
     assert status.ok and status.result["read_only"] is read_only
+
+
+def test_reconcile_managed_receipt_refuses_before_document_probe(tmp_path):
+    from uuid import uuid4
+
+    from fusion_cad_mcp import receipts
+    from fusion_cad_mcp.tools import operations
+
+    adapter = ReceiptAdapter({"ok": True, "document_creation_id": "doc"})
+    adapter.url = "endpoint"
+    adapter.receipt_journal_dir = tmp_path
+    operation_id = str(uuid4())
+    script = "import json\ndef run(_ctx):\n print(json.dumps({'ok': True}))\n"
+    initial = receipts.run_typed(
+        lambda *_args, **_kwargs: Envelope(ok=False, error="transport_timeout"),
+        script, adapter.url, 1, operation_id, journal_dir=tmp_path,
+        receipt_context={"kind": "workspace", "target_handle": "epoch:bound", "action": "edit"},
+    )
+    assert initial.state["execution_outcome"] == "unknown"
+    refused = operations.reconcile_operation(adapter, operation_id, "doc", True, "inspected", True)
+    assert refused.error == "workspace_reconciliation_required"
+    assert refused.state["retry_safe"] is False
+    assert not adapter.calls
+    assert receipts.get_status(operation_id, journal_dir=tmp_path).result["status"] == "unknown"
+    blocked = receipts.run_typed(lambda *_a, **_k: pytest.fail("must not dispatch"), script,
+                                 adapter.url, 1, journal_dir=tmp_path)
+    assert blocked.error == "receipt_barrier"

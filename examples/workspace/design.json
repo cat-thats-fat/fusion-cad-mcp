@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "seed": "assets/seed.f3d",
+  "edit": {
+    "parameter_name": "blankWidth",
+    "expression": "70 mm",
+    "expected_expression": "60 mm",
+    "expected_value_mm": 60,
+    "value_tolerance_mm": 0.01
+  },
+  "requirements": [
+    {
+      "id": "blank-width",
+      "metric": "body_extent",
+      "entities": ["root / Blank"],
+      "frame": "root",
+      "units": "mm",
+      "axis": "x",
+      "baseline": 60,
+      "baseline_tolerance": 0.01,
+      "comparator": "eq",
+      "expected": 70,
+      "tolerance": 0.01
+    }
+  ],
+  "protected": [
+    {
+      "id": "blank-thickness",
+      "metric": "body_extent",
+      "entities": ["root / Blank"],
+      "frame": "root",
+      "units": "mm",
+      "axis": "z",
+      "baseline": 5,
+      "baseline_tolerance": 0.01,
+      "tolerance": 0.01
+    }
+  ]
+}
