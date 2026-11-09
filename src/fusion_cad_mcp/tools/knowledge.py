@@ -81,6 +81,38 @@ def _resolve_skill_doc(name: str) -> Path | None:
     return None
 
 
+
+def get_capabilities() -> Envelope:
+    """Return compact local capability metadata without connecting to Fusion."""
+    from .. import __version__
+    from ..receipts import _MAX_ENTRIES, _RECOVERY_RESERVE
+    from .io import IMPORT_FORMATS
+
+    return Envelope(ok=True, result={
+        "version": __version__,
+        "local_api_corpus_present": _resolve_corpus_dir() is not None,
+        "api_documentation_fallback": {
+            "tool": "fusion_mcp_read", "queryType": "apiDocumentation",
+            "parameters": ["apiCategory", "searchPattern"],
+            "requires": "connected Autodesk Fusion MCP",
+        },
+        "active_design_import_formats": sorted(IMPORT_FORMATS),
+        "separate_document_archive_format": "f3d",
+        "solidworks_import_supported": False,
+        "paid_or_cloud_import_provided": False,
+        "receipts": {
+            "scope": "trusted JSON-status scripts using the enhanced adapter",
+            "modules": ["assembly", "construction", "doc_state", "features", "handle_tools",
+                        "inspection", "io", "local_files", "native_features", "operations",
+                        "parameters", "parametric_sketch", "placement", "primitives", "references",
+                        "sketch", "validation", "verify"],
+            "excluded": ["raw execute", "native Autodesk tools", "visualize and timeline tools"],
+            "normal_manifest_limit": _MAX_ENTRIES - _RECOVERY_RESERVE,
+            "recovery_probe_reserve": _RECOVERY_RESERVE,
+            "note": "Declarations are not proof of current geometry; lightweight adapters have no receipts.",
+        },
+    })
+
 # ---------- API corpus search ----------
 
 
@@ -407,4 +439,5 @@ __all__ = [
     "find_gotcha",
     "find_pattern",
     "find_tool",
+    "get_capabilities",
 ]

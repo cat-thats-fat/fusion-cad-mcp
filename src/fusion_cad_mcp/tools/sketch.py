@@ -33,7 +33,8 @@ import textwrap
 from typing import Any
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json, script_parse_failure
+from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..handles import emit_make_handle, emit_resolve, is_handle, parse_handle
 from ..resolver import RESOLVER_SCRIPT
 
@@ -685,6 +686,7 @@ def build_assert_profiles(sketch_name: str, expected: int) -> str:
     ok = actual == {expected}
     print(json.dumps({{
         "ok": ok,
+        **({{"error": "profile_count_mismatch"}} if not ok else {{}}),
         "actual": actual,
         "expected": {expected},
         "isFullyConstrained": sk.isFullyConstrained,
@@ -699,27 +701,27 @@ def assert_profiles(adapter: FusionAdapter, sketch: str, expected: int) -> Envel
         )
     # Bypass the generic _run helper so we can distinguish "assertion failed"
     # (parsed.ok = False but the script ran fine) from real script-level errors.
-    env = adapter.execute_script(build_assert_profiles(sketch, expected), read_only=True)
+    env = execute_typed_script(adapter, build_assert_profiles(sketch, expected), read_only=True)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, "assert_profiles_parse_failed", read_only=True)
     if "error" in parsed:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error=parsed.get("error", "assert_profiles_error"),
             message=env.message,
             result=parsed,
         )
     if parsed.get("ok") is False:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error="profile_count_mismatch",
             message=env.message,
             result=parsed,
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 # ---------- probe_sketch_dimensions ----------
@@ -1052,20 +1054,20 @@ def edit_sketch_dimension(
 
 
 def _run(adapter: FusionAdapter, script: str, label: str, *, read_only: bool = False) -> Envelope:
-    env = adapter.execute_script(script, read_only=True) if read_only else adapter.execute_script(script)
+    env = execute_typed_script(adapter, script, read_only=True) if read_only else execute_typed_script(adapter, script)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, f"{label}_parse_failed", read_only=read_only)
     if parsed.get("ok") is False:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error=parsed.get("error", f"{label}_failed"),
             message=env.message,
             result=parsed,
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 __all__ = [

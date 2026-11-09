@@ -19,7 +19,8 @@ import json
 import textwrap
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json, script_parse_failure
+from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..handles import emit_resolve, parse_handle
 from ..health import FEATURE_HEALTH_CHECK, FEATURE_HEALTH_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
@@ -106,20 +107,20 @@ import json
 
 
 def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = adapter.execute_script(script)
+    env = execute_typed_script(adapter, script)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, f"{label}_parse_failed")
     if parsed.get("ok") is False:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error=parsed.get("error", f"{label}_failed"),
             message=env.message,
             result=parsed,
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 # ---------- extrude ----------

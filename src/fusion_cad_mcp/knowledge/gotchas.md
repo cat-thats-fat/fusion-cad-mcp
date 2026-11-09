@@ -195,7 +195,7 @@ print([m for m in dir(design.exportManager) if 'Options' in m])
 
 Also: `transparent=true` (the default) on a light-coloured body over a light background renders an image that reads as blank/washed out.
 
-**Rule.** For anything above roughly 800px, or any repeated visual-check loop, skip the screenshot tool and write the file yourself, then read it back:
+**Rule.** For a local PNG, consider the typed `save_viewport` tool and verify its returned file metadata. The following historical raw API recipe shows an alternative:
 
 ```python
 vp = app.activeViewport

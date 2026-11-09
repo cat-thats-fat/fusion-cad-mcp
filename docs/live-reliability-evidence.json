@@ -1,0 +1,88 @@
+{
+  "fusion_version": "2706.1.17",
+  "checks": [
+    {
+      "name": "constrained_rectangles",
+      "status": "passed",
+      "evidence": {
+        "planes": 3,
+        "centered_non_xy": true
+      }
+    },
+    {
+      "name": "parameter_receipt_and_brep",
+      "status": "passed",
+      "evidence": {
+        "width_mm": 50,
+        "volume_mm3": 6952.0,
+        "duplicate_redispatched": false,
+        "conflict_refused": true,
+        "recovered_from_receipt": true
+      }
+    },
+    {
+      "name": "rigid_membership_and_compact_inspection",
+      "status": "passed",
+      "evidence": {
+        "selected": 2,
+        "actual": 2,
+        "descendants": 3,
+        "preview_count": 3,
+        "page_size": 1
+      }
+    },
+    {
+      "name": "native_descendant_membership",
+      "status": "passed",
+      "evidence": {
+        "actual": 3,
+        "suppressed": false
+      }
+    },
+    {
+      "name": "non_idempotent_duplicate_refusal",
+      "status": "passed",
+      "evidence": {
+        "actual_occurrences": 7,
+        "expected_without_duplicate": 7
+      }
+    },
+    {
+      "name": "viewport_local_png",
+      "status": "passed",
+      "evidence": {
+        "width": 1200,
+        "height": 800,
+        "bytes": 96962,
+        "camera_restored": true
+      }
+    },
+    {
+      "name": "archive_reopen",
+      "status": "passed",
+      "evidence": {
+        "same_volume": true,
+        "source_hash_matches": true,
+        "bytes": 185836,
+        "previous_document_preserved": true
+      }
+    },
+    {
+      "name": "recovery_barrier",
+      "status": "passed",
+      "evidence": {
+        "blocked_write": true,
+        "read_available": true,
+        "explicit_reconciliation": true
+      }
+    },
+    {
+      "name": "fixture_cleanup",
+      "status": "passed",
+      "evidence": {
+        "closed": 2,
+        "previous_restored": true
+      }
+    }
+  ]
+}

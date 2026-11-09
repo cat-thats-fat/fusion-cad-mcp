@@ -110,7 +110,7 @@ Start a new Codex chat and select the `fusion-cad` skill. If the server is not
 listed, reconnect or restart the client. `codex mcp get fusion_cad` confirms the
 saved configuration, not a live connection. Verify through the tools:
 
-1. Discover the server's tools (88 at the verified revision).
+1. Discover the server's tools (95 in version 0.3.0); call `get_capabilities` for the offline capability summary.
 2. Call `find_tool` for `create_parametric_enclosure`; confirm a nonempty hit.
 3. Call `doc_state`; confirm `result.active_design` is true and inspect the
    document's units, dirty flag and entity counts.
@@ -201,7 +201,7 @@ The other tools work without it. Only `find_api` returns `corpus_not_built` unti
 
 **Everything worked, then calls started failing after restarting Fusion.** The adapter re-handshakes on a rejected session. If errors persist, confirm the listener and inspect the error; reconnect the MCP server in your client if needed. Repeated failures alone do not identify which layer is at fault.
 
-**Expected script output is empty, or a call times out.** Intermittent empty successful replies were observed from Autodesk's MCP on Fusion 2706.1.17, including read-only print probes. The cause is unresolved. A write may have completed even if its result was lost: inspect the design before retrying, and do not assume timeout cancellation or automatic rollback. Restarting Fusion restored output in recorded runs, but is not a proven fix; protect unsaved work before restarting. An intentionally silent raw `execute` script can legitimately return empty output.
+**Expected script output is empty, or a call times out.** Intermittent empty successful replies were observed from Autodesk's MCP on Fusion 2706.1.17, including read-only print probes. The cause is unresolved. A write may have completed even if its result was lost: retain its operation ID, query `get_operation_status`, and inspect the design before deciding what happened. Instrumented writes can be blocked until `reconcile_operation` records explicit acknowledgement and evidence; reconciliation does not prove success, rollback or that timed-out execution stopped. Raw `execute` has no receipt. Restarting Fusion restored output in recorded runs, but is not a proven fix; protect unsaved work before restarting. An intentionally silent raw `execute` script can legitimately return empty output.
 
 **`find_api` returns `corpus_not_built`.** Expected until you build the corpus. See above.
 

@@ -12,6 +12,7 @@ import re
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..resolver import RESOLVER_SCRIPT
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
@@ -166,7 +167,7 @@ def _run(adapter, component, metadata):
         script = build_reference_metadata(component, metadata)
     except (ValueError, TypeError) as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
-    env = adapter.execute_script(script, read_only=metadata is None)
+    env = execute_typed_script(adapter, script, read_only=metadata is None)
     if not env.ok:
         return env
     result = parse_status_json(env)

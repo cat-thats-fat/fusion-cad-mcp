@@ -20,6 +20,8 @@ from fusion_cad_mcp.tools import (
 
 def _empty_script_adapter():
     adapter = Mock(spec=FusionAdapter)
+    # Deliberately exercise the legacy transport fallback, not an auto-created Mock.
+    del adapter.execute_typed_script
     adapter.execute_script.return_value = from_fusion_response({
         "result": {"content": [{"type": "text", "text": '{"success":true,"message":""}'}]},
     })

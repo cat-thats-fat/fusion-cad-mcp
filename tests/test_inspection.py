@@ -321,3 +321,24 @@ def test_selected_child_features_use_contextual_tokens(monkeypatch):
     assert out["sections"]["features"]["items"][0]["selector"] == "Child:1 / Cut"
     assert out["sections"]["features"]["items"][0]["handle"].endswith(":proxy-feature")
     assert out["sections"]["sketches"]["items"][0]["handle"].endswith(":proxy-sketch")
+
+
+def test_assembly_compact_fields_summary_and_health_filter(monkeypatch):
+    root = fixture()
+    bad = types.SimpleNamespace(name="Bad", objectType="adsk::fusion::Feature", healthState=2, errorOrWarningMessage="failed")
+    root.features = coll([root.features.item(0), bad])
+    out = execute(monkeypatch, inspection.build_inspect_assembly(include=["features", "bodies"], fields=[], health_filter="non_healthy"), root)
+    features = out["sections"]["features"]
+    assert features["count"] == 1 and features["items"][0]["name"] == "Bad"
+    assert "health" not in features["items"][0] and "handle" not in features["items"][0]
+    assert "bounding_box_mm" not in out["sections"]["bodies"]["items"][0]
+    summary = execute(monkeypatch, inspection.build_inspect_assembly(include=["features"], detail="summary"), root)["sections"]["features"]
+    assert summary["count"] == 2 and summary["items"] == [] and summary["truncated"]
+    page = execute(monkeypatch, inspection.build_inspect_assembly(include=["features"], limit=1), root)["sections"]["features"]
+    assert page["returned_count"] == 1 and page["next_offset"] == 1 and page["truncated"]
+
+
+def test_assembly_rejects_unknown_compact_options():
+    for options in ({"detail": "tiny"}, {"fields": ["bogus"]}, {"health_filter": "healthy"}):
+        with pytest.raises(ValueError):
+            inspection.build_inspect_assembly(**options)

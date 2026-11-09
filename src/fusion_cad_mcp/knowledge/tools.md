@@ -9,9 +9,9 @@ assemblies, select needed `include` sections and paginate: `limit` applies to ea
 section, not the combined reply. MCP text and structured content carry the same
 envelope for client compatibility; consume either representation once.
 
-## `inspect_assembly(component=None, include=None, limit=50, offset=0)`
+## `inspect_assembly(component=None, include=None, limit=50, offset=0, detail="full", fields=None, health_filter=None)`
 
-Read the root or a uniquely selected occurrence. By default returns paginated descendant occurrences, bodies, sketches, features and joints; `include` can also select `as_built_joints`. For a selected occurrence, its descendants are listed and the selected occurrence itself is excluded. Occurrence entries include parent path, repeated-definition count, grounding, root and immediate-parent transforms, and handles where available. Matrices use Fusion `Matrix3D.asArray` with cm translations. Body bounds are root-frame mm. Native definition sections are not a universal assembly dependency graph.
+Read the root or a uniquely selected occurrence. By default returns paginated descendant occurrences, bodies, sketches, features and joints; `include` can also select `as_built_joints`. For a selected occurrence, its descendants are listed and the selected occurrence itself is excluded. Occurrence entries include parent path, repeated-definition count, grounding, root and immediate-parent transforms, and handles where available. Matrices use Fusion `Matrix3D.asArray` with cm translations. Body bounds are root-frame mm. Native definition sections are not a universal assembly dependency graph. `detail="summary"` returns counts without rows. In full detail, `fields` selects optional groups `handles`, `transforms`, `health`, `bounds` (`None` means all; `[]` means none). Each section reports `returned_count`, `next_offset`, and `truncated`; pagination is per section. `health_filter="non_healthy"` filters only sketches and features, retaining unknown health; other sections are unaffected.
 
 ## `inspect_feature(feature, limit=50)`
 
@@ -175,7 +175,7 @@ Passthrough. Returns all projects/hubs visible to the user. Result shape is Fusi
 
 Fuzzy document-name search. `project` scopes it; omit to search everywhere. No client-side validation, so an empty query reaches Fusion. Result shape is Fusion's.
 
-## `open_doc(name, project=None)`
+## `open_doc(name, project=None, file_id=None)`
 
 Fuzzy-matched open by name. No validation. Result shape is Fusion's.
 
@@ -240,7 +240,7 @@ Returns: `ok`, `added` (`[{name, expression}]`, the *requested* expression, not 
 
 **Partial-application trap:** the per-parameter `add` is not individually guarded. If Fusion rejects one def mid-loop, earlier adds are already applied, no JSON is printed, and you get `parse_failed` with no record of what landed. Re-run is safe because the tool is idempotent.
 
-## `update_parameter(name, expression)`
+## `update_parameter(name, expression, operation_id=None)`
 
 Errors: `invalid_name`, `invalid_expression` (both `must be a non-empty string`), `param_not_found`.
 
@@ -301,6 +301,10 @@ Returns: `ok`, `sketch_name`, `plane` (lowercased), `handle`, formatted as `sket
 `p1`, `p2` are `[x, y]` mm, exactly 2 elements. Error `invalid_input`: `p1 and p2 must be [x, y] in mm`.
 
 Returns: `ok`, `line_index`.
+
+## `create_parametric_rectangle(name, width, height, x="0 mm", y="0 mm", z="0 mm", plane="xy", centered=False, component=None)`
+
+Create a new named, editable rectangle sketch with construction datums in root or a uniquely selected component. Dimensions and coordinates are Fusion length expressions; sizes must resolve positive. `plane` is `xy`, `xz` or `yz`; the anchor is the lower-left sketch-frame corner unless `centered=True`. It checks for one closed, fully constrained profile and retained bindings, with targeted cleanup on failure. It refuses duplicate names and unsafe component edits. This does not constrain an existing sketch. Inspect output and verify live geometry and coordinate orientation in the installed Fusion build.
 
 ## `add_rectangle(sketch, kind, p1, p2, p3=None)`
 
@@ -693,13 +697,13 @@ Errors include `invalid_input`, `occurrence_not_found`, `occurrence_ambiguous`, 
 
 Returns `ok`, `component`, and the read-back values `isGrounded` and `isGroundToParent`.
 
-## `create_rigid_group(component_names, name=None)`
+## `create_rigid_group(component_names, name=None, include_children=True, preview=False, max_occurrences=None, operation_id=None)`
 
-Two or more names. `includeChildren` is hardcoded on.
+Resolve at least two distinct occurrences. The legacy default includes descendants; use `preview=True` to count selected and expanded membership without creating a group. A positive `max_occurrences` refuses a larger expansion before creation. Preview is a point-in-time estimate, not a lock. A duplicate explicit group name is refused. Inspect after an unknown outcome; do not blindly retry. The result includes selected, expanded and actual membership counts when available. Health or suppression can be unavailable; unavailable is not healthy.
 
-Errors: `invalid_input` (`rigid group requires at least 2 component names`), `occurrence_not_found`, `rigid_group_add_failed` (carries `detail` when Fusion raised, typically over-constrained by an existing joint).
+## `inspect_rigid_group(name, limit=50, offset=0)`
 
-Returns: `ok`, `rigid_group_name`, `components`.
+Read a uniquely named root rigid group and bounded actual occurrence paths, count and suppression. Health information can be unavailable. Pages report `returned_count`, `next_offset` and `truncated`.
 
 ## `create_contact_set(body_names)`
 
@@ -948,7 +952,7 @@ Rolls the timeline back, captures, rolls forward, captures again, from the same 
 
 Returns: `before_image`, `after_image`, `before_marker`, `after_marker`, `direction`.
 
-## `export(format, path, body=None, refinement="medium", units="mm")`
+## `export(format, path, body=None, refinement="medium", units="mm", component=None, operation_id=None)`
 
 Formats: `stl`, `3mf`, `step`, `iges`, `obj`, `f3d`, `sat`, `smt`.
 
@@ -966,7 +970,7 @@ Returns: `ok`, `path`, `bytes_written`, and `format` for the mesh formats.
 
 ## `import_geometry(format, path, target_component=None)`
 
-Imports into the active design, at root when `target_component` is omitted. Otherwise select a unique component name, occurrence name or occurrence path. Shared/referenced definitions refuse edits. Formats: `step`, `iges`, `sat`, `smt`, `f3d`. For a separate F3D document use raw `execute` with `importToNewDocument` (below).
+Imports into the active design, at root when `target_component` is omitted. Otherwise select a unique component name, occurrence name or occurrence path. Shared/referenced definitions refuse edits. Formats: `step`, `iges`, `sat`, `smt`, `f3d`. For a separate F3D document use `open_local_archive` (Fusion `importToNewDocument`).
 
 `stl`, `3mf`, and `obj` are not supported for import by this tool. An explicit `"root"` is not a special target selector; omit `target_component` for the root component.
 
@@ -976,11 +980,25 @@ Returns `ok`, `format`, `path`, `source_sha256`, `target_component`, `target_occ
 
 Errors include `invalid_path`, `invalid_input`, `file_not_found` (checked inside Fusion), target selection errors, `referenced_component_edit_unsupported`, `shared_component_edit_unsupported`, `import_options_failed`, and `import_no_objects`.
 
-For a separate document from an F3D archive, use raw `execute` with Fusion's `app.importManager.createFusionArchiveImportOptions(path)` followed by `app.importManager.importToNewDocument(options)`. This differs from this tool's import into the active design. See Autodesk's [ImportManager documentation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/core_ImportManager.htm) and [Fusion archive options](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/core_ImportManager_createFusionArchiveImportOptions.htm).
+## `open_local_archive(path, operation_id=None)`
+
+Open an absolute local `.f3d` file as a separate unsaved document; this is distinct from importing geometry into the active design. Check the returned document identity and file metadata. An uncertain outcome requires inspection before any retry. Other formats, including SolidWorks, are not accepted by this tool.
+
+## `save_viewport(path, width=1600, height=1000, direction="current", fit=False, operation_id=None)`
+
+Save the viewport to an absolute `.png` path in an existing directory. Dimensions are 1..8192 pixels. Directions are `current`, `front`, `back`, `top`, `bottom`, `left`, `right`, and `iso-top-right`, `iso-top-left`, `iso-bottom-right`, `iso-bottom-left`. The tool attempts to restore temporary camera changes and reports file metadata; inspect failures and possible external writes. Images are visual evidence, not a geometry check.
+
+## `get_operation_status(operation_id)` / `reconcile_operation(operation_id, expected_document, acknowledgement, evidence, allow_missing_identity=False)`
+
+Trusted JSON-status modeling and inspection scripts use local receipts and automatic operation IDs; visual/timeline operations, native operations and raw `execute` are not covered. The finite journal admits 2,000 operation manifests: 1,968 normal slots and 32 reserved for recovery probes; capacity exhaustion refuses new receipt-backed work. Selected write tools also accept explicit canonical UUIDs. Check the returned operation ID and status after a lost response. A receipt records the script declaration, not proof of current geometry or rollback. Unknown or declared-failure writes can block later writes until explicit reconciliation; inspect read-only state and the recorded document identity first. Reconciliation requires acknowledgement, bounded evidence and a fresh matching document probe. `allow_missing_identity=True` explicitly permits recovery when the original receipt lacks document identity; this is weaker evidence and does not establish which document was originally affected. Reconciliation releases the barrier and does not prove success, rollback, or that a timed-out Fusion execution has stopped. Raw `execute` is uninstrumented and has no receipt guarantee. `insert_component`'s existing `operation_id` is its component-level duplicate guard, distinct from receipt IDs.
+
+## `get_capabilities()`
+
+Offline summary of package version, local API corpus presence, Autodesk API documentation fallback, supported imports and receipt coverage/capacity. It does not contact Fusion or check licensing, connectivity, model state or installed translator availability.
 
 ## `find_api(query, kind=None, namespace=None, limit=5)` / `find_pattern(query, limit=5)` / `find_gotcha(query, limit=5)` / `find_tool(query, limit=5)`
 
-Local search. **These are the only tools that work with Fusion closed**; they never touch the adapter.
+Local search. These and `get_capabilities` work with Fusion closed; they never touch the adapter.
 
 `find_tool` searches this file, `find_pattern` searches `patterns.md`, `find_gotcha` searches `gotchas.md`. All three search markdown shipped with the package and always work.
 

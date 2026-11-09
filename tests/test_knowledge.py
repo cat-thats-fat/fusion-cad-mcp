@@ -157,3 +157,33 @@ def test_find_tool_import_geometry_reports_active_design_and_target(monkeypatch)
     assert "target_component=None" in hit["heading"]
     assert "active design" in hit["snippet"]
     assert "importToNewDocument" in hit["snippet"]
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_capabilities_are_offline_compact_and_reflect_corpus(monkeypatch, tmp_path, present):
+    monkeypatch.setattr(kn, "_resolve_corpus_dir", lambda: tmp_path if present else None)
+    result = kn.get_capabilities()
+    assert result.ok and result.result["local_api_corpus_present"] is present
+    assert result.result["api_documentation_fallback"]["queryType"] == "apiDocumentation"
+    assert "f3d" in result.result["active_design_import_formats"]
+    assert result.result["separate_document_archive_format"] == "f3d"
+    assert result.result["solidworks_import_supported"] is False
+    assert result.result["receipts"]["normal_manifest_limit"] == 1968
+    assert result.result["receipts"]["recovery_probe_reserve"] == 32
+    assert len(json.dumps(result.result)) < 3000
+
+
+def test_every_registered_tool_has_a_discoverable_reference_heading():
+    import ast
+    import re
+    from pathlib import Path
+
+    package = Path(kn.__file__).resolve().parent.parent
+    tree = ast.parse((package / "server.py").read_text(encoding="utf-8"))
+    names = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and any(isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)
+                     and dec.func.attr == "tool" for dec in node.decorator_list)}
+    reference = (kn.PACKAGED_KNOWLEDGE_DIR / "tools.md").read_text(encoding="utf-8")
+    headings = set(re.findall(r"^#{1,6}[^\n]*", reference, re.MULTILINE))
+    missing = {name for name in names if not any(re.search(r"`" + re.escape(name) + r"\(", h) for h in headings)}
+    assert not missing, f"Tools missing reference headings: {sorted(missing)}"

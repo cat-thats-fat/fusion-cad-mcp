@@ -12,6 +12,7 @@ from typing import Any
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..handles import emit_scope_expr
 from ..resolver import RESOLVER_SCRIPT
 
@@ -33,13 +34,13 @@ def _finite(value: Any) -> bool:
 
 
 def _run(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = adapter.execute_script(script, read_only=True)
+    env = execute_typed_script(adapter, script, read_only=True)
     if not env.ok:
         return env
     parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, label + "_parse_failed", read_only=True)
-    return Envelope(
+    return Envelope(state=env.state,
         ok=parsed.get("ok") is not False,
         error=parsed.get("error"),
         result=parsed,
@@ -324,7 +325,8 @@ def inspect_feature(adapter: FusionAdapter, feature: str, limit: int = 50) -> En
 
 
 def build_inspect_assembly(
-    component: str | None = None, include: list[str] | None = None, limit: int = 50, offset: int = 0
+    component: str | None = None, include: list[str] | None = None, limit: int = 50, offset: int = 0,
+    detail: str = "full", fields: list[str] | None = None, health_filter: str | None = None,
 ) -> str:
     _bounds(limit, offset)
     if component is not None and (not isinstance(component, str) or not component):
@@ -340,8 +342,17 @@ def build_inspect_assembly(
         )
     ):
         raise ValueError("include must contain supported sections")
+    if detail not in ("full", "summary"):
+        raise ValueError("detail must be full or summary")
+    allowed_fields = ("handles", "transforms", "health", "bounds")
+    if fields is not None and (not isinstance(fields, list) or any(x not in allowed_fields for x in fields)):
+        raise ValueError("fields must contain supported detail groups")
+    if health_filter not in (None, "non_healthy"):
+        raise ValueError("health_filter must be non_healthy or None")
     return _script(
-        _ASSEMBLY, {"component": component, "include": list(dict.fromkeys(include)), "limit": limit, "offset": offset}
+        _ASSEMBLY, {"component": component, "include": list(dict.fromkeys(include)), "limit": limit,
+                    "offset": offset, "detail": detail, "fields": list(allowed_fields) if fields is None else fields,
+                    "health_filter": health_filter}
     )
 
 
@@ -376,16 +387,19 @@ def _occ_entry(occurrence, all_occurrences):
     count = sum(1 for x in all_occurrences if x.component == occurrence.component)
     item = {'path': occurrence.fullPathName, 'parent_path': parent.fullPathName if parent else None,
             'component_name': occurrence.component.name, 'definition_occurrence_count': count,
-            'shared_definition': count > 1, 'root_transform': _matrix(occurrence),
+            'shared_definition': count > 1,
             'is_grounded': _property(occurrence, 'isGrounded'),
             'is_ground_to_parent': _property(occurrence, 'isGroundToParent'),
             'is_referenced_component': _property(occurrence, 'isReferencedComponent')}
-    try:
-        native = occurrence.nativeObject or occurrence
-        item['local_transform'] = _matrix(native)
-    except Exception as exc: item['local_transform'] = {'available': False, 'reason': str(exc)}
-    try: item['handle'] = _handle('occurrence', occurrence.fullPathName, occurrence, parent)
-    except Exception as exc: item['handle_unavailable'] = str(exc)
+    if 'transforms' in P['fields']:
+        item['root_transform'] = _matrix(occurrence)
+        try:
+            native = occurrence.nativeObject or occurrence
+            item['local_transform'] = _matrix(native)
+        except Exception as exc: item['local_transform'] = {'available': False, 'reason': str(exc)}
+    if 'handles' in P['fields']:
+        try: item['handle'] = _handle('occurrence', occurrence.fullPathName, occurrence, parent)
+        except Exception as exc: item['handle_unavailable'] = str(exc)
     return item
 
 def run(_ctx):
@@ -398,10 +412,10 @@ def run(_ctx):
         if error: _out(error); return
     result = {'ok': True, 'component': comp.name, 'occurrence': occ.fullPathName if occ else None,
               'frame': 'root' if occ or comp == root else 'component', 'units': 'mm', 'sections': {}}
-    if occ:
+    if occ and 'transforms' in P['fields']:
         try: result['root_transform'] = {'matrix_cm': list(occ.transform2.asArray()), 'convention': 'Fusion Matrix3D.asArray; translation uses cm'}
         except Exception as exc: result['root_transform'] = {'available': False, 'reason': str(exc)}
-    else: result['root_transform'] = None
+    elif 'transforms' in P['fields']: result['root_transform'] = None
     for section in P['include']:
         try:
             all_occurrences = _items(root.allOccurrences) if section == 'occurrences' else []
@@ -411,26 +425,35 @@ def run(_ctx):
                 attr = 'asBuiltJoints' if section == 'as_built_joints' else section
                 collection = (occ.bRepBodies if occ else comp.bRepBodies) if section == 'bodies' else getattr(comp, attr)
                 values = _items(collection)
+            if P['health_filter'] == 'non_healthy' and section in ('sketches', 'features'):
+                values = [obj for obj in values if _state(obj)['health_state'] != 0]
             out = []
-            for obj in values[P['offset']:P['offset']+P['limit']]:
+            page = values[P['offset']:P['offset']+P['limit']] if P['detail'] == 'full' else []
+            for obj in page:
                 if section == 'occurrences':
                     out.append(_occ_entry(obj, all_occurrences)); continue
                 entry = {'name': obj.name, 'type': _type(obj)}
                 if section == 'bodies':
-                    try: entry['bounding_box_mm'] = _box(obj)
-                    except Exception as exc: entry['bounds_unavailable'] = str(exc)
-                    try: entry['handle'] = _handle('body', obj.name, obj, occ)
-                    except Exception as exc: entry['handle_unavailable'] = str(exc)
+                    if 'bounds' in P['fields']:
+                        try: entry['bounding_box_mm'] = _box(obj)
+                        except Exception as exc: entry['bounds_unavailable'] = str(exc)
+                    if 'handles' in P['fields']:
+                        try: entry['handle'] = _handle('body', obj.name, obj, occ)
+                        except Exception as exc: entry['handle_unavailable'] = str(exc)
                 elif section in ('sketches', 'features'):
-                    entry['health'] = _state(obj)
+                    if 'health' in P['fields']: entry['health'] = _state(obj)
                     entry['selector'] = (occ.fullPathName + ' / ' if occ else '') + obj.name
-                    try:
-                        contextual = obj.createForAssemblyContext(occ) if occ else obj
-                        if contextual is None: raise ValueError('proxy unavailable')
-                        entry['handle'] = _handle('sketch' if section == 'sketches' else 'feature', entry['selector'], contextual, occ)
-                    except Exception as exc: entry['handle_unavailable'] = str(exc)
+                    if 'handles' in P['fields']:
+                        try:
+                            contextual = obj.createForAssemblyContext(occ) if occ else obj
+                            if contextual is None: raise ValueError('proxy unavailable')
+                            entry['handle'] = _handle('sketch' if section == 'sketches' else 'feature', entry['selector'], contextual, occ)
+                        except Exception as exc: entry['handle_unavailable'] = str(exc)
                 out.append(entry)
-            section_out = {'count': len(values), 'offset': P['offset'], 'limit': P['limit'], 'items': out}
+            end = P['offset'] + len(out)
+            section_out = {'count': len(values), 'offset': P['offset'], 'limit': P['limit'], 'items': out,
+                           'returned_count': len(out), 'next_offset': end if P['detail'] == 'full' and end < len(values) else None,
+                           'truncated': end < len(values)}
             if section == 'occurrences':
                 section_out['scope'] = 'all descendants; selected occurrence excluded' if occ else 'all occurrences in root assembly'
                 section_out['transform_convention'] = 'Fusion Matrix3D.asArray; translation cm; root and immediate-parent frames'
@@ -446,9 +469,12 @@ def inspect_assembly(
     include: list[str] | None = None,
     limit: int = 50,
     offset: int = 0,
+    detail: str = "full",
+    fields: list[str] | None = None,
+    health_filter: str | None = None,
 ) -> Envelope:
     try:
-        script = build_inspect_assembly(component, include, limit, offset)
+        script = build_inspect_assembly(component, include, limit, offset, detail, fields, health_filter)
     except (TypeError, ValueError) as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
     return _run(adapter, script, "inspect_assembly")

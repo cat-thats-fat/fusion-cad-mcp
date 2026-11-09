@@ -74,7 +74,8 @@ def test_body_not_found_surfaces_structured_error(monkeypatch):
 
 def test_unparseable_stdout_surfaces_parse_error():
     class MalformedAdapter:
-        def execute_script(self, script):
+        def execute_script(self, script, *, read_only=False):
+            assert read_only is True
             return Envelope(ok=True, message="not json at all")
 
     env = v.volume(MalformedAdapter())

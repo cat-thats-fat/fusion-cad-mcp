@@ -116,6 +116,12 @@ def parse_stdout_json(envelope: Envelope) -> dict[str, Any] | None:
 
 def parse_status_json(envelope: Envelope) -> dict[str, Any] | None:
     """Read a generated tool result only when its status is explicitly boolean."""
+    # A direct JSON text block or structuredContent is already decoded by the
+    # transport. Autodesk's {success, message} wrapper is not a script result.
+    if (envelope.ok and isinstance(envelope.result, dict)
+            and "success" not in envelope.result
+            and type(envelope.result.get("ok")) is bool):
+        return envelope.result
     parsed = parse_stdout_json(envelope)
     return parsed if parsed is not None and type(parsed.get("ok")) is bool else None
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..mutation import MUTATION_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 
@@ -477,13 +478,13 @@ def run(_ctx):
         return
     print(json.dumps(_run_primitive(design, {dict(operation=operation, **arguments)!r})))
 """
-    env = adapter.execute_script(script)
+    env = execute_typed_script(adapter, script)
     if not env.ok:
         return env
     result = parse_status_json(env)
     if result is None:
         return script_parse_failure(env, operation + "_parse_failed")
-    return Envelope(ok=result["ok"], error=result.get("error"), result=result, message=env.message)
+    return Envelope(state=env.state, ok=result["ok"], error=result.get("error"), result=result, message=env.message)
 
 
 def create_parametric_enclosure(

@@ -12,6 +12,7 @@ from typing import Any
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..handles import emit_resolve, is_handle, parse_handle
 from ..resolver import RESOLVER_SCRIPT
 
@@ -193,10 +194,10 @@ def validate_design(adapter: FusionAdapter, checks: list[dict[str, Any]]) -> Env
         script = build_validate_design(checks)
     except (TypeError, ValueError) as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
-    env = adapter.execute_script(script, read_only=True)
+    env = execute_typed_script(adapter, script, read_only=True)
     if not env.ok:
         return env
     parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, "validation_parse_failed", read_only=True)
-    return Envelope(ok=parsed.get("ok") is True, error=parsed.get("error"), result=parsed, message=env.message)
+    return Envelope(state=env.state, ok=parsed.get("ok") is True, error=parsed.get("error"), result=parsed, message=env.message)

@@ -6,7 +6,8 @@ import re
 from pathlib import PurePosixPath, PureWindowsPath
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json, script_parse_failure
+from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..handles import emit_make_handle
 from ..resolver import RESOLVER_SCRIPT
 
@@ -71,22 +72,25 @@ def _validate_path(path: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, writes_model: bool = True) -> Envelope:
-    env = adapter.execute_script(script)
+def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, writes_model: bool = True, operation_id: str | None = None) -> Envelope:
+    env = execute_typed_script(adapter, script, operation_id=operation_id)
+    if not writes_model and env.state is not None:
+        env.state = {**env.state, "model_may_have_changed": False,
+                     "external_write_may_have_occurred": env.state.get("execution_outcome") != "not_started"}
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None or "ok" not in parsed:
         return script_parse_failure(env, f"{label}_parse_failed", writes_model=writes_model)
     if parsed.get("ok") is not True:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error=parsed.get("error", f"{label}_failed"),
             message=env.message,
             result=parsed,
         )
     handles = [obj["handle"] for obj in parsed.get("imported_objects", []) if obj.get("handle")]
-    state = {"handles_added": handles} if handles else None
+    state = {**(env.state or {}), **({"handles_added": handles} if handles else {})} or None
     return Envelope(ok=True, message=env.message, result=parsed, state=state)
 
 
@@ -251,6 +255,7 @@ def export(
     refinement: str = "medium",
     units: str = "mm",
     component: str | None = None,
+    operation_id: str | None = None,
 ) -> Envelope:
     ok, err = _validate_path(path)
     if not ok:
@@ -259,7 +264,7 @@ def export(
         script = build_export(format, body, path, refinement, units, component)
     except ValueError as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
-    return _ok_runner(adapter, script, "export", writes_model=False)
+    return _ok_runner(adapter, script, "export", writes_model=False, operation_id=operation_id)
 
 
 def build_import_geometry(

@@ -17,28 +17,29 @@ from __future__ import annotations
 import json
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json, script_parse_failure
+from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..resolver import RESOLVER_SCRIPT
 
 _FIND_BODY_HELPER = RESOLVER_SCRIPT
 _FIND_OCC_HELPER = RESOLVER_SCRIPT
 
 
-def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, read_only: bool = False) -> Envelope:
-    env = adapter.execute_script(script, read_only=True) if read_only else adapter.execute_script(script)
+def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, read_only: bool = False, operation_id: str | None = None) -> Envelope:
+    env = execute_typed_script(adapter, script, read_only=read_only, operation_id=operation_id)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, f"{label}_parse_failed", read_only=read_only)
     if parsed.get("ok") is False:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error=parsed.get("error", f"{label}_failed"),
             message=env.message,
             result=parsed,
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 def _header() -> str:
@@ -300,54 +301,142 @@ def unground_component(adapter: FusionAdapter, name: str) -> Envelope:
 # ---------- create_rigid_group ----------
 
 
-def build_create_rigid_group(component_names: list[str], name: str | None = None) -> str:
-    if not component_names or len(component_names) < 2:
+def build_create_rigid_group(
+    component_names: list[str], name: str | None = None, include_children: bool = True,
+    preview: bool = False, max_occurrences: int | None = None,
+) -> str:
+    if not isinstance(component_names, list) or len(component_names) < 2:
         raise ValueError("rigid group requires at least 2 component names")
-    name_block = f"    rg.name = {json.dumps(name)}\n" if name else ""
+    if any(not isinstance(x, str) or not x for x in component_names):
+        raise ValueError("component names must be nonempty strings")
+    if name is not None and (not isinstance(name, str) or not name):
+        raise ValueError("name must be a nonempty string")
+    if not isinstance(include_children, bool) or not isinstance(preview, bool):
+        raise ValueError("include_children and preview must be booleans")
+    if max_occurrences is not None and (isinstance(max_occurrences, bool) or not isinstance(max_occurrences, int) or max_occurrences < 1):
+        raise ValueError("max_occurrences must be a positive integer")
+    params = json.dumps(dict(names=component_names, name=name, include_children=include_children,
+                             preview=preview, max_occurrences=max_occurrences))
     return f"""\
 {_header()}{_FIND_OCC_HELPER}
-
+P = json.loads({params!r})
+{_RIGID_HELPERS}
 def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
     if design is None:
-        print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
+        print(json.dumps({{"ok": False, "error": "no_active_design", "mutation_state": "not_started"}})); return
     root = design.rootComponent
-
-    occs = adsk.core.ObjectCollection.create()
-    found = []
-    for nm in {json.dumps(component_names)}:
-        occ, error = _select_occurrence(root, nm)
+    selected = []
+    for selector in P['names']:
+        occ, error = _select_occurrence(root, selector)
         if error:
-            print(json.dumps(error)); return
-        occs.add(occ)
-        found.append(nm)
-
-    # RigidGroups has no createInput; add(occurrences, includeChildren) goes
-    # straight on the collection. Raises if an existing joint over-constrains it.
-    try:
-        rg = root.rigidGroups.add(occs, True)
+            error["mutation_state"] = "not_started"; print(json.dumps(error)); return
+        if any(occ == existing for existing in selected):
+            print(json.dumps({{"ok": False, "error": "duplicate_occurrence", "selector": selector, "mutation_state": "not_started"}})); return
+        selected.append(occ)
+    if P['name'] is not None and any(root.rigidGroups.item(i).name == P['name'] for i in range(root.rigidGroups.count)):
+        print(json.dumps({{"ok": False, "error": "rigid_group_name_exists", "name": P['name'], "mutation_state": "not_started"}})); return
+    expanded = list(selected)
+    if P['include_children']:
+        for i in range(root.allOccurrences.count):
+            candidate = root.allOccurrences.item(i)
+            parent = getattr(candidate, "assemblyContext", None)
+            while parent is not None:
+                if any(parent == item for item in selected):
+                    if not any(candidate == item for item in expanded): expanded.append(candidate)
+                    break
+                parent = getattr(parent, "assemblyContext", None)
+    data = {{"ok": True, "preview": P['preview'], "components": P['names'],
+             "include_children": P['include_children'], "selected_count": len(selected),
+             "expanded_count": len(expanded), "actual_count": None}}
+    if P['max_occurrences'] is not None and len(expanded) > P['max_occurrences']:
+        data.update(ok=False, error='max_occurrences_exceeded', mutation_state='not_started'); print(json.dumps(data)); return
+    if P['preview']: print(json.dumps(data)); return
+    occs = adsk.core.ObjectCollection.create()
+    for occ in selected: occs.add(occ)
+    try: rg = root.rigidGroups.add(occs, P['include_children'])
     except Exception as e:
-        print(json.dumps({{"ok": False, "error": "rigid_group_add_failed",
-                           "detail": str(e), "components": found}})); return
+        data.update(ok=False, error='rigid_group_add_failed', detail=str(e)); print(json.dumps(data)); return
     if rg is None:
-        print(json.dumps({{"ok": False, "error": "rigid_group_add_failed", "components": found}})); return
-{name_block}    print(json.dumps({{
-        "ok": True,
-        "rigid_group_name": rg.name,
-        "components": found,
-    }}))
+        data.update(ok=False, error='rigid_group_add_failed'); print(json.dumps(data)); return
+    try:
+        if P['name']: rg.name = P['name']
+        data.update(_rigid_data(rg))
+    except Exception as e:
+        data.update(ok=False, error='rigid_group_membership_unverified', mutation_state='unknown', detail=str(e))
+        print(json.dumps(data)); return
+    if data['actual_count'] is None:
+        data.update(ok=False, error='rigid_group_membership_unverified', mutation_state='unknown')
+    elif data['actual_count'] != data['expanded_count']:
+        data.update(ok=False, error='rigid_group_membership_mismatch', mutation_state='unknown')
+    print(json.dumps(data))
+"""
+
+
+_RIGID_HELPERS = """
+def _rigid_data(group):
+    data = {'rigid_group_name': group.name}
+    try: data['actual_count'] = group.occurrences.count
+    except Exception: data['actual_count'] = None
+    try: data['is_suppressed'] = group.isSuppressed
+    except Exception: data['is_suppressed'] = None
+    try: data['health_state'] = int(group.healthState)
+    except Exception: data['health_state'] = None
+    try: data['health_message'] = group.errorOrWarningMessage
+    except Exception: data['health_message'] = None
+    return data
 """
 
 
 def create_rigid_group(
-    adapter: FusionAdapter, component_names: list[str], name: str | None = None
+    adapter: FusionAdapter, component_names: list[str], name: str | None = None,
+    include_children: bool = True, preview: bool = False, max_occurrences: int | None = None,
+    operation_id: str | None = None,
 ) -> Envelope:
     try:
-        script = build_create_rigid_group(component_names, name)
+        script = build_create_rigid_group(component_names, name, include_children, preview, max_occurrences)
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "create_rigid_group")
+    if preview:
+        return _ok_runner(adapter, script, "create_rigid_group", read_only=True, operation_id=operation_id)
+    return _ok_runner(adapter, script, "create_rigid_group", operation_id=operation_id)
+
+
+def build_inspect_rigid_group(name: str, limit: int = 50, offset: int = 0) -> str:
+    if not isinstance(name, str) or not name:
+        raise ValueError("name must be a nonempty string")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError("limit must be an integer from 1 to 200")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ValueError("offset must be a nonnegative integer")
+    params = json.dumps(dict(name=name, limit=limit, offset=offset))
+    return f"""\
+{_header()}
+P = json.loads({params!r})
+{_RIGID_HELPERS}
+def run(_ctx):
+    design = adsk.fusion.Design.cast(adsk.core.Application.get().activeProduct)
+    if design is None: print(json.dumps({{'ok': False, 'error': 'no_active_design'}})); return
+    groups = design.rootComponent.rigidGroups
+    matches = [groups.item(i) for i in range(groups.count) if groups.item(i).name == P['name']]
+    if len(matches) != 1:
+        print(json.dumps({{'ok': False, 'error': 'rigid_group_not_found' if not matches else 'rigid_group_ambiguous'}})); return
+    group = matches[0]; members = group.occurrences; count = members.count
+    paths = [members.item(i).fullPathName for i in range(P['offset'], min(count, P['offset'] + P['limit']))]
+    end = P['offset'] + len(paths)
+    result = {{'ok': True, 'items': paths, 'offset': P['offset'], 'limit': P['limit'],
+               'returned_count': len(paths), 'next_offset': end if end < count else None, 'truncated': end < count}}
+    result.update(_rigid_data(group)); print(json.dumps(result))
+"""
+
+
+def inspect_rigid_group(adapter: FusionAdapter, name: str, limit: int = 50, offset: int = 0) -> Envelope:
+    try:
+        script = build_inspect_rigid_group(name, limit, offset)
+    except ValueError as e:
+        return Envelope(ok=False, error="invalid_input", message=str(e))
+    return _ok_runner(adapter, script, "inspect_rigid_group", read_only=True)
 
 
 # ---------- create_contact_set ----------

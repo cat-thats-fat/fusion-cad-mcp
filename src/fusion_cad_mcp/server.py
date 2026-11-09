@@ -16,6 +16,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 
 from .adapter import DEFAULT_URL, FusionAdapter
 from .envelope import Envelope
+from .receipts import get_status
 from .tools import assembly as asm
 from .tools import construction as cons
 from .tools import doc_state as doc_state_tool
@@ -26,6 +27,7 @@ from .tools import handle_tools as ht
 from .tools import inspection as inspect_tools
 from .tools import io as io_tools
 from .tools import knowledge as kn
+from .tools import local_files, operations, parametric_sketch
 from .tools import native_features as native_tools
 from .tools import parameters as params
 from .tools import placement as placement_tools
@@ -77,6 +79,14 @@ def _tool_result(env: Envelope) -> CallToolResult:
     metadata = env.to_dict()
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(metadata))],
                           structuredContent=metadata, isError=not env.ok)
+
+
+@mcp.tool()
+def get_capabilities() -> CallToolResult:
+    """Offline capability and setup report: corpus availability, supported local imports,
+    receipt coverage and limits. No Fusion call or network access.
+    """
+    return _tool_result(kn.get_capabilities())
 
 
 # ---------- Group 1: Document & State ----------
@@ -162,9 +172,9 @@ def add_parameters(defs: list[dict]) -> CallToolResult:
 
 
 @mcp.tool()
-def update_parameter(name: str, expression: str) -> CallToolResult:
+def update_parameter(name: str, expression: str, operation_id: str | None = None) -> CallToolResult:
     """Update one user parameter's expression. Returns before/after values."""
-    return _tool_result(params.update_parameter(_get_adapter(), name, expression))
+    return _tool_result(params.update_parameter(_get_adapter(), name, expression, operation_id))
 
 
 @mcp.tool()
@@ -703,9 +713,23 @@ def unground_component(name: str) -> CallToolResult:
 
 
 @mcp.tool()
-def create_rigid_group(component_names: list, name: str | None = None) -> CallToolResult:
-    """Lock 2+ components together as a rigid group (they move as one)."""
-    return _tool_result(asm.create_rigid_group(_get_adapter(), component_names, name))
+def create_rigid_group(component_names: list, name: str | None = None,
+                       include_children: bool = True, preview: bool = False,
+                       max_occurrences: int | None = None, operation_id: str | None = None) -> CallToolResult:
+    """Lock 2+ occurrences together. Preview selected/expanded counts before large groups.
+    include_children defaults to legacy True; max_occurrences refuses oversized groups before mutation.
+    Use a unique name and reuse the same operation_id only for the identical request.
+    """
+    return _tool_result(asm.create_rigid_group(_get_adapter(), component_names, name,
+                                              include_children, preview, max_occurrences, operation_id))
+
+
+@mcp.tool()
+def inspect_rigid_group(name: str, limit: int = 50, offset: int = 0) -> CallToolResult:
+    """Read a uniquely named root rigid group's actual membership and suppression state.
+    Unknown health stays null. Membership is paginated; limit is 1..200.
+    """
+    return _tool_result(asm.inspect_rigid_group(_get_adapter(), name, limit, offset))
 
 
 @mcp.tool()
@@ -1187,6 +1211,7 @@ def export(
     refinement: str = "medium",
     units: str = "mm",
     component: str | None = None,
+    operation_id: str | None = None,
 ) -> CallToolResult:
     """Export geometry to a file. format in {stl, 3mf, step, iges, obj, f3d, sat, smt}.
     path: absolute path (relative + '..' + Windows reserved names rejected).
@@ -1197,7 +1222,7 @@ def export(
     units: mm | cm | m | inch — STL only.
     """
     return _tool_result(io_tools.export(
-        _get_adapter(), format, path, body, refinement, units, component
+        _get_adapter(), format, path, body, refinement, units, component, operation_id
     ))
 
 
@@ -1216,15 +1241,75 @@ def import_geometry(format: str, path: str, target_component: str | None = None)
 
 
 @mcp.tool()
+def open_local_archive(path: str, operation_id: str | None = None) -> CallToolResult:
+    """Open a local F3D in a separate unsaved document; preserve existing documents.
+    Returns source hash, document creation ID, bounded counts and health. Does not save to cloud.
+    """
+    return _tool_result(local_files.open_local_archive(_get_adapter(), path, operation_id=operation_id))
+
+
+@mcp.tool()
+def save_viewport(path: str, width: int = 1600, height: int = 1000,
+                  direction: str = "current", fit: bool = False,
+                  operation_id: str | None = None) -> CallToolResult:
+    """Publish a local PNG atomically; return dimensions, byte count and SHA-256, no base64.
+    direction: current, top, bottom, front, back, left, right, or iso-top-right,
+    iso-top-left, iso-bottom-right, iso-bottom-left. Temporary camera changes
+    are restored and checked before publication. Image validity does not establish CAD correctness.
+    """
+    return _tool_result(local_files.save_viewport(_get_adapter(), path, width, height,
+                                                 direction, fit, operation_id=operation_id))
+
+
+@mcp.tool()
+def create_parametric_rectangle(name: str, width: str, height: str, x: str = "0 mm",
+                                y: str = "0 mm", z: str = "0 mm", plane: str = "xy",
+                                centered: bool = False, component: str | None = None) -> CallToolResult:
+    """Create a fully constrained named rectangle sketch and linked datum anchor.
+    Width/height and component-frame x/y/z are Fusion length expressions. Returns one profile,
+    world-independent component coordinates and verification. Requires a unique editable definition.
+    plane is xy/xz/yz; positive sketch directions on xz/yz differ from component axes.
+    """
+    return _tool_result(parametric_sketch.create_parametric_rectangle(
+        _get_adapter(), name, width, height, x, y, z, plane, centered, component))
+
+
+@mcp.tool()
+def get_operation_status(operation_id: str) -> CallToolResult:
+    """Read a durable local receipt without contacting Fusion. Results may arrive after a timeout.
+    A recorded declaration is historical evidence, not proof of current geometry or rollback.
+    """
+    return _tool_result(get_status(operation_id))
+
+
+@mcp.tool()
+def reconcile_operation(operation_id: str, expected_document: str, acknowledgement: bool,
+                         evidence: str, allow_missing_identity: bool = False) -> CallToolResult:
+    """Release an unresolved write barrier after independent inspection and a fresh document probe.
+    acknowledgement=True asserts that prior execution has ended. expected_document is the receipt's
+    creation ID; evidence describes inspection/recovery. This establishes neither success nor rollback.
+    allow_missing_identity explicitly accepts weaker evidence only when no original identity exists;
+    it never permits a known mismatch or re-executes the operation.
+    """
+    return _tool_result(operations.reconcile_operation(_get_adapter(), operation_id,
+                                                       expected_document, acknowledgement, evidence, allow_missing_identity))
+
+
+@mcp.tool()
 def inspect_assembly(component: str | None = None, include: list[str] | None = None,
-                     limit: int = 50, offset: int = 0) -> CallToolResult:
+                     limit: int = 50, offset: int = 0, detail: str = "full",
+                     fields: list[str] | None = None, health_filter: str | None = None) -> CallToolResult:
     """Read bounded assembly structure, occurrence transforms, bodies, sketches, features and joints.
     component is root (default) or a unique occurrence path. include selects occurrences, bodies,
     sketches, features, joints or as_built_joints. Occurrences lists the selected subtree's descendants;
     limit (1..200) and offset bound each section. Frames and units accompany measurements.
     Reads shared definitions without editing them. Does not recompute or move the timeline.
+    detail=summary returns counts; full returns paginated items. fields selects handles,
+    transforms, health and bounds (None=all, []=none). health_filter=non_healthy includes
+    warning/error/unknown sketches and features only. Pagination includes next_offset.
     """
-    return _tool_result(inspect_tools.inspect_assembly(_get_adapter(), component, include, limit, offset))
+    return _tool_result(inspect_tools.inspect_assembly(_get_adapter(), component, include, limit,
+                                                       offset, detail, fields, health_filter))
 
 
 @mcp.tool()

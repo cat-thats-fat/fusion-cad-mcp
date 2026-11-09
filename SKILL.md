@@ -36,7 +36,7 @@ Load on demand. This file is the operating manual; those are the depth.
 | `gotchas.md` | Failure-mode catalog, each with symptom and fix | When something behaves unexpectedly, or before a risky operation |
 | `patterns.md` | Reusable Python for `execute` | When no typed tool covers the operation |
 
-The server can also search these for you without loading them: `find_tool`, `find_gotcha`, `find_pattern`, and `find_api` for Autodesk's API help. **These work with Fusion closed.**
+Call `get_capabilities` offline first to check package version, corpus availability, import formats and receipt scope. The server can also search these without loading them: `find_tool`, `find_gotcha`, `find_pattern`, and `find_api` for Autodesk's API help. **These work with Fusion closed.**
 
 ## Six rules that prevent most failures
 
@@ -69,7 +69,7 @@ The server can also search these for you without loading them: `find_tool`, `fin
 
 ## Inspect, assemble and validate
 
-Use `inspect_assembly`, `inspect_feature` and `query_geometry` before selecting geometry. Assembly inspection includes a paginated occurrence hierarchy by default; a selected occurrence's listing covers its descendants. Specify occurrence-qualified names for repeated components; handles can become stale after edits. `query_geometry` uses root-frame coordinates and its `near` test is distance to a sample point, not minimum distance. Feature-created faces are only currently surviving faces; a generic dependency graph is unavailable.
+Use `inspect_assembly`, `inspect_feature` and `query_geometry` before selecting geometry. For large assemblies use `detail="summary"`, explicit `fields` and per-section pagination; a health filter retains unknown sketch/feature health. Assembly inspection includes a paginated occurrence hierarchy by default; a selected occurrence's listing covers its descendants. Specify occurrence-qualified names for repeated components; handles can become stale after edits. `query_geometry` uses root-frame coordinates and its `near` test is distance to a sample point, not minimum distance. Feature-created faces are only currently surviving faces; a generic dependency graph is unavailable.
 
 Read successful inspection data from `result`; `message` is empty to avoid
 duplicating that JSON. Select only needed assembly `include` sections and use
@@ -105,6 +105,8 @@ Full catalog in `gotchas.md`. These bite first.
 **Preview API badges are release gates.** If `find_api` reports a page as Preview, do not build distributed work on it without the user explicitly accepting the risk.
 
 ## Writing raw scripts
+
+Instrumented JSON-status scripts use local receipts. Preserve the operation ID, inspect status and the document after an uncertain write, and explicitly reconcile with evidence before releasing a write barrier. Reconciliation is not proof that the operation succeeded, rolled back, or stopped after timeout. Raw `execute` is uninstrumented.
 
 `execute` is the escape hatch, and it is the only tool with no validation. Reach for it when no typed tool covers the operation, after checking `find_api` and `find_pattern`.
 
@@ -166,3 +168,5 @@ its `fusion_mcp_read` with `queryType="apiDocumentation"`, an explicit
 If Fusion is restarted, the adapter re-handshakes on a rejected session. If errors
 persist, inspect the error and listener state, then reconnect the MCP client as
 needed. Do not diagnose a client fault solely from repeated failures.
+
+For a new editable rectangle profile use `create_parametric_rectangle`; it creates a named sketch and datums, not edits to an existing sketch. Preview rigid-group membership and set a maximum before creating large groups. `open_local_archive` opens an F3D separately; `save_viewport` saves a local PNG. Check all outcomes and use geometry readback for verification.

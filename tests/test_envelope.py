@@ -220,3 +220,31 @@ def test_new_wrappers_fail_closed_on_missing_or_invalid_status(text, tool, read_
     assert result.state["execution_outcome"] == "unknown"
     assert result.state["retry_safe"] is read_only
     assert result.state["model_may_have_changed"] is (not read_only)
+
+
+def test_typed_status_accepts_structured_and_direct_json_text():
+    from fusion_cad_mcp.envelope import parse_status_json
+
+    structured = {"result": {"structuredContent": {"ok": True, "count": 4}, "content": []}}
+    direct = _fusion_text_response('{"ok":false,"error":"refused"}')
+    assert parse_status_json(from_fusion_response(structured)) == {"ok": True, "count": 4}
+    assert parse_status_json(from_fusion_response(direct)) == {"ok": False, "error": "refused"}
+
+
+def test_typed_status_rejects_native_empty_stdout_and_protocol_failure():
+    from fusion_cad_mcp.envelope import parse_status_json
+
+    native = from_fusion_response(_fusion_text_response('{"success":true,"message":""}'))
+    assert native.ok and parse_status_json(native) is None
+    failure = {"result": {"isError": True, "structuredContent": {"ok": True}, "content": []}}
+    assert parse_status_json(from_fusion_response(failure)) is None
+    assert parse_status_json(Envelope(ok=False, result={"ok": True})) is None
+
+
+def test_typed_status_parser_does_not_modify_raw_envelope():
+    from fusion_cad_mcp.envelope import parse_status_json
+
+    env = from_fusion_response(_fusion_text_response('{"success":true,"message":"raw text"}'))
+    before = env.to_dict()
+    assert parse_status_json(env) is None
+    assert env.to_dict() == before

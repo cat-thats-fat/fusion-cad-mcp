@@ -15,7 +15,8 @@ from __future__ import annotations
 import json
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_status_json
+from ..execution import execute_typed_script
 from ..resolver import RESOLVER_SCRIPT
 
 
@@ -208,20 +209,20 @@ def run(_ctx):
 
 
 def _run_walker(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = adapter.execute_script(script)
+    env = execute_typed_script(adapter, script, read_only=label != "audit_feature_health")
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
-        return Envelope(ok=False, error=f"{label}_parse_failed", message=env.message)
+        return Envelope(state=env.state, ok=False, error=f"{label}_parse_failed", message=env.message)
     if parsed.get("ok") is False:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False,
             error=parsed.get("error", f"{label}_failed"),
             message=env.message,
             result=parsed,
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 def bounding_box(adapter: FusionAdapter, body_name: str | None = None) -> Envelope:

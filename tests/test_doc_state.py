@@ -112,7 +112,8 @@ def test_run_surfaces_adapter_error_unchanged():
     error = Envelope(ok=False, error="fusion_error", traceback="...")
 
     class FailingAdapter:
-        def execute_script(self, script):
+        def execute_script(self, script, *, read_only=False):
+            assert read_only is True
             return error
 
     assert doc_state.run(FailingAdapter()) is error
@@ -120,7 +121,8 @@ def test_run_surfaces_adapter_error_unchanged():
 
 def test_run_handles_unparseable_stdout():
     class MalformedAdapter:
-        def execute_script(self, script):
+        def execute_script(self, script, *, read_only=False):
+            assert read_only is True
             return Envelope(ok=True, message="not json at all")
 
     env = doc_state.run(MalformedAdapter())

@@ -338,11 +338,11 @@ def test_rigid_group_requires_at_least_2_components():
 @pytest.mark.parametrize("fail", [False, True], ids=["created", "rejected"])
 def test_rigid_group_passes_selected_occurrences(monkeypatch, fail):
     first, second = occurrence("Part:1"), occurrence("Part:2")
-    rigid_group = SimpleNamespace(name="Default")
+    rigid_group = SimpleNamespace(name="Default", occurrences=Collection([first, second]))
     add = Mock(
         return_value=rigid_group, side_effect=RuntimeError("over-constrained") if fail else None
     )
-    root = root_with(occurrences=[first, second], rigidGroups=SimpleNamespace(add=add))
+    root = root_with(occurrences=[first, second], rigidGroups=SimpleNamespace(add=add, count=0, item=lambda i: None))
     adapter = ScriptAdapter(
         monkeypatch, SimpleNamespace(rootComponent=root),
         core={"ObjectCollection": SimpleNamespace(create=Collection)},
@@ -430,3 +430,73 @@ def test_ground_requires_name():
     env = asm.ground_component(NoScriptAdapter(), "")
     assert env.ok is False
     assert env.error == "invalid_input"
+
+
+def test_rigid_group_preflight_bounds_and_deduplicates_expansion(monkeypatch):
+    parent = occurrence("Parent:1", assemblyContext=None)
+    child = occurrence("Parent:1+Child:1", assemblyContext=parent)
+    other = occurrence("Other:1", assemblyContext=None)
+    add = Mock()
+    root = root_with(occurrences=[parent, child, other], rigidGroups=SimpleNamespace(add=add, count=0))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root), core={"ObjectCollection": SimpleNamespace(create=Collection)})
+    result = asm.create_rigid_group(adapter, [parent.fullPathName, child.fullPathName], preview=True)
+    assert result.ok and result.result["selected_count"] == 2 and result.result["expanded_count"] == 2
+    result = asm.create_rigid_group(adapter, [parent.fullPathName, other.fullPathName], max_occurrences=2)
+    assert result.error == "max_occurrences_exceeded" and result.result["expanded_count"] == 3
+    assert result.result["mutation_state"] == "not_started"
+    assert asm.create_rigid_group(adapter, [parent.fullPathName, parent.name], preview=True).error == "duplicate_occurrence"
+    add.assert_not_called()
+
+
+def test_rigid_group_name_conflict_and_existing_membership(monkeypatch):
+    one, two = occurrence("One:1"), occurrence("Two:1")
+    group = SimpleNamespace(name="locked", occurrences=Collection([one, two]), isSuppressed=True)
+    groups = Collection([group])
+    root = root_with(occurrences=[one, two], rigidGroups=groups)
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root))
+    assert asm.create_rigid_group(adapter, [one.name, two.name], name="locked").error == "rigid_group_name_exists"
+    page = asm.inspect_rigid_group(adapter, "locked", limit=1)
+    assert page.ok and page.result["actual_count"] == 2 and page.result["is_suppressed"] is True
+    assert page.result["items"] == [one.fullPathName] and page.result["next_offset"] == 1
+
+
+def test_rigid_group_without_children_reports_actual_members(monkeypatch):
+    one, two = occurrence("One:1"), occurrence("Two:1")
+    group = SimpleNamespace(name="group", occurrences=Collection([one, two]), isSuppressed=False)
+    add = Mock(return_value=group)
+    groups = SimpleNamespace(count=0, add=add)
+    root = root_with(occurrences=[one, two], rigidGroups=groups)
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root), core={"ObjectCollection": SimpleNamespace(create=Collection)})
+    result = asm.create_rigid_group(adapter, [one.name, two.name], include_children=False)
+    assert result.ok and result.result["expanded_count"] == result.result["actual_count"] == 2
+    assert add.call_args.args[1] is False
+
+
+@pytest.mark.parametrize("actual,error", [(None, "rigid_group_membership_unverified"), (1, "rigid_group_membership_mismatch")])
+def test_rigid_group_post_add_membership_is_not_silently_accepted(monkeypatch, actual, error):
+    one, two = occurrence("One:1"), occurrence("Two:1")
+    group = SimpleNamespace(name="created")
+    if actual is not None:
+        group.occurrences = Collection([one] * actual)
+    add = Mock(return_value=group)
+    root = root_with(occurrences=[one, two], rigidGroups=SimpleNamespace(count=0, add=add))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root), core={"ObjectCollection": SimpleNamespace(create=Collection)})
+    result = asm.create_rigid_group(adapter, [one.name, two.name], include_children=False)
+    assert result.error == error and result.result["mutation_state"] == "unknown"
+    assert result.result["rigid_group_name"] == "created" and result.result["actual_count"] == actual
+    add.assert_called_once()
+
+
+def test_rigid_group_selector_refusal_is_not_started(monkeypatch):
+    one = occurrence("One:1")
+    root = root_with(occurrences=[one], rigidGroups=SimpleNamespace(count=0, add=Mock()))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(rootComponent=root))
+    result = asm.create_rigid_group(adapter, [one.name, "missing"])
+    assert result.error == "occurrence_not_found" and result.result["mutation_state"] == "not_started"
+
+
+def test_rigid_group_outcome_receipt_barrier_semantics():
+    from fusion_cad_mcp.receipts import _unresolved
+
+    assert not _unresolved({"terminal": {"declared_result": {"ok": False, "mutation_state": "not_started"}}})
+    assert _unresolved({"terminal": {"declared_result": {"ok": False, "mutation_state": "unknown"}}})

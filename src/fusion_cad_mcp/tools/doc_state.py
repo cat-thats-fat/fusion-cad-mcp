@@ -10,7 +10,8 @@ A direct (non-parametric) design raises on `design.userParameters` and
 from __future__ import annotations
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json
+from ..envelope import Envelope, parse_status_json
+from ..execution import execute_typed_script
 
 
 def build() -> str:
@@ -41,7 +42,7 @@ def run(_ctx):
     design = adsk.fusion.Design.cast(app.activeProduct)
 
     if design is None:
-        print(json.dumps({"active_design": False}))
+        print(json.dumps({"ok": True, "active_design": False}))
         return
 
     root = design.rootComponent
@@ -67,16 +68,18 @@ def run(_ctx):
     _fill(state, unavailable, "timeline_count", lambda: design.timeline.count)
     state["unavailable"] = unavailable
 
-    print(json.dumps(state))
+    print(json.dumps(dict(ok=True, **state)))
 '''.strip()
 
 
 def run(adapter: FusionAdapter) -> Envelope:
     """Execute doc_state against Fusion. Returns Envelope with the parsed state in result."""
-    env = adapter.execute_script(build())
+    env = execute_typed_script(adapter, build(), read_only=True)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
-        return Envelope(ok=False, error="doc_state_parse_failed", message=env.message)
-    return Envelope(ok=True, message=env.message, result=parsed)
+        return Envelope(state=env.state, ok=False, error="doc_state_parse_failed", message=env.message)
+    parsed = dict(parsed)
+    parsed.pop("ok", None)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)

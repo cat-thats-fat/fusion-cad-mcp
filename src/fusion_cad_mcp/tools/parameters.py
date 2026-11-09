@@ -21,7 +21,8 @@ import json
 from typing import Any
 
 from ..adapter import FusionAdapter
-from ..envelope import Envelope, parse_stdout_json, script_parse_failure
+from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..mutation import MUTATION_SCRIPT, PARAMETER_VALUE_SCRIPT
 
 # Names Fusion treats as math identifiers in expressions. Using these as user-param
@@ -300,47 +301,47 @@ def add_parameters(adapter: FusionAdapter, defs: list[dict[str, Any]]) -> Envelo
     ok, err = _validate_param_defs(defs)
     if not ok:
         return Envelope(ok=False, error="invalid_defs", message=err or "")
-    env = adapter.execute_script(build_add(defs))
+    env = execute_typed_script(adapter, build_add(defs))
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, "parse_failed")
     if parsed.get("ok") is False:
-        return Envelope(ok=False, error=parsed.get("error", "fusion_error"), message=env.message, result=parsed)
-    return Envelope(ok=True, message=env.message, result=parsed)
+        return Envelope(state=env.state, ok=False, error=parsed.get("error", "fusion_error"), message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
-def update_parameter(adapter: FusionAdapter, name: str, expression: str) -> Envelope:
+def update_parameter(adapter: FusionAdapter, name: str, expression: str, operation_id: str | None = None) -> Envelope:
     if not isinstance(name, str) or not name.strip():
         return Envelope(ok=False, error="invalid_name", message="name must be a non-empty string")
     if not isinstance(expression, str) or not expression.strip():
         return Envelope(
             ok=False, error="invalid_expression", message="expression must be a non-empty string"
         )
-    env = adapter.execute_script(build_update(name, expression))
+    env = execute_typed_script(adapter, build_update(name, expression), operation_id=operation_id)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, "parse_failed")
     if parsed.get("ok") is False:
-        return Envelope(
+        return Envelope(state=env.state,
             ok=False, error=parsed.get("error", "fusion_error"), message=env.message, result=parsed
         )
-    return Envelope(ok=True, message=env.message, result=parsed)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 def list_parameters(adapter: FusionAdapter) -> Envelope:
-    env = adapter.execute_script(build_list(), read_only=True)
+    env = execute_typed_script(adapter, build_list(), read_only=True)
     if not env.ok:
         return env
-    parsed = parse_stdout_json(env)
+    parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, "parse_failed", read_only=True)
     if parsed.get("ok") is False:
-        return Envelope(ok=False, error=parsed.get("error", "fusion_error"), message=env.message)
-    return Envelope(ok=True, message=env.message, result=parsed)
+        return Envelope(state=env.state, ok=False, error=parsed.get("error", "fusion_error"), message=env.message)
+    return Envelope(state=env.state, ok=True, message=env.message, result=parsed)
 
 
 __all__ = [

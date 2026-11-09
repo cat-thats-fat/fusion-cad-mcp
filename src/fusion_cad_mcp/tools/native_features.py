@@ -7,6 +7,7 @@ import re
 
 from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
+from ..execution import execute_typed_script
 from ..handles import emit_scope_expr
 from ..mutation import MUTATION_SCRIPT
 from .sketch import SKETCH_RESOLVER_SCRIPT, _resolve_ref
@@ -162,10 +163,10 @@ def sweep(
         script = build_sweep(sketch, path_sketch, path_entities, profile_index, name)
     except (ValueError, TypeError) as exc:
         return Envelope(ok=False, error="invalid_input", message=str(exc))
-    env = adapter.execute_script(script)
+    env = execute_typed_script(adapter, script)
     if not env.ok:
         return env
     parsed = parse_status_json(env)
     if parsed is None:
         return script_parse_failure(env, "sweep_parse_failed")
-    return Envelope(ok=parsed.get("ok") is True, error=parsed.get("error"), result=parsed)
+    return Envelope(ok=parsed.get("ok") is True, error=parsed.get("error"), result=parsed, state=env.state)
