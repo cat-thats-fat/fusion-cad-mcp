@@ -425,3 +425,87 @@ def test_rollback_requires_fresh_exact_witnesses(monkeypatch, problem, check_id,
             assert witnesses[key] == [check_id]
     assert measurement_calls == ([False] if problem in {"binding_changed", "target_inactive", "cleanup_failed", "custom_failure"}
                                  else [False, True])
+
+
+def test_rebinding_preserves_live_entry_at_registry_capacity(monkeypatch):
+    """Binding identity and capacity use stand-ins, not Fusion geometry."""
+    def make_document(name):
+        doc = FakeDocument()
+        doc.name = name
+        root = types.SimpleNamespace(isValid=True)
+        design = types.SimpleNamespace(isValid=True, parentDocument=doc, rootComponent=root)
+        root.parentDesign = design
+        doc.design = design
+        return doc
+
+    documents = [make_document(f"fixture-{i}") for i in range(129)]
+    app = types.SimpleNamespace(documents=Collection(*documents), activeDocument=documents[0], version="test")
+    core, fusion, adsk = types.ModuleType("adsk.core"), types.ModuleType("adsk.fusion"), types.ModuleType("adsk")
+    core.Application = types.SimpleNamespace(get=lambda: app)
+    fusion.Design = types.SimpleNamespace(cast=lambda value: value)
+    adsk.core, adsk.fusion = core, fusion
+    for name, module in (("adsk", adsk), ("adsk.core", core), ("adsk.fusion", fusion)):
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delitem(sys.modules, "_fusion_cad_workspace_v1", raising=False)
+    namespace = {}
+    exec(build_workspace_script("bind", {}), namespace)
+    initial = namespace["_dispatch"](app)
+    handle = initial["target_handle"]
+    registry = sys.modules["_fusion_cad_workspace_v1"]
+    token = handle.split(":", 1)[1]
+    registry.entries[token]["pending"] = "unresolved"
+    for _ in range(140):
+        result = namespace["_dispatch"](app)
+        assert result["target_handle"] == handle and result["owned"] is False
+    assert len(registry.entries) == 1
+    assert registry.entries[token]["pending"] == "unresolved"
+    # A caller cannot upgrade a user-owned binding to an owned working copy.
+    assert namespace["_binding"](app, documents[0], True) == handle
+    assert registry.entries[token]["owned"] is False
+    for doc in documents[1:128]:
+        namespace["_binding"](app, doc, True)
+    assert len(registry.entries) == 128
+    assert namespace["_dispatch"](app)["target_handle"] == handle
+    with pytest.raises(namespace["_WorkspaceError"], match="registry_full"):
+        namespace["_binding"](app, documents[128], True)
+    registry.entries[token]["owned"] = True
+    assert namespace["_dispatch"](app)["owned"] is True
+    assert registry.entries[token]["pending"] == "unresolved"
+    # Existing duplicate entries cannot be selected or collapsed silently.
+    registry.entries["legacy-duplicate"] = dict(registry.entries[token])
+    with pytest.raises(namespace["_WorkspaceError"]) as ambiguous:
+        namespace["_dispatch"](app)
+    assert ambiguous.value.code == "registry_ambiguous"
+    assert registry.entries[token]["pending"] == "unresolved"
+    del registry.entries["legacy-duplicate"]
+
+    # A conflicting context on the same document is still ambiguous when one
+    # entry matches exactly. An invalid context with pending work also counts.
+    doc = documents[0]
+    original_design = doc.design
+    replacement_root = types.SimpleNamespace(isValid=True)
+    replacement = types.SimpleNamespace(isValid=True, parentDocument=doc, rootComponent=replacement_root)
+    replacement_root.parentDesign = replacement
+    registry.entries["legacy-conflict"] = {**registry.entries[token], "design": replacement,
+                                          "root": replacement_root, "pending": "other-operation"}
+    for valid in (True, False):
+        replacement.isValid = valid
+        with pytest.raises(namespace["_WorkspaceError"], match="Multiple bindings"):
+            namespace["_dispatch"](app)
+    assert registry.entries["legacy-conflict"]["pending"] == "other-operation"
+    del registry.entries["legacy-conflict"]
+
+    # Rebinding a changed context must not mint a fresh handle while the prior
+    # live document still has a pending operation.
+    original_design.isValid = False
+    replacement.isValid = True
+    doc.design = replacement
+    with pytest.raises(namespace["_WorkspaceError"], match="target_binding_changed"):
+        namespace["_dispatch"](app)
+    with pytest.raises(namespace["_WorkspaceError"], match="registry_full"):
+        namespace["_capacity"]()
+    assert registry.entries[token]["pending"] == "unresolved"
+    doc.isValid = False
+    namespace["_capacity"]()
+    assert token not in registry.entries
+    sys.modules.pop("_fusion_cad_workspace_v1", None)

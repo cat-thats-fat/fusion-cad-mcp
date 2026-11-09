@@ -63,19 +63,45 @@ def _live(entry):
     except Exception:
         return False
 
+def _retain_binding(entry):
+    if _live(entry): return True
+    if entry['pending'] is None: return False
+    # An invalid Design or root does not establish that the pending document
+    # has closed. Keep its fence unless the document is known to be gone.
+    try: return bool(entry['document'].isValid)
+    except Exception: return True
+
 def _capacity():
     reg = _registry()
     for token, entry in list(reg.entries.items()):
-        if not _live(entry): del reg.entries[token]
+        if not _retain_binding(entry): del reg.entries[token]
     if len(reg.entries) >= 128: raise _WorkspaceError('registry_full')
     return reg
 
 def _register(app, document, design, root, owned=False):
-    reg = _capacity()
+    reg = _registry()
+    # Rebinding the same live native objects must not consume capacity or clear
+    # the existing ownership/pending fence. Never discard ambiguous old entries.
+    matches = [(token, entry) for token, entry in reg.entries.items()
+               if _retain_binding(entry) and entry['document'] == document]
+    if len(matches) > 1:
+        raise _WorkspaceError('registry_ambiguous', 'Multiple bindings exist for this document; inspect session state')
+    if matches:
+        token, entry = matches[0]
+        if not (_live(entry) and entry['design'] == design and entry['root'] == root):
+            raise _WorkspaceError('target_binding_changed')
+        handle = reg.epoch + ':' + token
+        _resolve(app, handle)
+        return handle
+    _capacity()
     token = str(uuid.uuid4())
     reg.entries[token] = {'document': document, 'design': design, 'root': root, 'owned': owned, 'pending': None}
     handle = reg.epoch + ':' + token
-    _resolve(app, handle)
+    try:
+        _resolve(app, handle)
+    except Exception:
+        del reg.entries[token]
+        raise
     return handle
 
 def _resolve(app, handle):
@@ -307,7 +333,9 @@ def _dispatch(app):
             if len(matches) != 1: raise _WorkspaceError('document_not_unique')
             doc = matches[0]
         if doc is None: raise _WorkspaceError('document_unavailable')
-        return {'ok': True, 'target_handle': _binding(app, doc), 'environment': env, 'document': {'name': doc.name}, 'owned': False}
+        handle = _binding(app, doc)
+        return {'ok': True, 'target_handle': handle, 'environment': env,
+                'document': {'name': doc.name}, 'owned': _resolve(app, handle)['owned']}
     if _ACTION == 'open':
         _idle(app)
         _capacity()
@@ -329,7 +357,8 @@ def _dispatch(app):
             _EFFECT_STARTED = True
             doc = manager.importToNewDocument(options)
             if doc is None: raise _WorkspaceError('import_failed')
-            return {'ok': True, 'target_handle': _binding(app, doc, True), 'environment': env, 'owned': True}
+            handle = _binding(app, doc, True)
+            return {'ok': True, 'target_handle': handle, 'environment': env, 'owned': _resolve(app, handle)['owned']}
         finally:
             try: os.unlink(staged)
             except OSError: pass

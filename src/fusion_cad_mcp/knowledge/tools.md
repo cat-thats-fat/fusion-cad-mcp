@@ -1034,7 +1034,7 @@ Create local workspace storage, a `design.json` starter and `assets/` directory.
 
 ## `workspace_bind(document_name=None)`
 
-Bind the active document or a unique exact document name. Returns `result.target_handle` for this open instance in the current Fusion session. A bound user document can be inspected and captured as a checkpoint. Use an owned copy returned by checkpoint, restore or build for managed writes. Before measuring or editing, activate the bound design and leave it idle in its root context at the end of its parametric timeline.
+Bind the active document or a unique exact document name. Returns `result.target_handle` for this open instance in the current Fusion session. Rebinding the same instance reuses its handle and preserves ownership and pending-operation state. A bound user document can be inspected and captured as a checkpoint. Use an owned copy returned by checkpoint, restore or build for managed writes. Before measuring or editing, activate the bound design and leave it idle in its root context at the end of its parametric timeline.
 
 ## `workspace_inspect(target_handle, parameter_name, checks)`
 

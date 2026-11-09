@@ -273,8 +273,35 @@ def stage_guards(adapter, folder, state, record):
     inactive = workspace.edit(adapter, str(root), edit_contract(state["target_handle"], 60, 65, state["protected"]))
     assert not inactive.ok and inactive.error == "target_not_active", inactive.to_dict()
     rebound = checked(workspace.bind(adapter))
-    refused = workspace.edit(adapter, str(root), edit_contract(rebound["target_handle"], 60, 65, state["protected"]))
+    assert rebound["target_handle"] == fresh and rebound["owned"] is True, rebound
+    deduplicated = native(adapter, f'''
+        reg=_registry()
+        entry=_resolve(app,{fresh!r})
+        before=len(reg.entries)
+        for _ in range(130):
+            assert _binding(app,entry['document'])=={fresh!r}
+        assert len(reg.entries)==before and entry['owned'] and entry['pending'] is None
+        print(json.dumps({{'ok':True,'repeat_bind_count':130,'additional_entries':0}}))
+    ''', read_only=True)
+    record("repeated_binding_reuses_native_identity", **{key: value for key, value in deduplicated.items() if key != "ok"})
+    user_bound = native(adapter, '''
+        doc=app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+        _registry().test_unowned_document=doc
+        handle=_binding(app,doc)
+        print(json.dumps({'ok':True,'target_handle':handle}))
+    ''')["target_handle"]
+    refused = workspace.edit(adapter, str(root), edit_contract(user_bound, 60, 65, state["protected"]))
     assert not refused.ok and refused.error == "user_document_edit_refused", refused.to_dict()
+    native(adapter, '''
+        doc=_registry().test_unowned_document
+        assert doc==app.activeDocument and not doc.isSaved
+        assert all(doc!=prior for prior,sig in _registry().test_originals)
+        design=adsk.fusion.Design.cast(doc.products.itemByProductType('DesignProductType'))
+        assert design.timeline.count==0 and design.userParameters.count==0
+        assert doc.close(False)
+        print(json.dumps({'ok':True}))
+    ''')
+    workspace._call(adapter, "activate", {"target_handle": fresh}, str(uuid.uuid4()))
     record("wrong_active_target_and_unowned_binding_refused", no_geometry_edit=True)
     native(adapter, f'''
         entry=_resolve(app,{fresh!r})

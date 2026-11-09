@@ -4,7 +4,7 @@
   "package_version": "0.4.0",
   "fusion_version": "2706.1.17",
   "license": "Personal",
-  "workspace_executor_sha256": "b154bd37e6e121ce05d11422e5ae5abf5a3380dcc426b1cb9a16a7bf3dc55cd4",
+  "workspace_executor_sha256": "346b73414a468268ef67a160fc60cca019bebc498436bb3b363b4a759396a3ac",
   "scope": "Disposable synthetic fixtures; declared measurements only. Existing-document witnesses cover dirty flags, root body bounds and volumes, root body/occurrence/timeline counts, and native reference validity.",
   "workspace_checks": [
     {
@@ -126,10 +126,10 @@
           }
         ],
         "timings_ms": {
-          "baseline": 6.880900007672608,
-          "edit": 69.37070000276435,
-          "measure": 2.273799997055903,
-          "feedback_total": 463.32080000138376
+          "baseline": 4.765399993630126,
+          "edit": 56.94300000322983,
+          "measure": 2.0102999988012016,
+          "feedback_total": 394.6752000047127
         }
       }
     },
@@ -352,28 +352,28 @@
       "status": "passed",
       "evidence": {
         "samples_ms": [
-          428.781099995831,
-          424.2143000010401,
-          405.4321000003256,
-          410.74740000476595,
-          408.7444000033429,
-          427.1584999951301,
-          439.58109999948647,
-          440.70999999530613,
-          434.0799000055995,
-          406.4982000127202,
-          391.9462000048952,
-          410.2024000021629,
-          426.51520000072196,
-          421.232599997893,
-          395.11270000366494,
-          428.2482999988133,
-          423.433500007377,
-          434.77039999561384,
-          404.31420000095386,
-          428.9138999884017
+          396.86429999710526,
+          414.0107999992324,
+          419.51500000141095,
+          431.5750000096159,
+          396.8542999937199,
+          425.76509999344125,
+          404.3148999917321,
+          412.37430000910535,
+          433.15569999685977,
+          416.74799998872913,
+          425.44229999475647,
+          405.7689000037499,
+          447.0071999967331,
+          460.47859999816865,
+          530.6540000019595,
+          449.42610000725836,
+          435.5867999984184,
+          442.19210000301246,
+          457.26350000768434,
+          430.81720000191126
         ],
-        "p95_ms": 439.58109999948647,
+        "p95_ms": 460.47859999816865,
         "declared_budget_ms": 10000,
         "setup_and_archive_excluded": true
       }
@@ -382,14 +382,14 @@
       "name": "seed_exported",
       "status": "passed",
       "evidence": {
-        "bytes": 91564
+        "bytes": 91612
       }
     },
     {
       "name": "accepted_checkpoint_roundtrip",
       "status": "passed",
       "evidence": {
-        "bytes": 91548,
+        "bytes": 91612,
         "checks": [
           {
             "id": "width",
@@ -439,8 +439,8 @@
       "name": "verified_build_reused",
       "status": "passed",
       "evidence": {
-        "miss_total_ms": 2363.8773999991827,
-        "hit_total_ms": 1565.6017000001157,
+        "miss_total_ms": 2471.91350000503,
+        "hit_total_ms": 1728.5396000079345,
         "same_archive": true,
         "hit_construction_calls": 0,
         "hit_checks": [
@@ -733,6 +733,14 @@
       }
     },
     {
+      "name": "repeated_binding_reuses_native_identity",
+      "status": "passed",
+      "evidence": {
+        "repeat_bind_count": 130,
+        "additional_entries": 0
+      }
+    },
+    {
       "name": "wrong_active_target_and_unowned_binding_refused",
       "status": "passed",
       "evidence": {
@@ -757,7 +765,7 @@
       "name": "real_timeout_late_completion_recovered",
       "status": "passed",
       "evidence": {
-        "bounded_response_ms": 392.4321000085911,
+        "bounded_response_ms": 373.2960000052117,
         "retry_blocked": true,
         "recovered_without_replay": true,
         "original_uncertainty_retained": true,
