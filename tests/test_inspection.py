@@ -144,6 +144,54 @@ def test_assembly_inspection_is_bounded(monkeypatch):
     assert set(out["sections"]) == {"bodies"}
 
 
+@pytest.mark.parametrize("collection", [coll, list])
+def test_mesh_inventory_is_paginated_and_distinct_from_brep(monkeypatch, collection):
+    root = fixture()
+    mesh = types.SimpleNamespace(
+        name="Reference", objectType="adsk::fusion::MeshBody", nativeObject=None,
+        entityToken="mesh-token", boundingBox=types.SimpleNamespace(
+            minPoint=point(1, 2, 3), maxPoint=point(4, 5, 6)),
+        mesh=types.SimpleNamespace(nodeCount=8, triangleCount=4, quadCount=0, polygonCount=0),
+    )
+    root.meshBodies = collection([mesh, mesh])
+    result = execute(monkeypatch, inspection.build_inspect_assembly(
+        include=["meshes", "bodies"], limit=1), root)
+    section = result["sections"]["meshes"]
+    assert section["count"] == 2 and section["next_offset"] == 1
+    row = section["items"][0]
+    assert row["handle"].startswith("mesh_body:")
+    assert row["bounding_box_mm"] == {"min": [10, 20, 30], "max": [40, 50, 60]}
+    assert row["geometry_counts"] == {"nodes": 8, "triangles": 4, "quads": 0, "polygons": 0}
+    assert row["appearance_verification"] == "unknown"
+    assert "geometry_witness" not in row
+    assert result["sections"]["bodies"]["count"] == 1
+
+
+def test_summary_does_not_read_mesh_geometry(monkeypatch):
+    class UnreadableMesh:
+        @property
+        def mesh(self):
+            raise AssertionError("summary must not read geometry")
+
+    root = fixture()
+    root.meshBodies = coll([UnreadableMesh()])
+    result = execute(monkeypatch, inspection.build_inspect_assembly(
+        include=["meshes"], detail="summary"), root)
+    assert result["sections"]["meshes"]["count"] == 1
+    assert result["sections"]["meshes"]["items"] == []
+
+
+def test_missing_mesh_witness_does_not_erase_inventory(monkeypatch):
+    root = fixture()
+    root.meshBodies = coll([types.SimpleNamespace(
+        name="Unknown", objectType="adsk::fusion::MeshBody", nativeObject=None)])
+    result = execute(monkeypatch, inspection.build_inspect_assembly(
+        include=["meshes"], fields=["mesh_geometry"]), root)
+    row = result["sections"]["meshes"]["items"][0]
+    assert row["name"] == "Unknown" and row["witness_unavailable"]
+    assert row["geometry_unavailable"]
+
+
 def test_ambiguous_body_fails(monkeypatch):
     root = fixture()
     root.bRepBodies = coll([root.bRepBodies.item(0), root.bRepBodies.item(0)])

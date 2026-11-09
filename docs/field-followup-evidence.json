@@ -1,0 +1,508 @@
+{
+  "version": "0.5.0",
+  "date": "2026-11-09",
+  "base_commit": "c671b4d6d562444d8df91774afd517288391a80e",
+  "fusion_version": "2706.1.17",
+  "license": "Personal",
+  "field": {
+    "core": {
+      "ok": true,
+      "export_preflight_not_started": true,
+      "subsequent_export_bytes": 684,
+      "face_distance_mm": 10.0,
+      "failed_requirement_reported": true,
+      "same_face_refused": true,
+      "stale_face_refused": true,
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 2
+    },
+    "mesh": {
+      "ok": true,
+      "imported_meshes": 1,
+      "source_nodes": 8,
+      "source_triangles": 4,
+      "local_bounds_mm": {
+        "min": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "max": [
+          20.0,
+          20.0,
+          10.0
+        ],
+        "units": "mm"
+      },
+      "root_bounds_mm": {
+        "min": [
+          79.99999999999999,
+          60.0,
+          10.0
+        ],
+        "max": [
+          100.0,
+          80.0,
+          20.0
+        ],
+        "units": "mm"
+      },
+      "ray_travel_mm": [
+        5.0,
+        15.000000149011612
+      ],
+      "root_ray_points_mm": [
+        [
+          92.99999989569187,
+          70.00000014901161,
+          10.0
+        ],
+        [
+          92.99999989569187,
+          70.00000014901161,
+          20.000000149011612
+        ]
+      ],
+      "replay_remeasured": true,
+      "changed_pose_replay_stale": true,
+      "finite_range_filtered": true,
+      "operation_id_replay_deduplicated": true,
+      "operation_id_changed_inputs_refused": true,
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 2
+    },
+    "nested": {
+      "ok": true,
+      "nested_face_distance_mm": 5.0,
+      "root_witness_points_mm": [
+        [
+          95.0,
+          95.0,
+          10.0
+        ],
+        [
+          95.0,
+          95.0,
+          15.0
+        ]
+      ],
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 2
+    },
+    "mesh_guards": {
+      "ok": true,
+      "two_meshes_preserved": true,
+      "centimetre_units_verified": true,
+      "missing_units_and_resources_refused": true,
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 4
+    },
+    "workspace": {
+      "ok": true,
+      "reordered_records_pass": true,
+      "missing_record_fails": true,
+      "mesh_checkpoint_roundtrip": true,
+      "parameter_propagation_and_restoration": true,
+      "stale_baseline_refused": true,
+      "deliberate_requirement_failed": true,
+      "mesh_restore_recomputed": true,
+      "mesh_seed_build_verified": true,
+      "mesh_build_cache_reverified": true,
+      "edit_and_face_feedback_ms": [
+        748.253099998692,
+        754.8715000157245
+      ],
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 8
+    },
+    "cleanup": {
+      "ok": true,
+      "closed_owned_documents": 8,
+      "originals_intact": true
+    },
+    "dimensionless": {
+      "ok": true,
+      "unitless_self_comparison_passed": true,
+      "unitless_checkpoint_reopen_passed": true,
+      "originals_intact": true,
+      "protected_intact": true,
+      "owned_open": 3,
+      "cleanup": {
+        "ok": true,
+        "closed_owned_documents": 3,
+        "originals_intact": true
+      }
+    }
+  },
+  "workspace_regression": {
+    "passed": 25,
+    "checks": [
+      {
+        "name": "fixture_created",
+        "status": "passed"
+      },
+      {
+        "name": "baseline_brep",
+        "status": "passed"
+      },
+      {
+        "name": "parameter_propagation",
+        "status": "passed",
+        "timings_ms": {
+          "baseline": 4.608699993696064,
+          "edit": 49.17730001034215,
+          "measure": 1.5106000064406544,
+          "feedback_total": 483.87430000002496
+        }
+      },
+      {
+        "name": "duplicate_operation_returns_history",
+        "status": "passed"
+      },
+      {
+        "name": "stale_parameter_refused",
+        "status": "passed"
+      },
+      {
+        "name": "unresolved_entity_refused",
+        "status": "passed"
+      },
+      {
+        "name": "invalid_geometry_targeted_rollback",
+        "status": "passed"
+      },
+      {
+        "name": "failed_requirement_retains_candidate",
+        "status": "passed"
+      },
+      {
+        "name": "custom_python_with_trusted_readback",
+        "status": "passed"
+      },
+      {
+        "name": "small_fixture_feedback_latency",
+        "status": "passed",
+        "evidence": {
+          "samples_ms": [
+            500.20300000323914,
+            518.0183000047691,
+            526.8055999767967,
+            525.036100007128,
+            498.8641999952961,
+            497.21579998731613,
+            509.38679999671876,
+            488.07209997903556,
+            502.02189999981783,
+            487.05450000124983,
+            553.0851000221446,
+            524.9965999973938,
+            498.9814999862574,
+            499.5092000172008,
+            517.3305000062101,
+            497.99729997175746,
+            511.73080000444315,
+            498.3267999778036,
+            505.7737000170164,
+            520.9865999931935
+          ],
+          "p95_ms": 526.8055999767967,
+          "declared_budget_ms": 10000,
+          "setup_and_archive_excluded": true
+        }
+      },
+      {
+        "name": "seed_exported",
+        "status": "passed"
+      },
+      {
+        "name": "accepted_checkpoint_roundtrip",
+        "status": "passed"
+      },
+      {
+        "name": "verified_build_reused",
+        "status": "passed",
+        "evidence": {
+          "miss_total_ms": 2829.139400011627,
+          "hit_total_ms": 1917.813500011107,
+          "same_archive": true,
+          "hit_construction_calls": 0,
+          "hit_checks": [
+            {
+              "id": "width",
+              "metric": "body_extent",
+              "frame": "root",
+              "units": "mm",
+              "entities": [
+                "root / Editable"
+              ],
+              "axis": "x",
+              "protected": false,
+              "method": "BRepBody.preciseBoundingBox",
+              "baseline": 60.0,
+              "result": 70.0,
+              "delta": 10.0,
+              "comparator": "eq",
+              "expected": 70.0,
+              "tolerance": 0.01,
+              "status": "passed",
+              "classification": "exact",
+              "reason": null
+            },
+            {
+              "id": "volume",
+              "metric": "body_volume",
+              "frame": "root",
+              "units": "mm^3",
+              "entities": [
+                "root / Editable"
+              ],
+              "protected": false,
+              "method": "BRepBody.volume",
+              "baseline": 9000.0,
+              "result": 10500.0,
+              "delta": 1500.0,
+              "comparator": "eq",
+              "expected": 10500.0,
+              "tolerance": 0.01,
+              "status": "passed",
+              "classification": "exact",
+              "reason": null
+            },
+            {
+              "id": "canary",
+              "metric": "body_volume",
+              "frame": "root",
+              "units": "mm^3",
+              "entities": [
+                "root / Protected"
+              ],
+              "protected": true,
+              "method": "BRepBody.volume",
+              "baseline": 1000.0,
+              "result": 1000.0,
+              "delta": 0.0,
+              "comparator": "eq",
+              "expected": 1000.0,
+              "tolerance": 0.01,
+              "status": "passed",
+              "classification": "exact",
+              "reason": null
+            },
+            {
+              "id": "pose",
+              "metric": "occurrence_translation",
+              "frame": "root",
+              "units": "mm",
+              "entities": [
+                "PCB:1"
+              ],
+              "axis": "x",
+              "protected": true,
+              "method": "Occurrence.transform2",
+              "baseline": 20.0,
+              "result": 20.0,
+              "delta": 0.0,
+              "comparator": "eq",
+              "expected": 20.0,
+              "tolerance": 0.01,
+              "status": "passed",
+              "classification": "exact",
+              "reason": null
+            }
+          ]
+        }
+      },
+      {
+        "name": "changed_checks_reverify_cached_geometry",
+        "status": "passed"
+      },
+      {
+        "name": "changed_parameter_rebuilds",
+        "status": "passed"
+      },
+      {
+        "name": "custom_recipe_checked_without_cache_admission",
+        "status": "passed"
+      },
+      {
+        "name": "restore_preserves_source_and_work_in_progress",
+        "status": "passed"
+      },
+      {
+        "name": "repeated_binding_reuses_native_identity",
+        "status": "passed"
+      },
+      {
+        "name": "wrong_active_target_and_unowned_binding_refused",
+        "status": "passed"
+      },
+      {
+        "name": "ambiguous_document_name_refused",
+        "status": "passed"
+      },
+      {
+        "name": "closed_native_target_refused",
+        "status": "passed"
+      },
+      {
+        "name": "real_timeout_late_completion_recovered",
+        "status": "passed",
+        "evidence": {
+          "bounded_response_ms": 448.1975000235252,
+          "retry_blocked": true,
+          "recovered_without_replay": true,
+          "original_uncertainty_retained": true,
+          "subsequent_edit_verified": true
+        }
+      },
+      {
+        "name": "partial_custom_failure_is_fenced",
+        "status": "passed",
+        "evidence": {
+          "width_restored_mm": 60.0,
+          "partial_change_remains": true,
+          "recovery": "unresolved_partial",
+          "retries_blocked": true,
+          "generic_reconciliation_refused": true,
+          "receipt_barrier": true,
+          "terminal_failure_confirmed": true,
+          "checkpoint_count": 0
+        }
+      },
+      {
+        "name": "partial_fixture_disposed_by_test_harness",
+        "status": "passed"
+      },
+      {
+        "name": "original_documents_preserved",
+        "status": "passed",
+        "evidence": {
+          "owned_documents_closed": 15,
+          "original_document_count": 5,
+          "originals_intact": true,
+          "original_active_restored": true
+        }
+      }
+    ]
+  },
+  "reliability_regression": {
+    "fusion_version": "2706.1.17",
+    "checks": [
+      {
+        "name": "constrained_rectangles",
+        "status": "passed",
+        "evidence": {
+          "planes": 3,
+          "centered_non_xy": true
+        }
+      },
+      {
+        "name": "parameter_receipt_and_brep",
+        "status": "passed",
+        "evidence": {
+          "width_mm": 50,
+          "volume_mm3": 6952.0,
+          "duplicate_redispatched": false,
+          "conflict_refused": true,
+          "recovered_from_receipt": true
+        }
+      },
+      {
+        "name": "rigid_membership_and_compact_inspection",
+        "status": "passed",
+        "evidence": {
+          "selected": 2,
+          "actual": 2,
+          "descendants": 3,
+          "preview_count": 3,
+          "page_size": 1
+        }
+      },
+      {
+        "name": "native_descendant_membership",
+        "status": "passed",
+        "evidence": {
+          "actual": 3,
+          "suppressed": false
+        }
+      },
+      {
+        "name": "non_idempotent_duplicate_refusal",
+        "status": "passed",
+        "evidence": {
+          "actual_occurrences": 7,
+          "expected_without_duplicate": 7
+        }
+      },
+      {
+        "name": "viewport_local_png",
+        "status": "passed",
+        "evidence": {
+          "width": 1200,
+          "height": 800,
+          "bytes": 96936,
+          "camera_restored": true
+        }
+      },
+      {
+        "name": "archive_reopen",
+        "status": "passed",
+        "evidence": {
+          "same_volume": true,
+          "source_hash_matches": true,
+          "bytes": 185539,
+          "previous_document_preserved": true
+        }
+      },
+      {
+        "name": "recovery_barrier",
+        "status": "passed",
+        "evidence": {
+          "blocked_write": true,
+          "read_available": true,
+          "explicit_reconciliation": true
+        }
+      },
+      {
+        "name": "fixture_cleanup",
+        "status": "passed",
+        "evidence": {
+          "closed": 2,
+          "previous_restored": true
+        }
+      }
+    ]
+  },
+  "automated": {
+    "passed": 1187,
+    "skipped": 1,
+    "skip": "Windows symbolic-link privilege unavailable; separate native junction retarget rejection checked"
+  },
+  "legacy_stdout_runner": {
+    "status": "blocked",
+    "reason": "empty raw output after fixture creation",
+    "resolution": "identified and closed only the blank test document; no mutation replay"
+  },
+  "appearance": {
+    "archive_bytes": 98437,
+    "source_image_sha256": "b9a8be4033fadf90b3178dcbf8593f2ae6f2ee0df71f66e92dd08b43fab2453d",
+    "embedded_source_image_matches": true,
+    "uv_values_equal": true,
+    "uv_scalar_count": 16,
+    "appearance_name": "Steel - Satin",
+    "rendering_verification": "unknown",
+    "clean_process_resource_isolation": "not_tested"
+  },
+  "packaging": {
+    "wheel_build": true,
+    "installed_wheel_knowledge": true,
+    "fresh_stdio_tools": 104,
+    "updated_schemas": true,
+    "live_read_only_doc_state": true
+  }
+}

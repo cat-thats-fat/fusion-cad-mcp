@@ -80,6 +80,10 @@ Use `create_component`, `insert_component` and `place_component` for local assem
 
 `set_reference_metadata` stores user-provided mount, connector and keep-out data on a component definition in component-local mm. `get_reference_metadata` returns that data, the selected occurrence transform, and root-frame body bounds. Shared or linked definitions refuse edits. `validate_design` checks explicit bounds, interference and minimum clearance; inspect every status and `passed`. Axis-aligned bounds do not establish cavity containment.
 
+For OBJ reference import, pass explicit units and a retained operation UUID. Preflight records a local dependency manifest (a filesystem write), rejects escaping or remote dependencies and requires explicit `geometry_only` when appearance resources are missing. Mesh bounds and hashes do not prove texture, UV, embedding or display fidelity. Inspect the full failure envelope, including `error` and `state`, and retain uncertain operation IDs. Scoped mesh, body and other evidence can be captured by `workspace_inspect` or compared at `workspace_checkpoint` archive reopen; it is not an atomic `workspace_edit` guard. See `tools.md` for the exact scope and field tolerances.
+
+For `validate_design` face-distance checks, reacquire current document-scoped face handles after edits or recompute and read root-frame mm witness points and each check status. Bounded `ray_collision_with_mesh` queries use root or local frames and source-bound replay; no-hit and ambiguous rays do not prove free space or clearance.
+
 ## Guarded workspace edits
 
 Use the workspace tools when a local F3D checkpoint, scoped evidence or recoverable operation record would help. V1 supports one existing numeric length user parameter in a self-contained parametric design.

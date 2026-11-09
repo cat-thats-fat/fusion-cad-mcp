@@ -100,6 +100,17 @@ def get_capabilities() -> Envelope:
         "separate_document_archive_format": "f3d",
         "solidworks_import_supported": False,
         "paid_or_cloud_import_provided": False,
+        "obj_reference_support": {
+            "explicit_units_required": True,
+            "dependency_manifest": "local content-addressed provenance artifact",
+            "appearance_verification": "unknown; resources present does not prove rendering",
+            "inspection": "inspect_assembly include=['meshes']; fields=['mesh_geometry'] for bounded digest",
+        },
+        "scoped_evidence": {
+            "version": 1,
+            "operations": ["workspace_inspect", "workspace_checkpoint"],
+            "atomic_edit_precondition": False,
+        },
         "receipts": {
             "scope": "trusted JSON-status scripts using the enhanced adapter",
             "modules": ["assembly", "construction", "doc_state", "features", "handle_tools",

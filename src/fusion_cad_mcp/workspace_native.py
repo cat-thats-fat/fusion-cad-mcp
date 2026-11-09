@@ -9,14 +9,15 @@ import hashlib
 import inspect
 import json
 
-from . import edit_contract
+from . import edit_contract, scoped_evidence
+from .native_mesh import MESH_EVIDENCE_SCRIPT
 from .resolver import RESOLVER_SCRIPT
 from .tools.parameters import _PARAMETER_SCRIPT
 from .tools.validation import _SCRIPT as _VALIDATION_SCRIPT
 
 
 def build_workspace_script(action: str, payload: dict) -> str:
-    if action not in {"bind", "inspect", "edit", "export", "open", "activate", "close"}:
+    if action not in {"bind", "inspect", "edit", "export", "open", "activate", "close", "recompute"}:
         raise ValueError("unsupported workspace action")
     if not isinstance(payload, dict):
         raise ValueError("payload must be a mapping")
@@ -26,6 +27,8 @@ def build_workspace_script(action: str, payload: dict) -> str:
         "import adsk.core, adsk.fusion, json, math, os, sys, types, uuid, hashlib, tempfile, time\n"
         + RESOLVER_SCRIPT + _PARAMETER_SCRIPT + _VALIDATION_SCRIPT.split("\ndef run(_ctx):", 1)[0]
         + "\n" + inspect.getsource(edit_contract)
+        + "\n" + inspect.getsource(scoped_evidence).split("SCOPED_CAPTURE_SCRIPT =", 1)[0]
+        + MESH_EVIDENCE_SCRIPT + scoped_evidence.SCOPED_CAPTURE_SCRIPT
         + "\n_ACTION = " + repr(action) + "\n_ARGS = json.loads(" + repr(data) + ")\n"
         + _WORKSPACE_SCRIPT
     )
@@ -392,6 +395,8 @@ def _dispatch(app):
         measurements = _measure(app, entry, _ARGS.get('checks', []))
         response = {'ok': True, 'parameter': parameter, 'measurements': measurements,
                     'health': _health(design), 'pending': entry['pending'], 'environment': env}
+        if _ARGS.get('scope') is not None:
+            response['evidence'] = _capture_scoped(entry, _ARGS['target_handle'], _ARGS['scope'])
         if expected_expression is not None:
             try:
                 expected = _parameter_expectation(design, expected_expression, native_parameter.unit)
@@ -403,6 +408,14 @@ def _dispatch(app):
     _available(entry)
     _no_external(entry)
     _timeline_end(design)
+    if _ACTION == 'recompute':
+        if not entry['owned']: raise _WorkspaceError('user_document_recompute_refused')
+        _EFFECT_STARTED = True
+        if design.computeAll() is not True: raise _WorkspaceError('recompute_failed')
+        _resolve(app, _ARGS['target_handle'])
+        _active(app, entry)
+        _timeline_end(design)
+        return {'ok': True, 'recomputed': True, 'environment': env}
     if _ACTION == 'export':
         path = _ARGS['path']
         if not os.path.isabs(path) or not path.lower().endswith('.f3d'): raise _WorkspaceError('invalid_export_path')

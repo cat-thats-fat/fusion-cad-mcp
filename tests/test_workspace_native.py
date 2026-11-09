@@ -14,7 +14,7 @@ from fusion_cad_mcp.workspace_native import build_workspace_script
 
 
 def test_generator_is_deterministic_and_compilable(tmp_path):
-    for action in ("bind", "inspect", "edit", "export", "open", "activate", "close"):
+    for action in ("bind", "inspect", "edit", "export", "open", "activate", "close", "recompute"):
         script = build_workspace_script(action, {"z": 1, "a": "some 'quoted' input"})
         assert script == build_workspace_script(action, {"a": "some 'quoted' input", "z": 1})
         compile(script, "<native>", "exec")
@@ -509,3 +509,47 @@ def test_rebinding_preserves_live_entry_at_registry_capacity(monkeypatch):
     namespace["_capacity"]()
     assert token not in registry.entries
     sys.modules.pop("_fusion_cad_workspace_v1", None)
+
+
+def test_recompute_dispatch_requires_owned_clean_target(monkeypatch):
+    adsk = types.ModuleType("adsk")
+    core, fusion = types.ModuleType("adsk.core"), types.ModuleType("adsk.fusion")
+    adsk.core, adsk.fusion = core, fusion
+    for name, module in (("adsk", adsk), ("adsk.core", core), ("adsk.fusion", fusion)):
+        monkeypatch.setitem(sys.modules, name, module)
+    calls = []
+    design = types.SimpleNamespace(computeAll=lambda: calls.append("compute") or True)
+    entry = {
+        "document": object(),
+        "design": design,
+        "root": object(),
+        "pending": None,
+        "owned": False,
+    }
+    namespace = {}
+    exec(build_workspace_script("recompute", {"target_handle": "h"}), namespace)
+    namespace.update(
+        {
+            "_environment": lambda _: {},
+            "_resolve": lambda *_: entry,
+            "_active": lambda *_: None,
+            "_no_external": lambda *_: None,
+            "_timeline_end": lambda *_: None,
+        }
+    )
+    with pytest.raises(namespace["_WorkspaceError"], match="user_document_recompute_refused"):
+        namespace["_dispatch"](None)
+    assert calls == []
+    entry["owned"] = True
+    entry["pending"] = "prior"
+    with pytest.raises(namespace["_WorkspaceError"], match="operation_pending"):
+        namespace["_dispatch"](None)
+    assert calls == []
+    entry["pending"] = None
+    assert namespace["_dispatch"](None)["recomputed"] is True
+    assert calls == ["compute"]
+    design.computeAll = lambda: False
+    namespace["_EFFECT_STARTED"] = False
+    with pytest.raises(namespace["_WorkspaceError"], match="recompute_failed"):
+        namespace["_dispatch"](None)
+    assert namespace["_EFFECT_STARTED"] is True

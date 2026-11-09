@@ -1,5 +1,10 @@
 # Initial field feedback and follow-up
 
+For the later modeling field run reviewed on 2026-11-09, see the
+[implementation plan](field-followup-plan.md) and
+[deferred findings and evidence](field-followup-backlog.md). The original pass
+below remains a separate historical record.
+
 Received 2026-11-08. The observations below were supplied by an agent using the
 local MCP installation. They are a report of that pass, not a benchmark score or
 an independently repeated modeling test.

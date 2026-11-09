@@ -19,6 +19,7 @@ class StubDesign:
         self.unitsManager = SimpleNamespace(defaultLengthUnits="mm")
         self.rootComponent = SimpleNamespace(
             bRepBodies=SimpleNamespace(count=3),
+            meshBodies=SimpleNamespace(count=2),
             sketches=SimpleNamespace(count=1),
             allOccurrences=SimpleNamespace(count=2),
             features=SimpleNamespace(count=5),
@@ -63,6 +64,7 @@ def test_script_reports_parametric_design_fully(monkeypatch):
         "features_count": 5,
         "unavailable": {},
         "bodies_count": 3,
+        "mesh_bodies_count": 2,
         "sketches_count": 1,
         "components_count": 2,
         "doc_name": "Part1",
@@ -87,6 +89,7 @@ def test_script_returns_partial_state_on_direct_design(monkeypatch):
             "timeline_count": "requires a parametric design",
         },
         "bodies_count": 3,
+        "mesh_bodies_count": 2,
         "sketches_count": 1,
         "components_count": 2,
         "doc_name": "Part1",

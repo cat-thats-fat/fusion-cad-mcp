@@ -1,6 +1,6 @@
 # Local reference-component workflow
 
-Use a local STEP file with the existing `import_geometry` tool. This workflow
+Use a local STEP or OBJ file with the existing `import_geometry` tool. This workflow
 adds portable mechanical meaning to imported geometry without a catalog service
 or another CAD engine.
 
@@ -40,3 +40,6 @@ explicit local clearance solid when exact B-rep interference is required, then
 use `validate_design`. Its bounds check does not establish containment inside an
 enclosure cavity, and this workflow does not automatically align holes or route
 wiring. Raw Python remains available for specialized reference processing.
+
+
+For an OBJ reference, call `import_geometry("obj", absolute_local_path, target_component=path, units="mm", operation_id=uuid)` with the actual source units. Preflight checks OBJ/MTL/image references against the resolved OBJ directory and any explicitly declared `dependency_roots`; it writes a local content-addressed manifest and reports its path and hash. Missing appearance resources require an explicit `appearance_policy="geometry_only"`. Imported mesh handles, counts and local/root bounds help inspect geometry, while appearance and UV preservation remain unknown. For archive preservation, declare a mesh `witness` in `workspace_checkpoint.evidence_scope` and inspect the reopened comparison; see the [tool reference](../src/fusion_cad_mcp/knowledge/tools.md) for exact scope fields and tolerances. Retain the operation UUID and inspect the entire error and state envelope when the outcome is uncertain. Metadata remains user supplied and does not certify the imported mesh.

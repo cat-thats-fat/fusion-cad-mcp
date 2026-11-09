@@ -13,6 +13,18 @@ from tests._assembly_fakes import Collection, ScriptAdapter, occurrence, point, 
 BASE = {"schema_version": 1, "reference_id": "board-1", "units": "mm"}
 
 
+def test_reference_metadata_reports_mesh_bounds_separately(monkeypatch):
+    comp = root(Attributes(json.dumps(BASE)))
+    comp.meshBodies = Collection([SimpleNamespace(name="Scan", boundingBox=SimpleNamespace(
+        minPoint=point(1, 2, 3), maxPoint=point(4, 5, 6)))])
+    result = r.get_reference_metadata(Adapter(monkeypatch, comp), "root")
+    assert result.ok and result.result["mesh_count"] == 1
+    assert result.result["body_count"] == 0
+    assert result.result["mesh_bounds_frame"] == "root"
+    assert result.result["mesh_bounds"] == [{"mesh": "Scan", "min_mm": [10, 20, 30],
+                                              "max_mm": [40, 50, 60]}]
+
+
 class Attributes:
     def __init__(self, value=None, *, fail_write=False, fail_restore=False):
         self.value = value

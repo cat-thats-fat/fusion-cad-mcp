@@ -23,7 +23,7 @@ Find current face, edge or vertex handles. `filters` accepts `type`, `normal`, `
 
 ## `validate_design(checks)`
 
-Accepts 1..50 checks: `{"type":"clearance","body_a":...,"body_b":...,"min_mm":...}`, `{"type":"interference","body_a":...,"body_b":...,"max_overlap_mm3":0}`, or `{"type":"bounds","body":...,"min_mm":[x,y,z],"max_mm":[x,y,z],"tolerance_mm":0}`. Body names, occurrence-qualified names and body handles are supported. Read `result.passed` and each `pass`, `violation` or `unavailable`. Bounds compare root-axis-aligned boxes, not actual containment in an irregular cavity.
+Accepts 1..50 checks: `{"type":"clearance","body_a":...,"body_b":...,"min_mm":...}`, `{"type":"interference","body_a":...,"body_b":...,"max_overlap_mm3":0}`, or `{"type":"bounds","body":...,"min_mm":[x,y,z],"max_mm":[x,y,z],"tolerance_mm":0}`. Face pairs use `{"type":"face_distance","face_a":handle,"face_b":handle,"min_mm":...,"max_mm":...,"tolerance_mm":...}` with at least one bound and document-scoped current face handles. The result includes minimum distance and witness points in root-frame mm. Same-face pairs are refused; shared-edge pairs can measure zero. Reacquire unique faces after edits or recompute. A face-pair minimum does not establish opposing walls or global wall thickness. Body names, occurrence-qualified names and body handles are supported. Read `result.passed` and each `pass`, `violation` or `unavailable`. Bounds compare root-axis-aligned boxes, not actual containment in an irregular cavity.
 
 ## `create_component(name, parent=None)`
 
@@ -875,13 +875,11 @@ Errors: `invalid_input` (`origin_mm must be [x, y, z] in mm`, `direction must be
 
 Returns `ok`, `meshes_found`, `names`, and `mesh_handles`.
 
-## `ray_collision_with_mesh(mesh_handle, origin_mm, direction)`
+## `ray_collision_with_mesh(mesh_handle, origin_mm=None, direction=None, queries=None, frame="root", tolerance_mm=1e-6, replay=None)`
 
-Casts against one mesh and returns its intersection points in mm, nearest first. Use a `mesh_body` handle from `find_mesh_using_ray`. Legacy `body` handles are accepted when their tokens resolve to a mesh body.
+Legacy `origin_mm` and `direction` cast one ray and return `collisions` and `points_mm`. Alternatively supply 1-32 `queries`, each `{"origin_mm":[x,y,z],"direction":[x,y,z],"start_mm":0,"end_mm":100,"selection":"all"}`; `selection` is `all`, `nearest` or `farthest`, the direction must be finite and nonzero, and `0 <= start_mm < end_mm`. `frame` is `root` or component `local`; positions, travel and tolerance are mm. A bounded query requires a document-scoped mesh handle. Hits are ordered by travel, with coincident returns marked ambiguous; tangent classification is unavailable. Review per-query `hits`, `no_hit`, `ambiguous`, `unavailable` or `truncated` and the coverage counts. No hit means missing sampled coverage, not free space.
 
-Errors: `invalid_input`, `handle_invalid`.
-
-Returns: `ok`, `collisions`, `points_mm`.
+Retain a returned query witness and pass it as `replay` with the mesh handle to repeat that same method, frame, interval and tolerance. Source geometry and occurrence pose fingerprints are checked; changed or unavailable source is stale or unavailable, not a favorable replacement sample. Other witness methods are not revalidated by this ray tool. This is bounded sampling, not a global clearance, containment or watertightness proof.
 
 ---
 
@@ -956,7 +954,7 @@ Returns: `before_image`, `after_image`, `before_marker`, `after_marker`, `direct
 
 Formats: `stl`, `3mf`, `step`, `iges`, `obj`, `f3d`, `sat`, `smt`.
 
-`body` is honored only by `stl`, `3mf`, and `obj`. **The solid formats always export the whole design** and ignore it silently.
+`body` is supported only by `stl`, `3mf`, and `obj`; other formats reject it. Select `component` separately to export that occurrence scope where supported.
 
 `refinement` (`low`, `medium`, `high`) applies to `stl` and `obj`. `units` applies to `stl` only.
 
@@ -968,17 +966,13 @@ Returns: `ok`, `path`, `bytes_written`, and `format` for the mesh formats.
 
 **Check `bytes_written`.** Missing or empty output is reported as an error rather than a successful export.
 
-## `import_geometry(format, path, target_component=None)`
+## `import_geometry(format, path, target_component=None, operation_id=None, units=None, dependency_roots=None, appearance_policy="require_resources")`
 
-Imports into the active design, at root when `target_component` is omitted. Otherwise select a unique component name, occurrence name or occurrence path. Shared/referenced definitions refuse edits. Formats: `step`, `iges`, `sat`, `smt`, `f3d`. For a separate F3D document use `open_local_archive` (Fusion `importToNewDocument`).
+Import `step`, `iges`, `sat`, `smt`, `f3d` or `obj` into the active design, at root if `target_component` is omitted. A selected occurrence must resolve uniquely and must not edit a shared or referenced definition. For a separate F3D document use `open_local_archive` (Fusion `importToNewDocument`). Paths must be absolute; STL and 3MF import are not supported here. Supply a canonical UUID as `operation_id` before dispatch to preserve it for receipt status and deduplication. Read the full envelope (`ok`, `error`, `message`, `result`, and `state`) on failure; an uncertain native import must not be replayed automatically.
 
-`stl`, `3mf`, and `obj` are not supported for import by this tool. An explicit `"root"` is not a special target selector; omit `target_component` for the root component.
+OBJ requires explicit source `units` of `mm`, `cm`, `m`, `in` or `inch`. Preflight follows local OBJ `mtllib` and supported MTL image references only within the resolved OBJ directory or explicit absolute `dependency_roots`; it rejects remote/escaping references, including resolved junction escapes. It accepts UTF-8 OBJ and MTL, bounded to 256 MiB per OBJ, 16 MiB per MTL, 256 MiB per image and 256 dependencies (512 MiB total). Texture options, backslash paths, continued lines, network paths, unsupported `map_` directives and MTL file aliases resolving to another parent directory are refused; quote paths with spaces. Existing meshes in the target require available bounded native witnesses so their identities and geometry can be checked after import. Missing appearance files refuse by default; explicitly choose `appearance_policy="geometry_only"` to proceed with missing resources. Preflight and immediate pre-import rehash narrow but cannot eliminate filesystem races.
 
-`path` must be absolute and identify an existing file accessible to Fusion. Counts are deltas of direct bodies and occurrences in the target component; bodies inside added subcomponents are not included in `bodies_added`.
-
-Returns `ok`, `format`, `path`, `source_sha256`, `target_component`, `target_occurrence_path`, `coordinate_frame`, `target_to_root_transform_cm`, `fusion_length_unit`, `display_length_unit`, `bodies_added`, `occurrences_added`, and `imported_objects`. Object identities include handles where available; an entry can report an `identity_error` even after import succeeds.
-
-Errors include `invalid_path`, `invalid_input`, `file_not_found` (checked inside Fusion), target selection errors, `referenced_component_edit_unsupported`, `shared_component_edit_unsupported`, `import_options_failed`, and `import_no_objects`.
+OBJ preflight writes a content-addressed provenance manifest under local app data `fusion-cad-mcp/manifests-v1`; `bundle` returns its path, SHA-256 and counts and `state` reports the local artifact write. The manifest records dependency hashes and declared options. The native import reports mesh handles, counts and local/root bounding boxes in mm and the target-to-root matrix in cm. It does not prove UV, material, image embedding or display fidelity: `appearance.status` remains `unknown` even if files exist. Read `cleanup` and the receipt after a partial failure; verified mesh-body cleanup does not prove every native effect was undone. Legacy formats return source hash, direct B-rep and occurrence count deltas and object identities where available.
 
 ## `open_local_archive(path, operation_id=None)`
 
@@ -1036,9 +1030,11 @@ Create local workspace storage, a `design.json` starter and `assets/` directory.
 
 Bind the active document or a unique exact document name. Returns `result.target_handle` for this open instance in the current Fusion session. Rebinding the same instance reuses its handle and preserves ownership and pending-operation state. A bound user document can be inspected and captured as a checkpoint. Use an owned copy returned by checkpoint, restore or build for managed writes. Before measuring or editing, activate the bound design and leave it idle in its root context at the end of its parametric timeline.
 
-## `workspace_inspect(target_handle, parameter_name, checks)`
+## `workspace_inspect(target_handle, parameter_name, checks, scope=None, baseline=None)`
 
 Read `result.parameter.expression` and `result.parameter.value_mm` for a numeric length user parameter, plus health and `result.measurements` keyed by check ID. Each check supplies a unique `id`, `metric`, `entities`, `frame: "root"`, `units` and `axis` where listed below. Use the measurements to fill the edit baseline.
+
+For scope-only inspection without a parameter or scalar checks, pass `parameter_name=""` and `checks=[]`. This does not change the checkpoint requirement for a named parameter.
 
 | Metric | `entities` | `units` | `axis` |
 |---|---|---|---|
@@ -1047,6 +1043,18 @@ Read `result.parameter.expression` and `result.parameter.value_mm` for a numeric
 | `occurrence_translation` | One exact occurrence path | `mm` | `x`, `y` or `z` |
 | `clearance` | Two distinct solid bodies | `mm` | Omit |
 | `interference` | Two distinct solid bodies | `mm^3` | Omit |
+
+The V1 `body_volume` check reads Fusion's `BRepBody.volume`. Its `exact` classification denotes a direct native measurement rather than a heuristic; the API does not specify an accuracy bound, and it is not a claim of mathematically exact volume.
+
+Optional `scope` is a versioned exact inventory, for example:
+
+```json
+{"version":1,"path":"root","sections":[{"kind":"body","names":["Plate"],"fields":["bounds_mm","volume_mm3"],"tolerances":{"bounds_mm":0.01,"volume_mm3":0.1}}]}
+```
+
+Each section declares unique exact names, selected fields and a tolerance for every numeric field. Kinds/fields are `body`: `bounds_mm`, `volume_mm3`; `mesh`: `witness`; `feature` and `sketch`: `health`; `parameter`: `expression`, `value_mm`, `units`; `occurrence`: `transform_cm`. The mesh `witness` tolerance is `{"bounds_mm":0.01,"transform_cm":0.001}`; it records a native geometry digest, counts, component-local bounds and occurrence transform, with appearance unknown. Omit numeric tolerances for text fields. Sections cover the exact collection in `path` (`root` or a full occurrence path); missing, extra and duplicate names fail comparison. Supply a prior returned evidence snapshot as `baseline` to compare on the same binding. Inspection does not implicitly recompute. These observations are not guards applied atomically by `workspace_edit`.
+
+Scoped `volume_mm3` uses Fusion physical properties at `LowCalculationAccuracy`, reported with the value; Autodesk documents a ±1% error margin at that setting. A tight equality tolerance does not improve that calculation accuracy.
 
 Body selectors are `root / BodyName` or `<full occurrence path> / BodyName`. An occurrence path looks like `Parent:1+Mount:2`. `body_extent` measures the precise root-axis B-rep box. `clearance` combines minimum distance with an interference check. `interference` measures total overlap volume.
 
@@ -1060,13 +1068,19 @@ Supply `custom_script` to implement the edit in trusted Python when scripting fi
 
 Read `result.execution` and `result.verification` separately. A completed edit can have a failed or incomplete verification. Rows include baseline, result, delta, threshold, units, tolerance, evidence classification and status. Unavailable required measurements prevent verified status. Reuse the original UUID to look up historical evidence. Use a fresh UUID and fresh guards for a new edit.
 
-## `workspace_checkpoint(workspace_path, target_handle, branch, requirements, parameter_name, operation_id=None, expected_previous=None, accepted=False)`
+## `workspace_checkpoint(workspace_path, target_handle, branch, requirements, parameter_name, operation_id=None, expected_previous=None, accepted=False, evidence_scope=None)`
 
 Capture a bound self-contained design into an immutable F3D and open a fresh workspace-owned copy. `requirements` use the edit requirement shape. Checkpoint thresholds apply to both the source and reopened archive. Set `accepted=True` to request accepted promotion. It requires passing checks and matching roundtrip evidence. A retained archive with failed or incomplete verification is eligible for the WIP pointer. Read `checkpoint_kind`, `roundtrip_passed` and `target_handle` in the result.
+
+Optional `evidence_scope` uses the same shape as `workspace_inspect.scope` and compares the source and freshly reopened archive, including selected mesh witnesses. This is checkpoint verification, not an atomic edit guard or general geometry equivalence proof. Read `roundtrip_details.scoped_evidence` and its differences.
+
+Before roundtrip readback, checkpoint and build explicitly recompute the freshly reopened workspace-owned copy as a separate receipt-backed phase. Build also recomputes its newly opened seed copy before baseline inspection. Source inspection is read-only; unavailable or uncertain recompute cannot produce verified evidence. Check phase receipts through `workspace_status`.
 
 Use `expected_previous=None` for a new pointer. To replace one, pass its current SHA-256 digest from `workspace_status`.
 
 ## `workspace_restore(workspace_path, branch, kind="accepted", operation_id=None)`
+
+Opens the retained archive as a fresh workspace-owned copy and explicitly recomputes that copy in a separate receipt-backed phase. The restore reports `verification: "not_run"`; inspect the new copy and its health before editing. An uncertain recompute keeps the writer barrier.
 
 Verify the archive digest and open a fresh working document from the selected `accepted` or `wip` pointer. Recovery uses archive import and bypasses Fusion Undo. Inspect the returned handle for current evidence before the next edit.
 
