@@ -13,3 +13,25 @@ The check resolves current bodies and occurrence contexts, copies native BReps, 
 These are discrete caller-supplied poses, not a continuous-motion proof, path planner, clearance measurement, or moving-tool envelope. Include every relevant moving body and stationary obstacle in separate checks, sample appropriate poses, and inspect all statuses. Geometry and kernel tolerances can make intersections unavailable. Test representative model geometry in the installed Fusion version before relying on results.
 
 Fusion's documented [temporary Boolean operation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_TemporaryBRepManager_booleanOperation.htm), [temporary transform](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_TemporaryBRepManager_transform.htm), and [occurrence transform2](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_Occurrence_transform2.htm) describe the native operations used here.
+
+## Verification
+
+On November 11, local Fusion Personal 2706.1.17 produced the expected synthetic
+intersection volumes: 500 mm³ for translation, 1,000 mm³ after a 90-degree
+rotation, 2,000 mm³ for a 45-degree rotated body contained by a larger box, and
+500 mm³ in a nested rotated/translated occurrence. Two separated poses passed
+the strictly disjoint-bounds check. The touching pose returned `unavailable` for
+an empty/non-solid intersection; no positive clearance was inferred.
+
+The nested body's independently expected root bounds were [80,60,10] to
+[100,70,20] mm. Selected primary body/parameter/occurrence witnesses matched
+before and after checking, as did the protected fixture and all three existing
+documents. The seven-pose check plus preservation inventories took about
+7,799 ms in this run. This is a measured fixture observation, not a latency bound.
+
+`scripts/live_pose_checks.py` supplies prepare/check/inspect/cleanup actions.
+Its offline box kernel tests only right-angle rotations for intersection volume;
+the arbitrary-angle case above was measured in real Fusion. Automated tests also
+cover false/raised Boolean results, missing/ambiguous/stale targets, repeated
+definitions, source preservation, invalid input and work limits. Kernel failure
+remains unavailable; the implementation does not perturb geometry to force a pass.

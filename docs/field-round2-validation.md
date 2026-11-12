@@ -20,7 +20,7 @@ Offline tests exercise witness consistency, bounded probes, scope, and failure h
 
 ## Assembly poses
 
-On Fusion Personal 2706.1.17, two separated samples passed using strictly disjoint bounds. Translation and rotation samples produced independently expected intersection volumes of 500, 1,000 and 2,000 mm³; a nested occurrence sample produced 500 mm³. A touching sample returned unavailable, rather than a clearance claim. Selected primary, original-document and protected-fixture witnesses remained unchanged. Fixture cleanup verification is pending. See [assembly pose checks](assembly-pose-checks.md) for methods and limits.
+On Fusion Personal 2706.1.17, two separated samples passed using strictly disjoint bounds. Translation and rotation samples produced independently expected intersection volumes of 500, 1,000 and 2,000 mm³; a nested occurrence sample produced 500 mm³. A touching sample returned unavailable, rather than a clearance claim. Selected primary, original-document and protected-fixture witnesses remained unchanged. Both owned fixtures were closed and the prior active document was restored. See [assembly pose checks](assembly-pose-checks.md) for methods and limits.
 
 Offline tests exercise temporary body copies, root-frame transforms, bounded pose inputs and uncertain Boolean outcomes. Supplied poses are discrete samples, not a continuous-motion proof or clearance measurement. A failed or uncertain Boolean is unavailable, not a pass.
 

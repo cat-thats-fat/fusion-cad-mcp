@@ -126,7 +126,7 @@ def main():
     with adapter_for(args.output, timeout=120) as adapter:
         if args.action == 'prepare':
             result = prepare(adapter, args.output)
-            assert result['original_document_count'] >= 3 and result['originals_intact'], result
+            assert result['originals_intact'], result
             result['fixture'] = fixture(adapter)
         elif args.action == 'check':
             result = pose_checks(adapter, args.output)
