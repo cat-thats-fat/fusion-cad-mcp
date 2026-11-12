@@ -7,9 +7,9 @@ not test fixtures. Four separate changes keep reliability work reviewable.
 | PR scope | Implementation | Required evidence |
 | --- | --- | --- |
 | Extrusion preflight (merged) | Classify only explicit pre-add refusals as not started; retain an optional operation UUID. Document the observed SAT restriction without inferring a universal entitlement rule. | Generated-script and receipt tests; live missing/ambiguous selectors followed by a valid extrusion; real dimensions and preserved documents. |
-| Measurement evidence (live fixture complete; merge pending) | Check scalar/witness consistency; add bounded, named point-to-surface probes to existing validation for localized translation checks. | Independent numeric tests, malformed results and stale scopes; live known surfaces and a deliberately altered local region. Gross bounds/volume remain separate evidence. |
+| Measurement evidence (implemented and live checked) | Check scalar/witness consistency; add bounded, named point-to-surface probes to existing validation for localized translation checks. | Independent numeric tests, malformed results and stale scopes; live known surfaces and a deliberately altered local region. Gross bounds/volume remain separate evidence. |
 | Durable custom Python (merged) | Opt-in existing receipt coordination, bounded output capture, persistent stages and explicit partial-failure records. | Duplicate/conflicting IDs, missing replies, failed scripts, stream restoration and size limits; live successful and deliberately failed staged scripts with independent readback. |
-| Assembly pose checks (review and integration pending) | Extend existing validation with caller-supplied rigid poses using temporary bodies. Preserve per-pose failures and kernel-unavailable results. | Independently computed box intersections/poses, strict scope and work limits; live separated/overlapping/touching poses, nested frames and original-document preservation. |
+| Assembly pose checks (implemented and live checked) | Extend existing validation with caller-supplied rigid poses using temporary bodies. Preserve per-pose failures and kernel-unavailable results. | Independently computed box intersections/poses, strict scope and work limits; live separated/overlapping/touching poses, nested frames and original-document preservation. |
 
 Each PR receives independent review and automated checks before publication.
 Live testing has one coordinator and uses disposable synthetic documents. Never
@@ -28,4 +28,4 @@ turns them into passes. Physical fit, simulation service acceptance, entitlement
 changes and missing engineering measurements remain outside this increment.
 
 
-The preflight and durable changes have merged. Measurement and pose live fixtures and owned-document cleanup are complete; their changes remain pending integration. The [validation record](field-round2-validation.md) tracks observed results separately from pending work.
+All four increments are implemented and their scoped live fixtures and owned-document cleanup are complete. Integration review also found and fixed a combined-result receipt overflow; actual-receipt regressions preserve every status and core measurement while explicitly compacting diagnostics. The [validation record](field-round2-validation.md) distinguishes measured behavior, offline failure-path tests and remaining limitations.

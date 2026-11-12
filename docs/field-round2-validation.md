@@ -1,6 +1,6 @@
 # Field feedback: second-round validation
 
-This record separates completed live observations from offline tests and pending work. The live fixtures use disposable, owned Fusion documents; private designs and source files are not published or used as fixtures. Tests do not establish general behavior for other geometry, Fusion builds or license entitlements.
+This record separates completed live observations from offline tests and remaining limitations. The live fixtures use disposable, owned Fusion documents; private designs and source files are not published or used as fixtures. Tests do not establish general behavior for other geometry, Fusion builds or license entitlements.
 
 ## Extrusion preflight
 
@@ -31,6 +31,14 @@ Offline tests exercise temporary body copies, root-frame transforms, bounded pos
 ## Observed timings
 
 These single observations include different work and are not benchmarks or cache guarantees: preflight refusals, corrected extrusion and preservation inventory took about 4,447 ms; durable edit and readback took 265 ms; measurement recheck including inventory took 4,752 ms; and seven pose samples including inventory took 7,799 ms. They do not predict performance for other models or machines.
+
+## Final integration checks
+
+The integrated local suite passed 1,335 tests, with one directory-symlink test skipped because that capability was unavailable on the Windows host. Ruff, whitespace checks, the 0.6.0 wheel build and installed-wheel knowledge smoke test passed. A fresh stdio MCP process advertised 104 tools, exposed the durable-execution arguments and sampled-validation capabilities, searched its packaged knowledge and refused an empty validation request without contacting Fusion.
+
+Independent review reproduced receipt overflow in large face-pair batches and mixed pose/surface batches. The shared reducer now budgets the complete payload, retaining statuses, IDs, coordinates, scalar candidates and satisfying bounds while explicitly marking omitted diagnostic detail. Actual-receipt regressions cover 50 face pairs, large surface batches and 128 pose samples combined with 46 surface probes, including long control/Unicode names and native exceptions. An independent mixed reproduction retained all results in a 162,428-byte terminal receipt. These are offline serialization and recovery tests, not kernel verification.
+
+A subsequent live integration run repeated the seven pose cases with the same expected results. A single mixed surface/pose/bounds call returned pass/violation/pass, a 5.00001 mm surface upper bound and 500 mm³ overlap. Selected primary, protected and original-document witnesses remained unchanged; both owned documents were closed. Later diagnostic-size compaction changes did not change the geometry operations; their large-result paths were verified offline.
 
 ## Scope
 
