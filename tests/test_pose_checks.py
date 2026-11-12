@@ -1,9 +1,12 @@
 """Pose checks use a small independent box kernel, not Fusion geometry."""
+import json
 import math
+import uuid
 from types import SimpleNamespace as NS
 
 import pytest
 
+from fusion_cad_mcp import receipts
 from fusion_cad_mcp.tools.validation import build_validate_design, validate_design
 from tests._assembly_fakes import Collection, point
 from tests.test_validation import Adapter
@@ -191,3 +194,40 @@ def test_overlap_threshold_inclusive(monkeypatch):
     rows = validate_design(adapter, [check([pose('p', [15, 0, 0])], max_overlap_mm3=500),
                                      check([pose('p', [15, 0, 0])], max_overlap_mm3=499)]).result['checks']
     assert [row['status'] for row in rows] == ['pass', 'violation']
+
+
+def test_pose_diagnostic_budget_preserves_all_samples_in_receipt(monkeypatch, tmp_path):
+    adapter, kernel, _ = fixture(monkeypatch)
+    def fail(*args):
+        raise RuntimeError('\x00\u754c' * 5000)
+    kernel.booleanOperation = fail
+    ids = [f'{i:03}' + '\x01' * 20 for i in range(32)]
+    checks = [check([pose(name, [15, 0, 0]) for name in ids]) for _ in range(4)]
+    env = receipts.run_typed(adapter.execute_script, build_validate_design(checks), 'endpoint', 1,
+                             str(uuid.uuid4()), read_only=True, journal_dir=tmp_path)
+    assert env.ok, env
+    result = json.loads(env.message)
+    assert not result['passed']
+    assert len(result['checks']) == 4
+    rows = [row for group in result['checks'] for row in group['poses']]
+    assert len(rows) == 128
+    assert all(row['status'] == 'unavailable' and row['reason_truncated'] for row in rows)
+    assert all(len(json.dumps(row['reason'], ensure_ascii=True).encode()) - 2 <= 512 for row in rows)
+    terminal = tmp_path / (env.state['operation_id'] + '.terminal.json')
+    assert terminal.stat().st_size < 256 * 1024
+
+
+def test_pose_id_byte_limits_and_unstringifiable_exception(monkeypatch):
+    with pytest.raises(ValueError, match='escaped JSON bytes'):
+        build_validate_design([check([pose('\x00' * 22, [0, 0, 0])])])
+    with pytest.raises(ValueError, match='UTF-8'):
+        build_validate_design([check([pose('\u00e9' * 65, [0, 0, 0])])])
+    adapter, kernel, _ = fixture(monkeypatch)
+    class BadError(Exception):
+        def __str__(self): raise ValueError('unprintable')
+    def fail(*args): raise BadError()
+    kernel.booleanOperation = fail
+    result = validate_design(adapter, [check([pose('p', [15, 0, 0])])]).result
+    row = result['checks'][0]['poses'][0]
+    assert not result['passed'] and row['status'] == 'unavailable'
+    assert row['reason'] == 'exception message unavailable' and not row['reason_truncated']

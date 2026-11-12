@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
@@ -33,8 +34,15 @@ def prepare_pose(check: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(pose, dict) or set(pose) - {"id", "translation_mm", "rotation_deg", "rotation_axis", "pivot_mm"}:
             raise ValueError("pose has unsupported fields")
         name = pose.get("id")
-        if not isinstance(name, str) or not name or len(name) > 128 or name in ids:
-            raise ValueError("pose ids must be unique nonempty strings of at most 128 characters")
+        if not isinstance(name, str) or not name or name in ids:
+            raise ValueError("pose ids must be unique nonempty strings")
+        try:
+            valid_length = (len(name.encode("utf-8")) <= 128 and
+                            len(json.dumps(name, ensure_ascii=True).encode("utf-8")) - 2 <= 128)
+        except UnicodeEncodeError:
+            valid_length = False
+        if not valid_length:
+            raise ValueError("pose id must fit 128 UTF-8 bytes and 128 escaped JSON bytes")
         ids.add(name)
         translation = _vector(pose.get("translation_mm"), "translation_mm")
         angle = pose.get("rotation_deg", 0)
@@ -51,6 +59,19 @@ def prepare_pose(check: dict[str, Any]) -> dict[str, Any]:
 
 
 POSE_SCRIPT = '''
+def _pose_reason(exc):
+    try: detail = str(exc)
+    except Exception: detail = 'exception message unavailable'
+    # Return at most 512 bytes in the receipt's escaped JSON representation.
+    def size(value): return len(json.dumps(value, ensure_ascii=True).encode('utf-8')) - 2
+    if size(detail) <= 512: return detail, False
+    lo, hi = 0, len(detail)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if size(detail[:mid]) <= 512: lo = mid
+        else: hi = mid - 1
+    return detail[:lo], True
+
 def _pose_copy(manager, root, body):
     if not getattr(body, 'isSolid', False): raise ValueError('solid body required')
     if body.faces.count > 512: raise ValueError('body face limit exceeded')
@@ -104,7 +125,8 @@ def _pose_check(design, root, spec):
         if manager is None: raise ValueError('temporary BRep manager unavailable')
         stationary = _pose_copy(manager, root, bodies[1])
     except Exception as exc:
-        return dict(result, status='unavailable', reason=str(exc), poses=[])
+        reason, truncated = _pose_reason(exc)
+        return dict(result, status='unavailable', reason=reason, reason_truncated=truncated, poses=[])
     for pose in spec['poses']:
         try:
             moving = _pose_copy(manager, root, bodies[0])
@@ -124,7 +146,8 @@ def _pose_check(design, root, spec):
             rows.append({'id': pose['id'], 'status': 'pass' if volume <= spec['max_overlap_mm3'] else 'violation',
                          'overlap_mm3': volume, 'method': 'temporary BRep intersection'})
         except Exception as exc:
-            rows.append({'id': pose['id'], 'status': 'unavailable', 'reason': str(exc)})
+            reason, truncated = _pose_reason(exc)
+            rows.append({'id': pose['id'], 'status': 'unavailable', 'reason': reason, 'reason_truncated': truncated})
     status = 'violation' if any(r['status'] == 'violation' for r in rows) else ('unavailable' if any(r['status'] != 'pass' for r in rows) else 'pass')
     return dict(result, status=status, poses=rows, frame='root', units={'distance': 'mm', 'volume': 'mm^3'},
                 moving_body='body_a', scope='sampled poses only; not continuous motion or clearance')
