@@ -16,6 +16,7 @@ from ..execution import execute_typed_script
 from ..handles import emit_resolve, is_handle, parse_handle
 from ..measurement import DISTANCE_EVIDENCE_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
+from .pose_checks import POSE_SCRIPT, prepare_pose
 
 
 def _finite(value: Any) -> bool:
@@ -48,11 +49,19 @@ def _prepare(checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[s
     handles: dict[str, str] = {}
     probe_names: set[str] = set()
     face_budget = 0
+    pose_count = 0
     for index, check in enumerate(checks):
         if not isinstance(check, dict):
             raise ValueError(f"checks[{index}] must be an object")
         kind = check.get("type")
-        if kind == "clearance":
+        if kind == "pose_interference":
+            required = {"body_a", "body_b", "frame", "poses"}
+            allowed = required | {"type", "max_overlap_mm3"}
+            numeric = prepare_pose(check)
+            pose_count += len(numeric["poses"])
+            if pose_count > 128:
+                raise ValueError("at most 128 poses per call")
+        elif kind == "clearance":
             allowed, required = {"type", "body_a", "body_b", "min_mm"}, {"body_a", "body_b", "min_mm"}
             numeric = {"min_mm": _number(check.get("min_mm"), "min_mm")}
         elif kind == "interference":
@@ -132,7 +141,7 @@ def build_validate_design(checks: list[dict[str, Any]]) -> str:
         "import adsk.core, adsk.fusion, json, math\n"
         + RESOLVER_SCRIPT + "\n" + "\n".join(functions)
         + "\n_HANDLES = " + mapping + "\n_CHECKS = " + repr(prepared) + "\n"
-        + DISTANCE_EVIDENCE_SCRIPT + _SCRIPT
+        + DISTANCE_EVIDENCE_SCRIPT + POSE_SCRIPT + _SCRIPT
     )
 
 
@@ -403,6 +412,8 @@ def _interference(design, a, b):
 
 def _check(design, root, measure, spec):
     kind = spec['type']
+    if kind == 'pose_interference':
+        return _pose_check(design, root, spec)
     if kind == 'face_distance':
         return _face_pair_check(design, root, measure, spec)
     if kind == 'surface_distance':
