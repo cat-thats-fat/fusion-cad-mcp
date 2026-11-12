@@ -827,3 +827,40 @@ def test_terminal_followed_by_failure_is_unknown_and_never_replayed(monkeypatch,
     if not read_only:
         blocked = r.run_typed(send, SCRIPT, "endpoint", 1, journal_dir=tmp_path)
         assert blocked.error == "receipt_barrier"
+
+
+def test_generated_extrude_missing_sketch_releases_receipt_barrier(monkeypatch, tmp_path):
+    from fusion_cad_mcp.tools.features import build_extrude
+    from tests._assembly_fakes import Collection, ScriptAdapter, root_with
+
+    root = root_with(sketches=Collection([types.SimpleNamespace(name="Plate - Profile")]))
+    adapter = ScriptAdapter(monkeypatch, types.SimpleNamespace(rootComponent=root))
+    # Receipt instrumentation also reads the document identity from the application.
+    sys.modules["adsk.core"].Application.get().activeDocument = types.SimpleNamespace(creationId="doc-1")
+    op = str(uuid.uuid4())
+    script = build_extrude("Plate", extent_kind="all_positive")
+    result = r.run_typed(adapter.execute_script, script, "endpoint", 1, op, journal_dir=tmp_path)
+    assert not result.ok and result.error == "sketch_not_found"
+    assert result.result["mutation_state"] == "not_started"
+    assert r.get_status(op, journal_dir=tmp_path).result["status"] == "declared_not_started"
+    assert r.run_typed(adapter.execute_script, SCRIPT, "endpoint", 1, journal_dir=tmp_path).ok
+
+
+def test_generated_extrude_failed_add_keeps_receipt_barrier(monkeypatch, tmp_path):
+    from fusion_cad_mcp.tools.features import build_extrude
+    from tests._assembly_fakes import Collection, ScriptAdapter, root_with
+
+    sk = types.SimpleNamespace(name="Plate", profiles=Collection([object()]))
+    root = root_with(sketches=Collection([sk]))
+    root.features = types.SimpleNamespace(extrudeFeatures=types.SimpleNamespace(
+        createInput=lambda *a: types.SimpleNamespace(setAllExtent=lambda *a: None), add=lambda _: None))
+    app = types.SimpleNamespace(activeDocument=types.SimpleNamespace(creationId="doc-1"))
+    adapter = ScriptAdapter(monkeypatch, types.SimpleNamespace(rootComponent=root), app=app,
+        fusion={"FeatureOperations": types.SimpleNamespace(NewBodyFeatureOperation=1),
+                "ExtentDirections": types.SimpleNamespace(PositiveExtentDirection=1)})
+    op = str(uuid.uuid4())
+    result = r.run_typed(adapter.execute_script, build_extrude("Plate", extent_kind="all_positive"),
+                         "endpoint", 1, op, journal_dir=tmp_path)
+    assert result.error == "feature_creation_failed"
+    assert r.get_status(op, journal_dir=tmp_path).result["status"] == "declared_failure_unreconciled"
+    assert r.run_typed(adapter.execute_script, SCRIPT, "endpoint", 1, journal_dir=tmp_path).error == "receipt_barrier"
