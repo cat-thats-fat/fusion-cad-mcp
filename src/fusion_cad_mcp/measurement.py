@@ -37,6 +37,28 @@ def _distance_point(result, field, issues):
         issues.append(_measurement_issue(field, exc))
         return None
 
+def _face_membership(face, point_mm):
+    evidence = {'status': 'unavailable', 'method': 'Fusion BRepFace.isPointOnFace',
+                'tolerance_source': 'Application.pointTolerance default', 'tolerance_mm': None}
+    try:
+        tolerance = adsk.core.Application.get().pointTolerance * 10
+        if _distance_number(tolerance) and tolerance >= 0:
+            evidence['tolerance_mm'] = tolerance
+    except Exception:
+        pass
+    try:
+        if point_mm is None:
+            raise ValueError('surface witness point unavailable')
+        point = adsk.core.Point3D.create(*[x / 10 for x in point_mm])
+        member = face.isPointOnFace(point)
+        if type(member) is not bool:
+            raise ValueError('native face membership did not return a boolean')
+        evidence['status'] = 'on_face' if member else 'off_face'
+    except Exception as exc:
+        detail, truncated = _measurement_detail(exc)
+        evidence.update(detail=detail, detail_truncated=truncated)
+    return evidence
+
 def _distance_evidence(result, input_point_mm=None):
     evidence = {'minimum_distance_mm': None, 'closest_point_a_mm': None,
                 'closest_point_b_mm': None, 'units': 'mm',

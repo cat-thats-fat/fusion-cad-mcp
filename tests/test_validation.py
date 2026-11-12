@@ -27,6 +27,8 @@ class Adapter:
         modules["adsk"].fusion = modules["adsk.fusion"]
         modules["adsk.core"].Application = NS(get=lambda: self.app)
         modules["adsk.core"].ObjectCollection = NS(create=Collection)
+        modules["adsk.core"].Point3D = NS(create=point)
+        self.app.pointTolerance = 1e-7
         modules["adsk.fusion"].Design = NS(cast=lambda d: d)
         for name, module in modules.items():
             monkeypatch.setitem(sys.modules, name, module)
@@ -165,7 +167,8 @@ def _face_pair_adapter(monkeypatch, *, distance=10):
     adapter = Adapter(monkeypatch, [], distance=distance)
     owner = NS(parentComponent=adapter.root)
     faces = {
-        token: NS(objectType="adsk::fusion::BRepFace", body=owner, assemblyContext=None, token=token)
+        token: NS(objectType="adsk::fusion::BRepFace", body=owner, assemblyContext=None, token=token,
+                  isPointOnFace=lambda p: True)
         for token in ("left", "right")
     }
     adapter.design.findEntityByToken = lambda token: [faces[token]] if token in faces else []
@@ -214,7 +217,8 @@ def test_face_distance_uses_nested_root_proxies(monkeypatch):
     adapter.root.allOccurrences = Collection([occurrence])
     proxies = []
     for i, face in enumerate(native_faces.values()):
-        proxy = NS(body=owner, assemblyContext=occurrence, location=point(4 + i, 5, 6))
+        proxy = NS(body=owner, assemblyContext=occurrence, location=point(4 + i, 5, 6),
+                   isPointOnFace=lambda p: True)
         face.body = owner
         face.createForAssemblyContext = Mock(return_value=proxy)
         proxies.append(proxy)
@@ -337,6 +341,12 @@ def _box_surface_adapter(monkeypatch, *, occurrence_path=None):
         NS(axis=axis, coord=coord, assemblyContext=context, isValid=True)
         for axis, extent in enumerate([1, 2, 3]) for coord in (0, extent)
     ])
+    for face in target.faces.items:
+        def member(p, face=face):
+            local = to_local(p)
+            return abs(local[face.axis] - face.coord) <= 1e-7 and all(
+                -1e-7 <= x <= extent + 1e-7 for x, extent in zip(local, [1, 2, 3], strict=True))
+        face.isPointOnFace = member
     def measure(p, face):
         local = to_local(p)
         nearest = [min(max(x, 0), extent) for x, extent in zip(local, [1, 2, 3], strict=True)]
@@ -532,3 +542,99 @@ def test_large_probe_input_echo_does_not_discard_candidate_or_status(monkeypatch
     assert all(row["evidence"]["minimum_scalar_candidate"]["minimum_distance_mm"] > 0 for row in result["checks"])
     assert len(json.dumps(result, ensure_ascii=True, separators=(",", ":")).encode()) < 197632
     assert (tmp_path / (env.state["operation_id"] + ".terminal.json")).stat().st_size < receipts._MAX_RECORD
+
+
+def test_notched_box_void_rejects_consistent_zero_native_face_minimum(monkeypatch):
+    """Analytic finite planes plus a polygon hole, independent of native output.
+
+    The simulated native minimum ignores the hole in the top face. Its two points
+    and scalar are internally consistent, reproducing the live false-pass trigger.
+    Membership separately tests the finite patch and excludes the open hole.
+    """
+    import math
+
+    target = body("box", token="box", high=(2, 3, 1))
+    adapter = Adapter(monkeypatch, [target])
+    target.parentComponent = adapter.root
+    outer = [(0, 2), (0, 3), (0, 1)]
+    notch = [(0.95, 1.05), (1.45, 1.55), (0.9, 1)]
+    faces = []
+
+    def patch(axis, coord, ranges, *, hole=False):
+        face = NS(axis=axis, coord=coord, ranges=ranges, assemblyContext=None, isValid=True)
+        def member(p):
+            values = [p.x, p.y, p.z]
+            on_patch = abs(values[axis] - coord) < 1e-7 and all(
+                low - 1e-7 <= x <= high + 1e-7
+                for x, (low, high) in zip(values, ranges, strict=True))
+            in_void = hole and notch[0][0] < p.x < notch[0][1] and notch[1][0] < p.y < notch[1][1]
+            return on_patch and not in_void
+        face.isPointOnFace = member
+        return face
+
+    for axis in (0, 1):
+        faces.extend(patch(axis, coord, outer) for coord in outer[axis])
+    faces.append(patch(2, 0, outer))
+    for axis in (0, 1):
+        faces.extend(patch(axis, coord, notch) for coord in notch[axis])
+    faces.append(patch(2, 1, outer, hole=True))  # Native face 9: top with a void.
+    faces.append(patch(2, 0.9, notch))
+    target.faces = Collection(faces)
+
+    def native(p, face):
+        values = [p.x, p.y, p.z]
+        projected = [min(max(x, low), high) for x, (low, high) in zip(values, face.ranges, strict=True)]
+        projected[face.axis] = face.coord
+        return NS(value=math.dist(values, projected), positionOne=p, positionTwo=point(*projected))
+
+    adapter.app.measureManager.measureMinimumDistance.side_effect = native
+    query = [10, 15, 10]
+    result = validate_design(adapter, [surface_check(point_mm=query, max_faces=11, max_mm=0.1)]).result
+    row = result["checks"][0]
+    evidence = row["evidence"]
+    candidate = evidence["minimum_scalar_candidate"]
+    assert not result["passed"] and row["status"] == "unavailable"
+    assert evidence["faces_attempted"] == evidence["faces_measured"] == 11
+    assert evidence["faces_valid"] == 10 and evidence["face_failure_count"] == 1
+    assert candidate["face_index"] == 9 and candidate["minimum_distance_mm"] == 0
+    assert candidate["closest_point_a_mm"] == candidate["closest_point_b_mm"] == query
+    assert candidate["witness_consistency"]["status"] == "consistent"
+    assert candidate["surface_membership"]["status"] == "off_face"
+    # Independent distance to the rectangular notch walls/floor is 0.5mm.
+    true_distance_mm = 10 * min(1 - 0.95, 1.05 - 1, 1.5 - 1.45, 1.55 - 1.5, 1 - 0.9)
+    assert true_distance_mm == pytest.approx(0.5)
+    # The valid alternatives are not silently selected as an established minimum.
+    assert candidate["minimum_distance_mm"] != pytest.approx(true_distance_mm)
+
+
+@pytest.mark.parametrize("mode,status", [("false", "off_face"), ("missing", "unavailable"),
+    ("raises", "unavailable"), ("nonboolean", "unavailable")])
+def test_surface_probe_requires_native_trimmed_face_membership(monkeypatch, mode, status):
+    adapter, target = _box_surface_adapter(monkeypatch)
+    first = target.faces.item(0)
+    if mode == "missing":
+        del first.isPointOnFace
+    elif mode == "raises":
+        first.isPointOnFace = Mock(side_effect=RuntimeError("native membership unavailable"))
+    else:
+        first.isPointOnFace = lambda p: False if mode == "false" else None
+    result = validate_design(adapter, [surface_check(max_mm=999, tolerance_mm=999)]).result
+    row = result["checks"][0]
+    assert not result["passed"] and row["status"] == "unavailable"
+    failure, = row["evidence"]["face_failures"]
+    assert failure["evidence"]["witness_consistency"]["status"] == "consistent"
+    assert failure["evidence"]["surface_membership"]["status"] == status
+    assert row["evidence"]["minimum_scalar_candidate"]["minimum_distance_mm"] > 0
+
+
+@pytest.mark.parametrize("member", [False, None])
+def test_face_distance_requires_membership_of_both_witnesses(monkeypatch, member):
+    adapter, faces = _face_pair_adapter(monkeypatch)
+    faces["right"].isPointOnFace = lambda p: member
+    result = validate_design(adapter, [face_pair_check(max_mm=100)]).result
+    row = result["checks"][0]
+    assert row["status"] == "unavailable" and not result["passed"]
+    assert row["evidence"]["minimum_distance_mm"] == 10
+    assert row["evidence"]["witness_consistency"]["status"] == "consistent"
+    assert row["evidence"]["face_membership"]["a"]["status"] == "on_face"
+    assert row["evidence"]["face_membership"]["b"]["status"] == ("off_face" if member is False else "unavailable")

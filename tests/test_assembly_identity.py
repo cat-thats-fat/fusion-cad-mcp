@@ -43,8 +43,8 @@ def test_measure_restores_or_retains_selected_assembly_context(monkeypatch, exis
     occ2 = occurrence("Parent:2+Leaf:1")
     root = root_with(occurrences=[occ1, occ2])
     face_type = "adsk::fusion::BRepFace"
-    first_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ1)
-    second_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ2)
+    first_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ1, isPointOnFace=lambda p: True)
+    second_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ2, isPointOnFace=lambda p: True)
     proxies = {id(occ1): first_proxy, id(occ2): second_proxy}
     native = SimpleNamespace(
         objectType=face_type, createForAssemblyContext=Mock(side_effect=lambda occ: proxies[id(occ)])
@@ -60,7 +60,8 @@ def test_measure_restores_or_retains_selected_assembly_context(monkeypatch, exis
     ]
 
     assert parse_handle(handles[1])["path"].endswith("|occ=Parent:2+Leaf:1")
-    env = handle_tools.measure(ScriptAdapter(monkeypatch, design, app=app), *handles, "min_distance")
+    env = handle_tools.measure(ScriptAdapter(monkeypatch, design, app=app,
+                                           core={"Point3D": SimpleNamespace(create=point)}), *handles, "min_distance")
 
     assert env.ok is True
     assert env.result["value_mm"] == 35

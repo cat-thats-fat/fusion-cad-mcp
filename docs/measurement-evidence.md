@@ -29,8 +29,14 @@ scalar, native witness positions and `witness_consistency`:
 Finite scalars and readable coordinates survive witness failure. Non-finite scalar
 representations and field errors remain JSON-safe diagnostics. `scalar_valid`
 requires a finite nonnegative scalar and a valid native result; it does not assert
-that Fusion computed the correct geometric minimum. Consistency does not prove
-that points lie on the surfaces. The helper relies on the native API for geometry.
+that Fusion computed the correct geometric minimum. Consistency alone does not
+prove that points lie on the surfaces. Face witnesses additionally require native
+`BRepFace.isPointOnFace` membership, which accounts for trimmed boundaries and
+voids. `surface_membership` records the selected face's second witness check;
+`face_membership.a/b` record both face-distance witnesses. `measure` applies the
+same checks to each input whose handle kind is `face`; other entity kinds retain
+the scalar/separation consistency contract. Native membership is additional
+evidence, not an independent nearest-point solver.
 
 The numerical test uses `1e-6 mm + 64 * ulp(scale)`, where scale is the maximum of
 1 mm, absolute witness coordinates and distance. The absolute floor is a chosen
@@ -39,12 +45,16 @@ It is independent of caller acceptance thresholds. This is not an Autodesk kerne
 precision guarantee; a later live synthetic test must assess actual platform
 behavior. Widening `max_mm` or `tolerance_mm` cannot hide a contradiction.
 
-Face and surface validation return `unavailable` on witness failure. Clearance
+Face and surface validation return `unavailable` on witness failure or false,
+missing, raised or nonboolean native face membership. Membership uses the API's
+default `Application.pointTolerance` in cm, separately reported in mm when
+readable. Caller acceptance thresholds never widen this membership tolerance.
+Clearance
 also returns unavailable unless interference independently establishes a
 violation, in which case that violation is preserved. Aggregate `passed` is false
 when any check is unavailable. `measure` distance/min_distance return `ok:false`
 with `measurement_witness_unavailable` for witness failure while retaining the
-scalar; invalid native scalars/results and native call exceptions use
+scalar, including rejected face membership; invalid native scalars/results and native call exceptions use
 `measurement_unavailable`. Angles keep their existing contract. Existing distance
 point arrays remain in cm; the added `distance_evidence` uses mm.
 
@@ -77,10 +87,12 @@ refuses missing/ambiguous/stale document/entity/occurrence resolution and refuse
 component-local geometry when a root context cannot be established.
 
 The implementation measures the caller's root-frame Point3D against every
-trimmed face on the selected B-rep body. Enumerating faces makes this a surface
-query for interior points too, avoiding reliance on a solid-volume distance
-interpretation. The native API supports these input types. All faces must yield
-usable measurements; a failed face cannot be silently omitted. The smallest
+B-rep face on the selected body, then validates the returned face witness against
+that face's trimmed boundaries. Enumerating faces avoids a solid-volume distance
+interpretation for interior points. The native API supports these input types,
+but observed minima can ignore a face's voids. All faces must yield usable,
+consistent measurements and on-face witnesses; a failed face cannot be silently
+omitted, even if another face supplies an apparently valid alternative. The smallest
 returned finite scalar is retained under `minimum_scalar_candidate`, with native
 positions and face index. `face_failures` retains representative exceptions and
 contradictory or missing witnesses: at most three entries and 2048 escaped-JSON
@@ -110,6 +122,25 @@ distance, full surface equivalence, a complete cross-section comparison,
 containment, an absence of self-intersections, or downstream solver acceptance.
 Bounds, volume, topology and local probes answer different questions.
 
+## Live limitation: native face minima can ignore a void
+
+A separate synthetic fixture on Fusion 2706.1.17 exported/imported a 20 x 30 x
+10 mm box, then cut a 1 mm cube notch from the top of the imported body. Bounds
+were unchanged and volume changed from 6000 to 5999 mm3. At the center of the
+notch opening, the API returned zero distance to the top face, with two identical
+witnesses and consistent scalar/separation. `isPointOnFace` returned false: the
+point was inside the face's void. The independently known surface distance was
+0.5 mm. Some other face results also failed membership; a whole-body measurement
+returned scalar 0.5 mm with inconsistent witness coordinates.
+
+The earlier consistency-only implementation falsely passed this control. The
+membership gate now makes such results unavailable while retaining the raw zero
+candidate and the failed membership evidence. It does not repair Fusion's native
+measurement, discard the invalid face, or establish a replacement minimum from
+other faces. This conservative result is deliberate. A revised live fixture must
+confirm the changed tool behavior; offline regression tests cover the same void
+failure with independently computed finite-patch/hole membership.
+
 ## Offline verification
 
 The tests execute generated scripts against local API doubles, and independently
@@ -122,9 +153,9 @@ before native calls, reject stale/foreign/ambiguous handles and retain an
 independent interference violation. These are synthetic tests, not a Fusion
 kernel or STEP fidelity test.
 
-No live Fusion calls were made: another agent was using the active R6 session.
-No export roundtrip was attempted. Live capability/precision results remain
-unverified.
+The initial implementation was developed offline while another agent used the
+active R6 session. The separate subsequent synthetic observations above exposed
+the trimming failure; the revised membership gate requires its own live rerun.
 
 The full offline suite is rerun after changes, along with Ruff checks on changed
 Python files and `git diff --check`. Receipt integration tests execute the actual
@@ -170,9 +201,14 @@ record the Fusion build/API version, document scope, units and all full envelope
   defines the native scalar/position properties and result validity.
 - [Autodesk measure sample](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/MeasureSample_Sample.htm)
   demonstrates transient point and B-rep measurement.
+- [BRepFace.isPointOnFace](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_BRepFace_isPointOnFace.htm)
+  checks face boundaries/voids with a cm tolerance, defaulting to the application
+  point tolerance; introduced September 2024.
 
 The installed Autodesk API Python package was inspected offline at the
 installation-relative `API/Python/packages/adsk/core.py`,
 `MeasureManager.measureMinimumDistance`. Its documented supported
 types and cm output agree with the official pages. This inspection establishes
 the installed binding signature, not successful live kernel behavior.
+The installation-relative `API/Python/packages/adsk/fusion.py` also exposes
+`BRepFace.isPointOnFace(point, tolerance=0)` with the documented boundary behavior.

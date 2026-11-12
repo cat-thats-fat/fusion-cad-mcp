@@ -77,6 +77,8 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
         raise ValueError(f"kind must be one of {sorted(MEASURE_KINDS)}, got {kind!r}")
     resolve_a = _indent4(emit_resolve(entity_a, var="_a"))
     resolve_b = _indent4(emit_resolve(entity_b, var="_b"))
+    face_a = parse_handle(entity_a)["kind"] == "face"
+    face_b = parse_handle(entity_b)["kind"] == "face"
 
     if kind in {"distance", "min_distance"}:
         measure_call = """try:
@@ -85,7 +87,12 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
         detail, truncated = _measurement_detail(exc)
         print(json.dumps({'ok': False, 'error': 'measurement_unavailable', 'detail': detail, 'detail_truncated': truncated})); return
     evidence = _distance_evidence(result)
-    valid = evidence['scalar_valid'] and evidence['witness_consistency']['status'] == 'consistent'
+    memberships = {}
+    if FACE_A: memberships['a'] = _face_membership(_a, evidence['closest_point_a_mm'])
+    if FACE_B: memberships['b'] = _face_membership(_b, evidence['closest_point_b_mm'])
+    if memberships: evidence['face_membership'] = memberships
+    valid = (evidence['scalar_valid'] and evidence['witness_consistency']['status'] == 'consistent'
+             and all(item['status'] == 'on_face' for item in memberships.values()))
     report = {'ok': valid, 'kind': KIND, 'value_mm': evidence['minimum_distance_mm'],
               'value_cm': evidence['minimum_distance_mm'] / 10 if evidence['minimum_distance_mm'] is not None else None,
               'distance_evidence': evidence}
@@ -94,7 +101,7 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
     if KIND == 'distance':
         report['point_a_cm'] = [x / 10 for x in evidence['closest_point_a_mm']] if evidence['closest_point_a_mm'] is not None else None
         report['point_b_cm'] = [x / 10 for x in evidence['closest_point_b_mm']] if evidence['closest_point_b_mm'] is not None else None
-""".replace("KIND", repr(kind)).rstrip()
+""".replace("KIND", repr(kind)).replace("FACE_A", repr(face_a)).replace("FACE_B", repr(face_b)).rstrip()
         report = "report"
     else:  # angle
         measure_call = "result = app.measureManager.measureAngle(_a, _b)"

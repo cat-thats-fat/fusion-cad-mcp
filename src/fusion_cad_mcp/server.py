@@ -1375,6 +1375,8 @@ def validate_design(checks: list[dict]) -> CallToolResult:
     in 1..512 (sum <=4096). It measures the point against every body face; excess faces are unavailable.
     It is a sampled directional surface check, not Hausdorff distance or full export equivalence.
     Native scalar/witness contradictions retain scalar evidence and cannot pass distance validation.
+    Face/surface witnesses must also pass native trimmed-face membership; false or unavailable
+    isPointOnFace results retain raw scalar candidates and make validation unavailable.
     Body selectors accept names, occurrence-qualified names or body handles. Clearance uses B-rep
     measurement plus interference. Bounds are conservative root-axis boxes, not cavity containment.
     Read result.passed and each status: pass, violation or unavailable. No unchecked result passes.

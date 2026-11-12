@@ -146,7 +146,8 @@ def _face_failure(evidence, failure):
     global _FACE_DIAGNOSTIC_BYTES
     evidence['face_failure_count'] += 1
     issues = failure.get('evidence', {}).get('witness_consistency', {}).get('issues', [])
-    if failure.get('detail_truncated') or any(issue.get('detail_truncated') for issue in issues):
+    membership = failure.get('evidence', {}).get('surface_membership', {})
+    if failure.get('detail_truncated') or membership.get('detail_truncated') or any(issue.get('detail_truncated') for issue in issues):
         evidence['diagnostics_truncated'] = True
     size = _json_size(failure)
     if len(evidence['face_failures']) < 3 and size <= min(2048 - evidence['_failure_bytes'], _FACE_DIAGNOSTIC_BYTES):
@@ -199,14 +200,19 @@ def _face_distance(measure, a, b, spec):
     try:
         evidence = _distance_evidence(measure.measureMinimumDistance(a, b))
         evidence['frame'] = 'root'
+        evidence['face_membership'] = {
+            'a': _face_membership(a, evidence['closest_point_a_mm']),
+            'b': _face_membership(b, evidence['closest_point_b_mm']),
+        }
     except Exception as exc:
         detail, truncated = _measurement_detail(exc)
         return dict(result, status='unavailable', reason={
             'error': 'face_distance_unavailable', 'detail': detail, 'detail_truncated': truncated,
         })
-    if not evidence['scalar_valid'] or evidence['witness_consistency']['status'] != 'consistent':
+    if (not evidence['scalar_valid'] or evidence['witness_consistency']['status'] != 'consistent'
+            or any(item['status'] != 'on_face' for item in evidence['face_membership'].values())):
         return dict(result, status='unavailable', evidence=evidence,
-                    reason={'error': 'face_distance_unavailable', 'detail': 'native distance witness not consistent'})
+                    reason={'error': 'face_distance_unavailable', 'detail': 'native witness consistency or trimmed-face membership unavailable'})
     distance_mm = evidence['minimum_distance_mm']
     tolerance = spec['tolerance_mm']
     passes = spec.get('min_mm', 0) - tolerance <= distance_mm <= spec.get('max_mm', math.inf) + tolerance
@@ -277,10 +283,12 @@ def _surface_distance(design, root, measure, spec):
             evidence['faces_measured'] += 1
             sample = _distance_evidence(native_result, spec['point_mm'])
             sample['face_index'] = index
+            sample['surface_membership'] = _face_membership(face, sample['closest_point_b_mm'])
             value = sample['minimum_distance_mm']
             if value is not None and (evidence['minimum_scalar_candidate'] is None or value < evidence['minimum_scalar_candidate']['minimum_distance_mm']):
                 evidence['minimum_scalar_candidate'] = sample
-            if not sample['scalar_valid'] or sample['witness_consistency']['status'] != 'consistent':
+            if (not sample['scalar_valid'] or sample['witness_consistency']['status'] != 'consistent'
+                    or sample['surface_membership']['status'] != 'on_face'):
                 _face_failure(evidence, {'face_index': index, 'evidence': sample})
             else:
                 evidence['faces_valid'] += 1
