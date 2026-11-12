@@ -9,7 +9,13 @@ import pytest
 from fusion_cad_mcp import receipts
 from fusion_cad_mcp.tools.validation import build_validate_design, validate_design
 from tests._assembly_fakes import Collection, point
-from tests.test_validation import Adapter
+from tests.test_validation import (
+    Adapter,
+    _assert_bounded_receipt,
+    _box_surface_adapter,
+    _receipt_validation,
+    surface_check,
+)
 
 
 class Box:
@@ -231,3 +237,57 @@ def test_pose_id_byte_limits_and_unstringifiable_exception(monkeypatch):
     row = result['checks'][0]['poses'][0]
     assert not result['passed'] and row['status'] == 'unavailable'
     assert row['reason'] == 'exception message unavailable' and not row['reason_truncated']
+
+
+@pytest.mark.parametrize('character', ['\x01', '😀'])
+def test_combined_maximum_pose_and_surface_diagnostics_fit_real_receipt(monkeypatch, tmp_path, character):
+    path = 'Parent:1+' + 'x' * 270
+    adapter, target = _box_surface_adapter(monkeypatch, occurrence_path=path)
+    import adsk.core
+    import adsk.fusion
+    target.assemblyContext.bRepBodies = Collection([])
+    for name, low, high in [('a', (0, 0, 0), (1, 2, 1)), ('b', (2, 0, 0), (3, 1, 1))]:
+        adapter.root.bRepBodies.add(Box(name, low, high, adapter.root))
+    adsk.core.Matrix3D = NS(create=Matrix)
+    adsk.core.Vector3D = NS(create=point)
+    kernel = Kernel()
+    def failed_intersection(*args):
+        raise RuntimeError('\x00界' * 50000)
+    kernel.booleanOperation = failed_intersection
+    adsk.fusion.TemporaryBRepManager = NS(get=lambda: kernel)
+    adsk.fusion.BooleanTypes = NS(IntersectionBooleanType=1)
+    native = adapter.app.measureManager.measureMinimumDistance.side_effect
+    def partly_failed(p, face):
+        if any(face is selected for selected in target.faces.items[:3]):
+            raise RuntimeError('\x00界' * 50000)
+        return native(p, face)
+    adapter.app.measureManager.measureMinimumDistance.side_effect = partly_failed
+    # IDs use exactly the accepted 128 escaped bytes; names use all 100 allowed
+    # characters, testing both control expansion and astral surrogate expansion.
+    ids = [f'{index:02d}' + '\x01' * 21 for index in range(32)]
+    checks = [check([pose(name, [15, 0, 0]) for name in ids]) for _ in range(4)]
+    names = [f'{index:02d}' + character * 98 for index in range(46)]
+    checks += [surface_check(name=name, body=f'body:box|occ={path}|doc=646f63:box',
+                             point_mm=[15, 65, 95], max_mm=1000) for name in names]
+    env = _receipt_validation(adapter, checks, tmp_path)
+    _assert_bounded_receipt(env, tmp_path)
+    assert not env.result['passed'] and len(env.result['checks']) == 50
+    assert env.result['output_compaction'] != ['input_echoes']
+    for group in env.result['checks'][:4]:
+        assert group['status'] == 'unavailable'
+        assert [row['id'] for row in group['poses']] == ids
+        assert all(row['status'] == 'unavailable' and row['reason_truncated'] for row in group['poses'])
+    assert [row['evidence']['name'] for row in env.result['checks'][4:]] == names
+    for group in env.result['checks'][4:]:
+        evidence = group['evidence']
+        assert group['status'] == 'pass' and evidence['proof'] == 'validated_witness_upper_bound'
+        assert evidence['face_failure_count'] == 3
+        assert evidence['face_failures_omitted'] + len(evidence['face_failures']) == 3
+        for sample in (evidence['minimum_scalar_candidate'], evidence['satisfying_witness']):
+            assert sample['scalar_valid'] and sample['minimum_distance_mm'] > 0
+            assert sample['witness_consistency']['status'] == 'consistent'
+            assert sample['surface_membership']['status'] == 'on_face'
+            assert sample['surface_membership']['tolerance_mm'] == 1e-6
+            assert len(sample['closest_point_a_mm']) == len(sample['closest_point_b_mm']) == 3
+            assert len(sample['surface_membership']['membership_point_mm']) == 3
+        assert evidence['satisfying_witness']['witness_upper_bound_mm'] <= 1000

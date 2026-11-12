@@ -10,6 +10,8 @@
 
 The check resolves current bodies and occurrence contexts, copies native BReps, applies occurrence and pose transforms to temporary copies, and uses a temporary intersection. Originals are never moved or inserted into the model. Strictly disjoint axis-aligned boxes prove zero overlap. Contact, failed Boolean operations, empty/non-solid Boolean output, stale selectors, and invalid geometry may be unavailable; unavailable is not a pass. The limit is 32 poses per check, 128 per call, 512 faces per body and 1,024 per pair.
 
+Large combined validation responses may compact diagnostic text and repeated metadata, marking the response and affected checks. Check and sample statuses, pose IDs, scalar candidates and witness upper bounds remain; omitted input echoes retain their check indices.
+
 These are discrete caller-supplied poses, not a continuous-motion proof, path planner, clearance measurement, or moving-tool envelope. Include every relevant moving body and stationary obstacle in separate checks, sample appropriate poses, and inspect all statuses. Geometry and kernel tolerances can make intersections unavailable. Test representative model geometry in the installed Fusion version before relying on results.
 
 Fusion's documented [temporary Boolean operation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_TemporaryBRepManager_booleanOperation.htm), [temporary transform](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_TemporaryBRepManager_transform.htm), and [occurrence transform2](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_Occurrence_transform2.htm) describe the native operations used here.
