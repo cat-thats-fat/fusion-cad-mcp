@@ -509,7 +509,13 @@ Shared behavior across this group:
 - `name` always renames *after* creation, so the returned `feature_name` is your name.
 - Plane and axis arguments accept the principal names (`xy`/`xz`/`yz`, `x`/`y`/`z`, lowercased) or the exact case-sensitive name of root construction geometry.
 
-## `extrude(sketch, profile_index=0, operation="new_body", extent_kind="distance", expression=None, direction="positive", is_full_length=True, participants=None, name=None)`
+## `extrude(sketch, profile_index=0, operation="new_body", extent_kind="distance", expression=None, direction="positive", is_full_length=True, participants=None, name=None, operation_id=None)`
+
+Retain an optional operation UUID before dispatch. Explicit target/profile/participant
+refusals before feature addition report `mutation_state: "not_started"`; a corrected
+request uses a new UUID. Failures after an attempted add remain unresolved until
+inspection establishes their effects. Reusing the same UUID does not rerun a
+completed request; different inputs with that UUID are refused.
 
 | `extent_kind` | Requires | Also uses |
 |---|---|---|
