@@ -2,16 +2,15 @@
 
 ## Motivation and evidence boundary
 
-The retained E30 field run `20261109-200528-simscale` passed its declared STEP
-bounds/volume checks while 10 of 49 sampled section boundary comparisons failed
-0.05 mm, with maximum point-to-segment difference 1.342516 mm. Its
-`08-local-native-surface-witness.json` retained a native distance of about
-0.777739 mm to the source versus 0.0000584 mm to the STEP import. The native
+An external field run passed its declared STEP bounds/volume checks while 10 of
+49 sampled section boundary comparisons failed 0.05 mm, with maximum
+point-to-segment difference 1.342516 mm. Retained native measurements reported
+about 0.777739 mm to the source versus 0.0000584 mm to the STEP import. The native
 `positionTwo` repeated the input point despite nonzero distance. That is a
 contradictory position witness, not evidence that the scalar is necessarily wrong.
 Independent section evidence and native scalar evidence must remain available.
 
-These changes do not repair that STEP translation, retest the E30 model or certify
+These changes do not repair that STEP translation, retest the source model or certify
 an export. They provide a reusable, bounded way to expose contradictory native
 witnesses and rerun explicitly named local surface probes.
 
@@ -38,19 +37,35 @@ same checks to each input whose handle kind is `face`; other entity kinds retain
 the scalar/separation consistency contract. Native membership is additional
 evidence, not an independent nearest-point solver.
 
+For two face inputs, native witness order is checked against both selected faces.
+If the original assignment fails and both swapped assignments pass membership,
+a valid consistent measurement can be reassigned explicitly. `witness_order` is
+`swapped_to_match_entities`; `native_witnesses` retains the original coordinates
+and memberships. Accepted checks are in `face_membership`; failed alternate
+assignments retain `swapped_face_membership` diagnostics.
+Otherwise order stays `as_returned`. Already valid or identical/shared-edge points
+are not reordered. Scalar and separation are unchanged.
+
 The numerical test uses `1e-6 mm + 64 * ulp(scale)`, where scale is the maximum of
 1 mm, absolute witness coordinates and distance. The absolute floor is a chosen
 diagnostic allowance, and the ulp term allows coordinate subtraction/roundoff.
 It is independent of caller acceptance thresholds. This is not an Autodesk kernel
-precision guarantee; a later live synthetic test must assess actual platform
-behavior. Widening `max_mm` or `tolerance_mm` cannot hide a contradiction.
+precision guarantee; the selected live fixtures below establish only the reported
+platform behavior. Widening `max_mm` or `tolerance_mm` cannot hide a contradiction.
 
-Face and surface validation return `unavailable` on witness failure or false,
-missing, raised or nonboolean native face membership. Membership uses the API's
-default `Application.pointTolerance` in cm, separately reported in mm when
-readable. Caller acceptance thresholds never widen this membership tolerance.
-Clearance
-also returns unavailable unless interference independently establishes a
+Face-distance validation returns `unavailable` on witness failure or false,
+missing, raised or nonboolean native face membership. Surface maximum checks
+can pass using a separate valid upper-bound witness, as described below.
+Membership passes a finite positive `Application.pointTolerance` explicitly in
+cm, separately reported in mm. Zero is refused because it is the API's default
+sentinel. Caller acceptance thresholds never widen this membership tolerance.
+For a proxy face, the root-frame point is transformed using an inverted copy of
+`assemblyContext.transform2` and queried on `nativeObject` in component-local
+coordinates. Missing native face/context, failed inversion/point transform or
+non-finite coordinates fail closed. Evidence records input/local points,
+conversion and a bounded occurrence-path diagnostic. No point snapping, tolerance
+increase or alternative nearest-point solver is used.
+Clearance also returns unavailable unless interference independently establishes a
 violation, in which case that violation is preserved. Aggregate `passed` is false
 when any check is unavailable. `measure` distance/min_distance return `ok:false`
 with `measurement_witness_unavailable` for witness failure while retaining the
@@ -90,9 +105,8 @@ The implementation measures the caller's root-frame Point3D against every
 B-rep face on the selected body, then validates the returned face witness against
 that face's trimmed boundaries. Enumerating faces avoids a solid-volume distance
 interpretation for interior points. The native API supports these input types,
-but observed minima can ignore a face's voids. All faces must yield usable,
-consistent measurements and on-face witnesses; a failed face cannot be silently
-omitted, even if another face supplies an apparently valid alternative. The smallest
+but observed minima can ignore a face's voids. All faces are attempted within the
+declared budget and every failed face is counted. The smallest
 returned finite scalar is retained under `minimum_scalar_candidate`, with native
 positions and face index. `face_failures` retains representative exceptions and
 contradictory or missing witnesses: at most three entries and 2048 escaped-JSON
@@ -102,10 +116,27 @@ and field-issue text is bounded to 256 escaped-JSON bytes with truncation flags.
 the number and presence of every failure even after detailed diagnostics are
 omitted. `faces_attempted` counts native calls, `faces_measured` counts returned
 calls (including malformed results), and `faces_valid` counts usable measurements.
-Any failure still makes the check unavailable. Large output can omit input check
+Large output can omit input check
 echoes, reporting `check_index` and `input_echo_omitted`; every check status and
-minimum scalar candidate remains. Passing compares that scalar with
-`max_mm + tolerance_mm`.
+minimum scalar candidate remains.
+
+A usable scalar/separation-consistent, on-face witness supplies a conservative
+upper bound without claiming that it is the closest point. The actual
+query-to-witness separation plus the finite known application point tolerance is
+stored as `satisfying_witness.witness_upper_bound_mm`. If it is at most
+`max_mm + tolerance_mm`, the maximum requirement passes with
+`proof: validated_witness_upper_bound`. Other faces can remain unavailable;
+their failures and the unvalidated raw minimum candidate remain visible. Unknown
+membership tolerance cannot prove this bound. A strict zero maximum can be
+unavailable even at a nominal surface point because native membership has a
+positive tolerance. `proof_scope` identifies this native tolerance qualification.
+
+Without a satisfying witness, `violation` requires every face measurement to be
+usable and the minimum native scalar to exceed the maximum plus acceptance
+tolerance. Its `proof: native_face_minima_above_maximum` is explicitly conditional
+on the correctness of the native minima, not an independent global proof.
+Otherwise the result is unavailable. Faces are never discarded to claim an
+established replacement minimum.
 
 For translation comparison, retain the same named root points, units, frame,
 thresholds and source provenance; acquire current handles separately in the
@@ -134,12 +165,44 @@ point was inside the face's void. The independently known surface distance was
 returned scalar 0.5 mm with inconsistent witness coordinates.
 
 The earlier consistency-only implementation falsely passed this control. The
-membership gate now makes such results unavailable while retaining the raw zero
-candidate and the failed membership evidence. It does not repair Fusion's native
+membership gate makes tight maximum checks unavailable when no acceptable bound
+is established, while retaining the raw zero candidate and failed membership.
+A relaxed maximum can pass if a separately validated witness and its native
+membership tolerance establish that upper bound. This does not repair Fusion's native
 measurement, discard the invalid face, or establish a replacement minimum from
-other faces. This conservative result is deliberate. A revised live fixture must
-confirm the changed tool behavior; offline regression tests cover the same void
-failure with independently computed finite-patch/hole membership.
+other faces. A separate opposite-plane live measurement also returned its two
+positions in reversed entity order; both swapped memberships passed, supporting
+the explicit reassignment above. Native membership also returned false for
+proxy-face centers and for tiny off-plane perturbations when using the documented
+default tolerance. Querying the native face after inverse occurrence conversion
+with an explicit, unchanged application point tolerance succeeded. These findings
+motivate the coordinate/tolerance handling above; they are not claims that the
+underlying API has been repaired.
+
+## Selected live verification
+
+The revised tools were tested on separate synthetic fixtures in Fusion
+2706.1.17. The application point tolerance was 0.00001 mm. The complete recheck,
+including document inventories, took about 4.75 seconds; this is a scoped fixture
+observation, not a general performance benchmark.
+
+| Check | Observed evidence and result |
+| --- | --- |
+| Box exterior/interior | 5 mm valid witnesses, conservative upper bounds 5.00001 mm; pass |
+| Box edge | Zero separation, upper bound 0.00001 mm; pass under 0.001 mm maximum |
+| Nested rotated/translated box | Native-component membership after inverse occurrence conversion; upper bound 5.00001 mm; pass |
+| Opposite box faces and direct measure | 10 mm scalar; both native positions reversed; explicit reassignment passed |
+| Cylinder exterior | 5 mm scalar with inconsistent witnesses; unavailable |
+| Cylinder interior | Raw 10 mm candidate inconsistent; a separate valid cap witness established upper bound 10.00001 mm; requested maximum passed without a minimum claim |
+| Stale handle / face budget | Refused with no successful validation |
+| Original and STEP-import fixture | Selected on-surface probes passed |
+| Notched import, 0.05 mm maximum | Bounds unchanged, volume 6000 to 5999 mm3; raw zero candidate off-face; unavailable |
+| Same notch, 0.6 mm maximum | Separate 0.5 mm witness, conservative upper bound 0.50001 mm; pass |
+
+Both owned fixture documents were closed; the original three documents and their
+protected state remained intact. The results establish these selected synthetic
+requirements only. They do not certify arbitrary imported geometry or establish
+a global minimum where native face measurements remain unavailable.
 
 ## Offline verification
 
@@ -154,18 +217,23 @@ independent interference violation. These are synthetic tests, not a Fusion
 kernel or STEP fidelity test.
 
 The initial implementation was developed offline while another agent used the
-active R6 session. The separate subsequent synthetic observations above exposed
-the trimming failure; the revised membership gate requires its own live rerun.
+active session. Subsequent separate synthetic live checks exposed the trimming,
+witness-order and membership-frame/tolerance behaviors recorded above; the final
+selected live checks passed or conservatively remained unavailable as reported.
 
 The full offline suite is rerun after changes, along with Ruff checks on changed
 Python files and `git diff --check`. Receipt integration tests execute the actual
 generated script through the real receipt runtime for 50 checks and 4096 native
 attempts with long escaped exception text, and for oversized input echoes. They
 verify receipt recovery retains every status and finite scalar candidate.
+An independent real-receipt stress run used 50 nested probes, each with three long
+native failures plus both candidate and satisfying-witness evidence. Its terminal
+record was 187774 bytes, below the 256 KiB limit, and retained all 50 outcomes and
+failure counts.
 
-## Deferred live synthetic test plan
+## Further live regression plan
 
-After the active R6 work releases Fusion, use a separate disposable design and
+For further verification, use a separate disposable design and
 record the Fusion build/API version, document scope, units and all full envelopes.
 
 1. Build a 10 x 20 x 30 mm box with named parameters. Probe known exterior corner,
@@ -188,7 +256,7 @@ record the Fusion build/API version, document scope, units and all full envelope
    measurements. Preserve results for unavailable kernel calls too.
 6. Optionally export this fixture to STEP, open the import in a separate document,
    reacquire its handle and rerun the named probe set manually in both directions.
-   Check gross metrics separately. This is a fixture smoke test, not proof for E30
+   Check gross metrics separately. This is a fixture smoke test, not proof for the source model
    or a general export guarantee. Never reopen/export the user's production design
    as an implicit part of this test.
 

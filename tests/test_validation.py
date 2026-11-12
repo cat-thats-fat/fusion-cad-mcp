@@ -9,7 +9,7 @@ import pytest
 
 from fusion_cad_mcp.envelope import Envelope
 from fusion_cad_mcp.tools.validation import build_validate_design, validate_design
-from tests._assembly_fakes import Collection, point, root_with
+from tests._assembly_fakes import Collection, RigidMatrix, point, root_with, transformable_point
 
 
 class Adapter:
@@ -27,7 +27,7 @@ class Adapter:
         modules["adsk"].fusion = modules["adsk.fusion"]
         modules["adsk.core"].Application = NS(get=lambda: self.app)
         modules["adsk.core"].ObjectCollection = NS(create=Collection)
-        modules["adsk.core"].Point3D = NS(create=point)
+        modules["adsk.core"].Point3D = NS(create=transformable_point)
         self.app.pointTolerance = 1e-7
         modules["adsk.fusion"].Design = NS(cast=lambda d: d)
         for name, module in modules.items():
@@ -168,7 +168,7 @@ def _face_pair_adapter(monkeypatch, *, distance=10):
     owner = NS(parentComponent=adapter.root)
     faces = {
         token: NS(objectType="adsk::fusion::BRepFace", body=owner, assemblyContext=None, token=token,
-                  isPointOnFace=lambda p: True)
+                  isPointOnFace=lambda p, tolerance: True)
         for token in ("left", "right")
     }
     adapter.design.findEntityByToken = lambda token: [faces[token]] if token in faces else []
@@ -211,14 +211,13 @@ def test_face_distance_allows_zero_for_distinct_faces_at_shared_edge(monkeypatch
 
 def test_face_distance_uses_nested_root_proxies(monkeypatch):
     adapter, native_faces = _face_pair_adapter(monkeypatch)
-    occurrence = NS(fullPathName="Parent:1+Box:2")
+    occurrence = NS(fullPathName="Parent:1+Box:2", transform2=RigidMatrix())
     child_component = NS(name="Box")
     owner = NS(parentComponent=child_component)
     adapter.root.allOccurrences = Collection([occurrence])
     proxies = []
     for i, face in enumerate(native_faces.values()):
-        proxy = NS(body=owner, assemblyContext=occurrence, location=point(4 + i, 5, 6),
-                   isPointOnFace=lambda p: True)
+        proxy = NS(body=owner, assemblyContext=occurrence, location=point(4 + i, 5, 6), nativeObject=face)
         face.body = owner
         face.createForAssemblyContext = Mock(return_value=proxy)
         proxies.append(proxy)
@@ -326,7 +325,8 @@ def _box_surface_adapter(monkeypatch, *, occurrence_path=None):
     target = body("box", token="box")
     adapter = Adapter(monkeypatch, [target])
     target.parentComponent = adapter.root
-    context = NS(fullPathName=occurrence_path) if occurrence_path else None
+    context = NS(fullPathName=occurrence_path,
+                 transform2=RigidMatrix(((0, -1, 0), (1, 0, 0), (0, 0, 1)), (4, 5, 6))) if occurrence_path else None
     target.assemblyContext = context
     if context:
         adapter.root.allOccurrences = Collection([context])
@@ -342,11 +342,15 @@ def _box_surface_adapter(monkeypatch, *, occurrence_path=None):
         for axis, extent in enumerate([1, 2, 3]) for coord in (0, extent)
     ])
     for face in target.faces.items:
-        def member(p, face=face):
-            local = to_local(p)
-            return abs(local[face.axis] - face.coord) <= 1e-7 and all(
-                -1e-7 <= x <= extent + 1e-7 for x, extent in zip(local, [1, 2, 3], strict=True))
-        face.isPointOnFace = member
+        def member(p, tolerance, axis=face.axis, coord=face.coord):
+            local = [p.x, p.y, p.z]
+            return abs(local[axis] - coord) <= tolerance and all(
+                -tolerance <= x <= extent + tolerance for x, extent in zip(local, [1, 2, 3], strict=True))
+        if context:
+            face.nativeObject = NS(isPointOnFace=Mock(side_effect=member))
+            face.isPointOnFace = Mock(side_effect=AssertionError('proxy membership must not be used'))
+        else:
+            face.isPointOnFace = member
     def measure(p, face):
         local = to_local(p)
         nearest = [min(max(x, 0), extent) for x, extent in zip(local, [1, 2, 3], strict=True)]
@@ -354,7 +358,7 @@ def _box_surface_adapter(monkeypatch, *, occurrence_path=None):
         return NS(value=math.dist(local, nearest), positionOne=p, positionTwo=point(*to_root(nearest)))
 
     adapter.app.measureManager.measureMinimumDistance.side_effect = measure
-    sys.modules["adsk.core"].Point3D = NS(create=point)
+    sys.modules["adsk.core"].Point3D = NS(create=transformable_point)
     return adapter, target
 
 
@@ -362,11 +366,12 @@ def test_surface_probe_uses_finite_face_geometry_and_named_points(monkeypatch):
     import math
 
     adapter, _ = _box_surface_adapter(monkeypatch)
-    checks = [surface_check(max_mm=math.sqrt(75)),
-              surface_check(name="inside", point_mm=[5, 5, 5], max_mm=4.5, tolerance_mm=0.5),
+    checks = [surface_check(max_mm=math.sqrt(75), tolerance_mm=1e-6),
+              surface_check(name="inside", point_mm=[5, 5, 5], max_mm=4.5, tolerance_mm=0.500001),
               surface_check(name="far", max_mm=8.6)]
     result = validate_design(adapter, checks).result
     assert [row["status"] for row in result["checks"]] == ["pass", "pass", "violation"]
+    assert result["checks"][2]["evidence"]["proof"] == "native_face_minima_above_maximum"
     nearest = result["checks"][0]["evidence"]["minimum_scalar_candidate"]
     assert nearest["minimum_distance_mm"] == pytest.approx(math.sqrt(75))
     assert nearest["closest_point_b_mm"] == [10, 20, 30]
@@ -384,6 +389,15 @@ def test_surface_probe_transformed_nested_occurrence_and_scope_guard(monkeypatch
     result = validate_design(adapter, [surface_check(body=scoped, point_mm=[15, 65, 95])]).result
     assert result["passed"]
     assert result["checks"][0]["evidence"]["minimum_scalar_candidate"]["closest_point_b_mm"] == [20, 60, 90]
+    membership = result["checks"][0]["evidence"]["satisfying_witness"]["surface_membership"]
+    assert membership["frame_conversion"] == "inverse_occurrence_transform2"
+    assert membership["input_point_mm"] == [20, 60, 90]
+    assert membership["membership_point_mm"] == [10, 20, 30]
+    assert membership["tolerance_source"] == "explicit Application.pointTolerance"
+    assert target.assemblyContext.transform2.apply([1, 2, 3]) == [2, 6, 9]
+    for face in target.faces.items:
+        face.isPointOnFace.assert_not_called()
+        assert face.nativeObject.isPointOnFace.call_args.args[1] == 1e-7
     bad = validate_design(adapter, [surface_check(point_mm=[15, 65, 95])]).result
     assert bad["checks"][0]["reason"] == "body_root_context_unavailable"
     assert adapter.app.measureManager.measureMinimumDistance.call_count == 6
@@ -406,7 +420,9 @@ def test_surface_probe_preserves_all_face_failures_and_available_scalar(monkeypa
     adapter.app.measureManager.measureMinimumDistance.side_effect = measure
     result = validate_design(adapter, [surface_check(max_mm=999, tolerance_mm=999)]).result
     row = result["checks"][0]
-    assert not result["passed"] and row["status"] == "unavailable"
+    assert result["passed"] and row["status"] == "pass"
+    assert row["evidence"]["proof"] == "validated_witness_upper_bound"
+    assert row["evidence"]["satisfying_witness"]["surface_membership"]["status"] == "on_face"
     assert row["evidence"]["faces_attempted"] == 6
     assert row["evidence"]["faces_measured"] == (5 if mode == "raise" else 6)
     assert row["evidence"]["faces_valid"] == 5
@@ -544,7 +560,8 @@ def test_large_probe_input_echo_does_not_discard_candidate_or_status(monkeypatch
     assert (tmp_path / (env.state["operation_id"] + ".terminal.json")).stat().st_size < receipts._MAX_RECORD
 
 
-def test_notched_box_void_rejects_consistent_zero_native_face_minimum(monkeypatch):
+@pytest.mark.parametrize("maximum,expected_status", [(0.1, "unavailable"), (0.6, "pass")])
+def test_notched_box_void_rejects_consistent_zero_native_face_minimum(monkeypatch, maximum, expected_status):
     """Analytic finite planes plus a polygon hole, independent of native output.
 
     The simulated native minimum ignores the hole in the top face. Its two points
@@ -562,7 +579,7 @@ def test_notched_box_void_rejects_consistent_zero_native_face_minimum(monkeypatc
 
     def patch(axis, coord, ranges, *, hole=False):
         face = NS(axis=axis, coord=coord, ranges=ranges, assemblyContext=None, isValid=True)
-        def member(p):
+        def member(p, tolerance):
             values = [p.x, p.y, p.z]
             on_patch = abs(values[axis] - coord) < 1e-7 and all(
                 low - 1e-7 <= x <= high + 1e-7
@@ -589,11 +606,11 @@ def test_notched_box_void_rejects_consistent_zero_native_face_minimum(monkeypatc
 
     adapter.app.measureManager.measureMinimumDistance.side_effect = native
     query = [10, 15, 10]
-    result = validate_design(adapter, [surface_check(point_mm=query, max_faces=11, max_mm=0.1)]).result
+    result = validate_design(adapter, [surface_check(point_mm=query, max_faces=11, max_mm=maximum)]).result
     row = result["checks"][0]
     evidence = row["evidence"]
     candidate = evidence["minimum_scalar_candidate"]
-    assert not result["passed"] and row["status"] == "unavailable"
+    assert result["passed"] is (expected_status == "pass") and row["status"] == expected_status
     assert evidence["faces_attempted"] == evidence["faces_measured"] == 11
     assert evidence["faces_valid"] == 10 and evidence["face_failure_count"] == 1
     assert candidate["face_index"] == 9 and candidate["minimum_distance_mm"] == 0
@@ -605,11 +622,18 @@ def test_notched_box_void_rejects_consistent_zero_native_face_minimum(monkeypatc
     assert true_distance_mm == pytest.approx(0.5)
     # The valid alternatives are not silently selected as an established minimum.
     assert candidate["minimum_distance_mm"] != pytest.approx(true_distance_mm)
+    if expected_status == "pass":
+        assert evidence["proof"] == "validated_witness_upper_bound"
+        assert evidence["satisfying_witness"]["input_point_separation_mm"] == pytest.approx(0.5)
+        assert evidence["satisfying_witness"]["surface_membership"]["status"] == "on_face"
+    else:
+        assert evidence["proof"] is None and evidence["satisfying_witness"] is None
 
 
 @pytest.mark.parametrize("mode,status", [("false", "off_face"), ("missing", "unavailable"),
     ("raises", "unavailable"), ("nonboolean", "unavailable")])
-def test_surface_probe_requires_native_trimmed_face_membership(monkeypatch, mode, status):
+@pytest.mark.parametrize("allow_upper_bound", [False, True])
+def test_surface_probe_requires_native_trimmed_face_membership(monkeypatch, mode, status, allow_upper_bound):
     adapter, target = _box_surface_adapter(monkeypatch)
     first = target.faces.item(0)
     if mode == "missing":
@@ -617,10 +641,12 @@ def test_surface_probe_requires_native_trimmed_face_membership(monkeypatch, mode
     elif mode == "raises":
         first.isPointOnFace = Mock(side_effect=RuntimeError("native membership unavailable"))
     else:
-        first.isPointOnFace = lambda p: False if mode == "false" else None
-    result = validate_design(adapter, [surface_check(max_mm=999, tolerance_mm=999)]).result
+        first.isPointOnFace = lambda p, tolerance: False if mode == "false" else None
+    result = validate_design(adapter, [surface_check(max_mm=999 if allow_upper_bound else 0.1)]).result
     row = result["checks"][0]
-    assert not result["passed"] and row["status"] == "unavailable"
+    assert result["passed"] is allow_upper_bound
+    assert row["status"] == ("pass" if allow_upper_bound else "unavailable")
+    assert row["evidence"]["proof"] == ("validated_witness_upper_bound" if allow_upper_bound else None)
     failure, = row["evidence"]["face_failures"]
     assert failure["evidence"]["witness_consistency"]["status"] == "consistent"
     assert failure["evidence"]["surface_membership"]["status"] == status
@@ -630,7 +656,7 @@ def test_surface_probe_requires_native_trimmed_face_membership(monkeypatch, mode
 @pytest.mark.parametrize("member", [False, None])
 def test_face_distance_requires_membership_of_both_witnesses(monkeypatch, member):
     adapter, faces = _face_pair_adapter(monkeypatch)
-    faces["right"].isPointOnFace = lambda p: member
+    faces["right"].isPointOnFace = lambda p, tolerance: member
     result = validate_design(adapter, [face_pair_check(max_mm=100)]).result
     row = result["checks"][0]
     assert row["status"] == "unavailable" and not result["passed"]
@@ -638,3 +664,131 @@ def test_face_distance_requires_membership_of_both_witnesses(monkeypatch, member
     assert row["evidence"]["witness_consistency"]["status"] == "consistent"
     assert row["evidence"]["face_membership"]["a"]["status"] == "on_face"
     assert row["evidence"]["face_membership"]["b"]["status"] == ("off_face" if member is False else "unavailable")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_face_distance_assigns_plane_witnesses_using_membership_and_retains_native_order(monkeypatch, reverse):
+    adapter, faces = _face_pair_adapter(monkeypatch)
+    for token, z in [("left", 1), ("right", 0)]:
+        faces[token].isPointOnFace = lambda p, tolerance, z=z: abs(p.z - z) < tolerance and 0 <= p.x <= 2 and 0 <= p.y <= 3
+    top, bottom = point(1, 1.5, 1), point(1, 1.5, 0)
+    first, second = (bottom, top) if reverse else (top, bottom)
+    adapter.app.measureManager.measureMinimumDistance.return_value = NS(
+        value=1, positionOne=first, positionTwo=second)
+    result = validate_design(adapter, [face_pair_check(min_mm=10, max_mm=10)]).result
+    assert result["passed"]
+    evidence = result["checks"][0]["evidence"]
+    assert evidence["minimum_distance_mm"] == evidence["witness_consistency"]["separation_mm"] == 10
+    assert evidence["closest_point_a_mm"] == [10, 15, 10]
+    assert evidence["closest_point_b_mm"] == [10, 15, 0]
+    assert all(item["status"] == "on_face" for item in evidence["face_membership"].values())
+    if reverse:
+        assert evidence["witness_order"] == "swapped_to_match_entities"
+        native = evidence["native_witnesses"]
+        assert native["closest_point_a_mm"] == [10, 15, 0] and native["closest_point_b_mm"] == [10, 15, 10]
+        assert all(item["status"] == "off_face" for item in native["face_membership"].values())
+    else:
+        assert evidence["witness_order"] == "as_returned" and "native_witnesses" not in evidence
+
+
+def test_upper_bound_uses_actual_input_point_not_slightly_shifted_native_anchor(monkeypatch):
+    adapter, target = _box_surface_adapter(monkeypatch)
+    native = adapter.app.measureManager.measureMinimumDistance.side_effect
+    def shifted(p, face):
+        if face.axis == 2 and face.coord == 3:
+            a, b = point(p.x, p.y, p.z - 5e-8), point(p.x, p.y, 3)
+            return NS(value=a.z - b.z, positionOne=a, positionTwo=b)
+        return native(p, face)
+    adapter.app.measureManager.measureMinimumDistance.side_effect = shifted
+    result = validate_design(adapter, [surface_check(point_mm=[5, 5, 35], max_mm=4.9999996)]).result
+    row = result["checks"][0]
+    candidate = row["evidence"]["minimum_scalar_candidate"]
+    assert candidate["witness_consistency"]["status"] == "consistent"
+    assert candidate["minimum_distance_mm"] < 4.9999996 < candidate["input_point_separation_mm"]
+    assert row["status"] == "unavailable" and not result["passed"]
+    assert row["reason"] == "surface_maximum_boundary_uncertain"
+    assert row["evidence"]["satisfying_witness"] is None
+
+
+@pytest.mark.parametrize("maximum,status", [(0, "unavailable"), (1e-6, "pass")])
+def test_upper_bound_includes_native_membership_tolerance(monkeypatch, maximum, status):
+    adapter, _ = _box_surface_adapter(monkeypatch)
+    native = adapter.app.measureManager.measureMinimumDistance.side_effect
+    def within_native_tolerance(p, face):
+        if face.axis == 2 and face.coord == 3:
+            return NS(value=0, positionOne=p, positionTwo=p)
+        return native(p, face)
+    adapter.app.measureManager.measureMinimumDistance.side_effect = within_native_tolerance
+    # Half a native point tolerance above the top plane; membership accepts it,
+    # but a zero-length native witness does not prove an exact zero bound.
+    result = validate_design(adapter, [surface_check(point_mm=[5, 5, 30.0000005], max_mm=maximum)]).result
+    row = result["checks"][0]
+    candidate = row["evidence"]["minimum_scalar_candidate"]
+    assert candidate["minimum_distance_mm"] == candidate["input_point_separation_mm"] == 0
+    assert candidate["surface_membership"]["status"] == "on_face"
+    assert candidate["witness_upper_bound_mm"] == 1e-6
+    assert row["status"] == status
+    assert result["passed"] is (status == "pass")
+    if status == "pass":
+        assert row["evidence"]["satisfying_witness"]["witness_upper_bound_mm"] <= maximum
+
+
+@pytest.mark.parametrize("native_tolerance", [None, float("nan"), float("inf"), True, -1, 0])
+def test_unknown_or_invalid_native_tolerance_cannot_prove_upper_bound(monkeypatch, native_tolerance):
+    adapter, _ = _box_surface_adapter(monkeypatch)
+    adapter.app.pointTolerance = native_tolerance
+    result = validate_design(adapter, [surface_check(max_mm=999)]).result
+    row = result["checks"][0]
+    candidate = row["evidence"]["minimum_scalar_candidate"]
+    assert candidate["surface_membership"]["status"] == "unavailable"
+    assert candidate["surface_membership"]["tolerance_mm"] is None
+    assert candidate["witness_upper_bound_mm"] is None
+    assert row["status"] == "unavailable" and not result["passed"]
+    assert row["evidence"]["satisfying_witness"] is None
+
+
+@pytest.mark.parametrize("mode", ["native_missing", "native_invalid", "transform_missing",
+    "inverse_false", "inverse_raises", "point_transform_false", "nonfinite_transform"])
+def test_proxy_membership_frame_conversion_fails_closed(monkeypatch, mode):
+    adapter, target = _box_surface_adapter(monkeypatch, occurrence_path="Parent:1+Box:2")
+    context = target.assemblyContext
+    if mode in {"native_missing", "native_invalid"}:
+        for face in target.faces.items:
+            if mode == "native_missing":
+                face.nativeObject = None
+            else:
+                face.nativeObject.isValid = False
+    elif mode == "transform_missing":
+        del context.transform2
+    elif mode in {"inverse_false", "inverse_raises"}:
+        inverse = NS(invert=Mock(return_value=False, side_effect=RuntimeError("inverse unavailable") if mode == "inverse_raises" else None))
+        context.transform2 = NS(copy=lambda: inverse)
+    elif mode == "point_transform_false":
+        sys.modules["adsk.core"].Point3D = NS(create=lambda x, y, z: NS(x=x, y=y, z=z, transformBy=lambda matrix: False))
+    else:
+        context.transform2 = NS(copy=lambda: NS(invert=lambda: True, apply=lambda values: [float("nan"), 0, 0]))
+    result = validate_design(adapter, [surface_check(
+        body="body:box|occ=Parent:1+Box:2|doc=646f63:box", point_mm=[15, 65, 95])]).result
+    row = result["checks"][0]
+    assert row["status"] == "unavailable" and not result["passed"]
+    evidence = row["evidence"]
+    assert evidence["face_failure_count"] == 6 and evidence["faces_valid"] == 0
+    assert evidence["satisfying_witness"] is None
+    assert evidence["minimum_scalar_candidate"]["surface_membership"]["status"] == "unavailable"
+    for face in target.faces.items:
+        face.isPointOnFace.assert_not_called()
+        if face.nativeObject is not None:
+            face.nativeObject.isPointOnFace.assert_not_called()
+
+
+def test_proxy_membership_context_diagnostic_is_bounded(monkeypatch):
+    import json
+
+    path = "Parent:1+" + "界" * 1000 + ":2"
+    adapter, _ = _box_surface_adapter(monkeypatch, occurrence_path=path)
+    result = validate_design(adapter, [surface_check(
+        body=f"body:box|occ={path}|doc=646f63:box", point_mm=[15, 65, 95])]).result
+    assert result["passed"]
+    membership = result["checks"][0]["evidence"]["satisfying_witness"]["surface_membership"]
+    assert membership["occurrence_path_truncated"]
+    assert len(json.dumps(membership["occurrence_path"], ensure_ascii=True).encode()) <= 256

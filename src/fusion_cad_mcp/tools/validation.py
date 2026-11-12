@@ -200,10 +200,7 @@ def _face_distance(measure, a, b, spec):
     try:
         evidence = _distance_evidence(measure.measureMinimumDistance(a, b))
         evidence['frame'] = 'root'
-        evidence['face_membership'] = {
-            'a': _face_membership(a, evidence['closest_point_a_mm']),
-            'b': _face_membership(b, evidence['closest_point_b_mm']),
-        }
+        _face_pair_witnesses(evidence, a, b)
     except Exception as exc:
         detail, truncated = _measurement_detail(exc)
         return dict(result, status='unavailable', reason={
@@ -258,7 +255,8 @@ def _surface_distance(design, root, measure, spec):
                 'units': 'mm', 'face_count': count, 'faces_attempted': 0, 'faces_measured': 0, 'faces_valid': 0,
                 'scope': 'one caller-supplied point to selected body surface; sampled and directional; not Hausdorff or full shape equivalence',
                 'method': 'minimum native Point3D-to-BRepFace scalar across every selected body face',
-                'minimum_scalar_candidate': None, 'face_failures': [], 'face_failure_count': 0,
+                'minimum_scalar_candidate': None, 'satisfying_witness': None, 'proof': None, 'proof_scope': None,
+                'face_failures': [], 'face_failure_count': 0,
                 'face_failures_omitted': 0, 'diagnostics_truncated': False, '_failure_bytes': 0}
     if count < 1 or count > spec['max_faces']:
         evidence.pop('_failure_bytes')
@@ -283,6 +281,8 @@ def _surface_distance(design, root, measure, spec):
             evidence['faces_measured'] += 1
             sample = _distance_evidence(native_result, spec['point_mm'])
             sample['face_index'] = index
+            sample['input_point_separation_mm'] = None
+            sample['witness_upper_bound_mm'] = None
             sample['surface_membership'] = _face_membership(face, sample['closest_point_b_mm'])
             value = sample['minimum_distance_mm']
             if value is not None and (evidence['minimum_scalar_candidate'] is None or value < evidence['minimum_scalar_candidate']['minimum_distance_mm']):
@@ -292,15 +292,31 @@ def _surface_distance(design, root, measure, spec):
                 _face_failure(evidence, {'face_index': index, 'evidence': sample})
             else:
                 evidence['faces_valid'] += 1
+                separation = math.dist(spec['point_mm'], sample['closest_point_b_mm'])
+                sample['input_point_separation_mm'] = separation if math.isfinite(separation) else None
+                membership_tolerance = sample['surface_membership']['tolerance_mm']
+                upper_bound = separation + membership_tolerance if membership_tolerance is not None else None
+                sample['witness_upper_bound_mm'] = upper_bound if upper_bound is not None and math.isfinite(upper_bound) else None
+                if sample['witness_upper_bound_mm'] is not None and upper_bound <= spec['max_mm'] + spec['tolerance_mm']:
+                    previous = evidence['satisfying_witness']
+                    if previous is None or upper_bound < previous['witness_upper_bound_mm']:
+                        evidence['satisfying_witness'] = sample
         except Exception as exc:
             detail, truncated = _measurement_detail(exc)
             _face_failure(evidence, {'face_index': index, 'detail': detail, 'detail_truncated': truncated})
     evidence.pop('_failure_bytes')
+    if evidence['satisfying_witness'] is not None:
+        evidence['proof'] = 'validated_witness_upper_bound'
+        evidence['proof_scope'] = 'native face membership tolerance plus query-to-witness separation; not a global minimum proof'
+        return dict(result, status='pass', evidence=evidence)
     if evidence['face_failure_count'] or evidence['minimum_scalar_candidate'] is None:
         return dict(result, status='unavailable', evidence=evidence, reason='surface_distance_unavailable')
     value = evidence['minimum_scalar_candidate']['minimum_distance_mm']
-    passes = value <= spec['max_mm'] + spec['tolerance_mm']
-    return dict(result, status='pass' if passes else 'violation', evidence=evidence)
+    if value > spec['max_mm'] + spec['tolerance_mm']:
+        evidence['proof'] = 'native_face_minima_above_maximum'
+        evidence['proof_scope'] = 'all selected face native minima usable; conditional on native minimum correctness'
+        return dict(result, status='violation', evidence=evidence)
+    return dict(result, status='unavailable', evidence=evidence, reason='surface_maximum_boundary_uncertain')
 
 def _interference(design, a, b):
     if not getattr(a, 'isSolid', False) or not getattr(b, 'isSolid', False):

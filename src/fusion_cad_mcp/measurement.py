@@ -39,18 +39,44 @@ def _distance_point(result, field, issues):
 
 def _face_membership(face, point_mm):
     evidence = {'status': 'unavailable', 'method': 'Fusion BRepFace.isPointOnFace',
-                'tolerance_source': 'Application.pointTolerance default', 'tolerance_mm': None}
+                'tolerance_source': 'explicit Application.pointTolerance', 'tolerance_mm': None,
+                'membership_frame': 'native_component', 'frame_conversion': 'none'}
     try:
-        tolerance = adsk.core.Application.get().pointTolerance * 10
+        raw_tolerance = adsk.core.Application.get().pointTolerance
+        if not _distance_number(raw_tolerance) or raw_tolerance <= 0:
+            raise ValueError('native point tolerance unavailable')
+        tolerance = raw_tolerance * 10
         if _distance_number(tolerance) and tolerance >= 0:
             evidence['tolerance_mm'] = tolerance
-    except Exception:
-        pass
-    try:
+        else:
+            raise ValueError('native point tolerance unavailable')
         if point_mm is None:
             raise ValueError('surface witness point unavailable')
+        evidence['input_point_mm'] = list(point_mm)
         point = adsk.core.Point3D.create(*[x / 10 for x in point_mm])
-        member = face.isPointOnFace(point)
+        if point is None: raise ValueError('native point creation unavailable')
+        context = getattr(face, 'assemblyContext', None)
+        native = getattr(face, 'nativeObject', None)
+        target = face
+        if context is not None:
+            if native is None or not getattr(native, 'isValid', True):
+                raise ValueError('native face unavailable for proxy membership')
+            inverse = context.transform2.copy()
+            if inverse is None or inverse.invert() is not True:
+                raise ValueError('occurrence transform inversion unavailable')
+            if point.transformBy(inverse) is not True:
+                raise ValueError('native membership point transformation unavailable')
+            target = native
+            path, path_truncated = _measurement_detail(context.fullPathName)
+            evidence.update(frame_conversion='inverse_occurrence_transform2',
+                            occurrence_path=path, occurrence_path_truncated=path_truncated)
+        elif native is not None:
+            raise ValueError('proxy membership context unavailable')
+        native_point_mm = [point.x * 10, point.y * 10, point.z * 10]
+        if not all(_distance_number(x) for x in native_point_mm):
+            raise ValueError('non-finite native membership point')
+        evidence['membership_point_mm'] = native_point_mm
+        member = target.isPointOnFace(point, raw_tolerance)
         if type(member) is not bool:
             raise ValueError('native face membership did not return a boolean')
         evidence['status'] = 'on_face' if member else 'off_face'
@@ -58,6 +84,21 @@ def _face_membership(face, point_mm):
         detail, truncated = _measurement_detail(exc)
         evidence.update(detail=detail, detail_truncated=truncated)
     return evidence
+
+def _face_pair_witnesses(evidence, a, b):
+    raw_a, raw_b = evidence['closest_point_a_mm'], evidence['closest_point_b_mm']
+    original = {'a': _face_membership(a, raw_a), 'b': _face_membership(b, raw_b)}
+    evidence.update(face_membership=original, witness_order='as_returned')
+    if all(item['status'] == 'on_face' for item in original.values()) or raw_a == raw_b: return
+    evidence['native_witnesses'] = {'closest_point_a_mm': raw_a, 'closest_point_b_mm': raw_b,
+                                    'face_membership': original}
+    swapped = {'a': _face_membership(a, raw_b), 'b': _face_membership(b, raw_a)}
+    evidence['swapped_face_membership'] = swapped
+    if (evidence['scalar_valid'] and evidence['witness_consistency']['status'] == 'consistent'
+            and all(item['status'] == 'on_face' for item in swapped.values())):
+        evidence.pop('swapped_face_membership')  # The accepted checks are face_membership below.
+        evidence.update(closest_point_a_mm=raw_b, closest_point_b_mm=raw_a,
+                        face_membership=swapped, witness_order='swapped_to_match_entities')
 
 def _distance_evidence(result, input_point_mm=None):
     evidence = {'minimum_distance_mm': None, 'closest_point_a_mm': None,

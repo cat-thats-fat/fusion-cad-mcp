@@ -145,13 +145,13 @@ def test_list_body_entities_rejects_unknown_kind():
 def test_measure_dispatches_resolved_entities_and_converts_result(
     monkeypatch, kind, method, measurement, expected
 ):
-    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace", token=token, isPointOnFace=lambda p: True)
+    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace", token=token, isPointOnFace=lambda p, tolerance: True)
                 for token in ("tA", "tB")}
     lookup = Mock(side_effect=lambda token: [entities[token]])
     measure = Mock(return_value=measurement)
     adapter = ScriptAdapter(
         monkeypatch, SimpleNamespace(findEntityByToken=lookup),
-        app=SimpleNamespace(measureManager=SimpleNamespace(**{method: measure})),
+        app=SimpleNamespace(pointTolerance=1e-7, measureManager=SimpleNamespace(**{method: measure})),
         core={"Point3D": SimpleNamespace(create=point)},
     )
 
@@ -206,7 +206,7 @@ def test_measure_rejects_consistent_witness_inside_trimmed_face_void(monkeypatch
 
     entities = {
         token: SimpleNamespace(objectType="adsk::fusion::BRepFace",
-                               isPointOnFace=Mock(side_effect=lambda p, token=token: membership(p, hole=token == bad_entity)))
+                               isPointOnFace=Mock(side_effect=lambda p, tolerance, token=token: membership(p, hole=token == bad_entity)))
         for token in ("a", "b")
     }
     native = Mock(return_value=SimpleNamespace(value=0, positionOne=query, positionTwo=query))
@@ -222,7 +222,7 @@ def test_measure_rejects_consistent_witness_inside_trimmed_face_void(monkeypatch
     assert evidence["face_membership"][bad_entity]["status"] == "off_face"
     assert evidence["face_membership"][bad_entity]["tolerance_mm"] == 1e-6
     for entity in entities.values():
-        entity.isPointOnFace.assert_called_once_with(query)
+        entity.isPointOnFace.assert_called_once_with(query, 1e-7)
 
 
 @pytest.mark.parametrize("kind", ["distance", "min_distance"])
@@ -237,6 +237,33 @@ def test_measure_other_entity_kinds_keep_consistency_contract(monkeypatch, kind)
     result = ht.measure(adapter, "body:box:a", "edge:line:b", kind)
     assert result.ok and result.result["value_mm"] == 50
     assert "face_membership" not in result.result["distance_evidence"]
+
+
+@pytest.mark.parametrize("kind", ["distance", "min_distance"])
+@pytest.mark.parametrize("scalar", [1, 2])
+def test_measure_reassigns_reversed_plane_points_only_when_native_distance_is_consistent(monkeypatch, kind, scalar):
+    entities = {
+        token: SimpleNamespace(objectType="adsk::fusion::BRepFace",
+                               isPointOnFace=lambda p, tolerance, z=z: abs(p.z - z) < tolerance and 0 <= p.x <= 2 and 0 <= p.y <= 3)
+        for token, z in [("a", 1), ("b", 0)]
+    }
+    native = Mock(return_value=SimpleNamespace(value=scalar, positionOne=point(1, 1.5, 0), positionTwo=point(1, 1.5, 1)))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(pointTolerance=1e-7,
+                                                measureManager=SimpleNamespace(measureMinimumDistance=native)),
+                            core={"Point3D": SimpleNamespace(create=point)})
+    result = ht.measure(adapter, "face:top:a", "face:bottom:b", kind)
+    evidence = result.result["distance_evidence"]
+    assert evidence["minimum_distance_mm"] == scalar * 10
+    assert evidence["native_witnesses"]["closest_point_a_mm"] == [10, 15, 0]
+    if scalar == 1:
+        assert result.ok and evidence["witness_order"] == "swapped_to_match_entities"
+        assert evidence["closest_point_a_mm"] == [10, 15, 10] and evidence["closest_point_b_mm"] == [10, 15, 0]
+        if kind == "distance":
+            assert result.result["point_a_cm"] == [1, 1.5, 1] and result.result["point_b_cm"] == [1, 1.5, 0]
+    else:
+        assert not result.ok and result.error == "measurement_witness_unavailable"
+        assert evidence["witness_order"] == "as_returned" and evidence["closest_point_a_mm"] == [10, 15, 0]
 
 
 def test_build_measure_rejects_unknown_kind():

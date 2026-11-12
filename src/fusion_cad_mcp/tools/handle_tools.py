@@ -88,8 +88,12 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
         print(json.dumps({'ok': False, 'error': 'measurement_unavailable', 'detail': detail, 'detail_truncated': truncated})); return
     evidence = _distance_evidence(result)
     memberships = {}
-    if FACE_A: memberships['a'] = _face_membership(_a, evidence['closest_point_a_mm'])
-    if FACE_B: memberships['b'] = _face_membership(_b, evidence['closest_point_b_mm'])
+    if FACE_A and FACE_B:
+        _face_pair_witnesses(evidence, _a, _b)
+        memberships = evidence['face_membership']
+    else:
+        if FACE_A: memberships['a'] = _face_membership(_a, evidence['closest_point_a_mm'])
+        if FACE_B: memberships['b'] = _face_membership(_b, evidence['closest_point_b_mm'])
     if memberships: evidence['face_membership'] = memberships
     valid = (evidence['scalar_valid'] and evidence['witness_consistency']['status'] == 'consistent'
              and all(item['status'] == 'on_face' for item in memberships.values()))
