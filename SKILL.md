@@ -122,11 +122,11 @@ Full catalog in `gotchas.md`. These bite first.
 
 ## Writing raw scripts
 
-Instrumented JSON-status scripts return through local receipts. Preserve the operation ID and inspect status and the document after an uncertain write. Use workspace recovery for workspace jobs and explicit evidence for reconciliation of other instrumented calls. Establish the actual model result and execution state independently. Raw `execute` uses Autodesk's script output path.
+Instrumented JSON-status scripts return through local receipts. Preserve the operation ID and inspect status and the document after an uncertain write. Use workspace recovery for workspace jobs and explicit evidence for reconciliation of other instrumented calls. Establish the actual model result and execution state independently. Default raw `execute` uses Autodesk's script output path; opt in with `durable=True` and a retained canonical UUID `operation_id` for receipt-backed custom execution.
 
 `execute` is a first-class custom scripting path, available for operations missing from the typed surface and whenever the agent judges Python a better fit than a premade tool. Useful cases include coordinated native edits, specialized inspection, and reusable build recipes. Reuse existing helpers where they fit, and consult `find_api` for unfamiliar APIs and `find_pattern` for adaptable examples.
 
-Raw `execute` currently has no automatic target validation, operation receipt, or general rollback guarantee. Supply explicit target checks and measure the resulting geometry for the selected requirements, with units and tolerances. Report baseline, result and differences where relevant. Verification requires measurements and their comparisons. To apply the guarded V1 parameter-edit contract to a trusted recipe, use `workspace_edit` with `custom_script` on a workspace-owned copy.
+Default raw `execute` has no automatic target validation, operation receipt, or general rollback guarantee. Durable execution records bounded stdout, stderr and optional `receipt_stage(name, data)` checkpoints; they are not verification and failure retains the write barrier. See `docs/durable-execute.md`. Supply explicit target checks and measure the resulting geometry for the selected requirements, with units and tolerances. Report baseline, result and differences where relevant. Verification requires measurements and their comparisons. To apply the guarded V1 parameter-edit contract to a trusted recipe, use `workspace_edit` with `custom_script` on a workspace-owned copy.
 
 Direct raw execution also bypasses receipt-backed writer coordination. Do not use that bypass to resume writes or replay a mutation while its outcome is unresolved; inspect status and establish recovery evidence first.
 

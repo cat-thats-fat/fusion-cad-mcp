@@ -358,6 +358,113 @@ def run(_ctx):
 """
 
 
+
+def _instrument_custom(script: str, root: Path, operation_id: str, fingerprint: str, endpoint_hash: str) -> str:
+    # Compile before reserving/dispatching: syntax errors cannot mutate Fusion.
+    compile(script, "<custom-execute>", "exec")
+    config = {"root": str(root.resolve()), "id": operation_id,
+              "fingerprint": fingerprint, "endpoint_hash": endpoint_hash}
+    prefix = _RUNTIME.split("\ndef run(_ctx):", 1)[0].replace("__RECEIPT_CONFIG__", repr(config))
+    return prefix + "\n_receipt_script = " + repr(script) + _CUSTOM_RUNTIME
+
+
+_CUSTOM_RUNTIME = r'''
+import sys as _receipt_sys, io as _receipt_io, contextlib as _receipt_contextlib, inspect as _receipt_inspect
+
+class _receipt_capture(_receipt_io.TextIOBase):
+    def __init__(self):
+        self.parts = []; self.size = 0; self.json_size = 0; self.truncated = False
+    def writable(self): return True
+    def write(self, text):
+        if not isinstance(text, str): raise TypeError('write() argument must be str')
+        # Limit both UTF-8 and the escaped JSON representation. Control characters
+        # can expand sixfold in ensure_ascii receipts.
+        text = text.encode('utf-8', 'replace').decode('utf-8')
+        byte_left = 32768 - self.size
+        json_left = 65536 - self.json_size
+        def fits(value):
+            return (len(value.encode('utf-8')) <= byte_left and
+                    len(_receipt_json.dumps(value, ensure_ascii=True)) - 2 <= json_left)
+        if fits(text): chunk = text
+        else:
+            self.truncated = True
+            lo, hi = 0, len(text)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if fits(text[:mid]): lo = mid
+                else: hi = mid - 1
+            chunk = text[:lo]
+        if chunk:
+            self.parts.append(chunk)
+            self.size += len(chunk.encode('utf-8'))
+            self.json_size += len(_receipt_json.dumps(chunk, ensure_ascii=True)) - 2
+        return len(text)
+    def value(self): return ''.join(self.parts)
+
+def run(_ctx):
+    claim = _receipt_os.path.join(_receipt_config['root'], _receipt_config['id'] + '.claim')
+    try:
+        fd = _receipt_os.open(claim, _receipt_os.O_CREAT | _receipt_os.O_EXCL | _receipt_os.O_WRONLY, 0o600)
+    except FileExistsError:
+        if _receipt_os.path.exists(_receipt_os.path.join(_receipt_config['root'], _receipt_config['id'] + '.terminal.json')): return
+        raise RuntimeError('operation already claimed; outcome unknown')
+    _receipt_os.close(fd)
+    try:
+        import adsk.core
+        doc = adsk.core.Application.get().activeDocument
+        doc_id = str(doc.creationId) if doc and doc.creationId else None
+    except Exception:
+        doc_id = None
+    _receipt_write('started', {'document_creation_id': doc_id, 'session_evidence': 'unavailable'})
+    stages = []
+    def receipt_stage(name, data=None):
+        if not isinstance(name, str) or not name or len(name.encode('utf-8')) > 128:
+            raise ValueError('stage name must contain 1 to 128 UTF-8 bytes')
+        item = {'name': name, 'data': data}
+        encoded = _receipt_json.dumps(item, ensure_ascii=True, allow_nan=False, separators=(',', ':'))
+        if len(encoded.encode('utf-8')) > 4096 or len(stages) >= 16:
+            raise ValueError('stage limit exceeded')
+        stages.append(_receipt_json.loads(encoded))
+        _receipt_write('stages', {'document_creation_id': doc_id, 'stages': stages})
+    out, err = _receipt_capture(), _receipt_capture()
+    try:
+        with _receipt_contextlib.redirect_stdout(out), _receipt_contextlib.redirect_stderr(err):
+            namespace = {'__name__': '__fusion_custom__', 'receipt_stage': receipt_stage}
+            exec(compile(_receipt_script, '<custom-execute>', 'exec'), namespace)
+            entry = namespace.get('run')
+            if (not callable(entry) or _receipt_inspect.iscoroutinefunction(entry)
+                    or _receipt_inspect.isgeneratorfunction(entry)
+                    or _receipt_inspect.isasyncgenfunction(entry)):
+                raise TypeError('run must be a synchronous callable')
+            value = entry(_ctx)
+            if (_receipt_inspect.isawaitable(value) or _receipt_inspect.isgenerator(value)
+                    or _receipt_inspect.isasyncgen(value)):
+                # Closing an unstarted built-in coroutine/generator does not run
+                # user code. Never close a started or arbitrary returned object.
+                if (_receipt_inspect.iscoroutine(value) and
+                        _receipt_inspect.getcoroutinestate(value) == _receipt_inspect.CORO_CREATED):
+                    value.close()
+                elif (_receipt_inspect.isgenerator(value) and
+                        _receipt_inspect.getgeneratorstate(value) == _receipt_inspect.GEN_CREATED):
+                    value.close()
+                raise TypeError('run must return synchronously, not an awaitable or generator')
+        result = {'ok': True, 'stdout': out.value(), 'stderr': err.value(),
+                  'stdout_truncated': out.truncated, 'stderr_truncated': err.truncated}
+        _receipt_write('terminal', {'document_creation_id': doc_id, 'declared_result': result})
+    except BaseException as exc:
+        try:
+            try: message = str(exc)
+            except BaseException: message = '<exception message unavailable>'
+            message = message.encode('utf-8', 'replace')[:4096].decode('utf-8', 'ignore')
+            exception_type = type(exc).__name__.encode('utf-8', 'replace')[:256].decode('utf-8', 'ignore')
+            _receipt_write('failed', {'document_creation_id': doc_id, 'exception_type': exception_type,
+                'exception_message': message,
+                'stdout': out.value(), 'stderr': err.value(), 'stdout_truncated': out.truncated,
+                'stderr_truncated': err.truncated})
+        except Exception: pass
+        raise
+'''
+
 def _entry(root: Path, operation_id: str) -> dict[str, Any] | None:
     base = _read(root / (operation_id + ".json"))
     if base is None:
@@ -374,7 +481,7 @@ def _entry(root: Path, operation_id: str) -> dict[str, Any] | None:
         raise ValueError("invalid receipt identity")
     if "receipt_context" in base:
         base["receipt_context"] = _workspace_context(base["receipt_context"])
-    for kind in ("started", "terminal", "failed", "reconciled", "not_started"):
+    for kind in ("started", "terminal", "failed", "reconciled", "not_started", "stages"):
         item = _read(root / (operation_id + "." + kind + ".json"))
         if item is not None:
             if (
@@ -475,6 +582,9 @@ def get_status(operation_id: str, *, journal_dir: str | os.PathLike[str] | None 
                     "original_document_identity_unavailable"
                 ),
                 "declared_result": terminal.get("declared_result") if terminal else None,
+                "stages": (entry.get("stages") or {}).get("stages", []),
+                "failure": entry.get("failed"),
+                "script_execution": "raised" if "failed" in entry else "returned" if terminal else "unknown",
                 "meaning": "Recorded script declaration, not proof of current geometry or rollback",
             },
         )
@@ -669,9 +779,16 @@ def run_typed(
     *,
     recovery_probe: bool = False,
     receipt_context: dict[str, Any] | None = None,
+    custom: bool = False,
 ) -> Envelope:
     supplied_operation_id = operation_id is not None
     try:
+        if type(custom) is not bool:
+            raise ValueError("custom must be boolean")
+        if custom and isinstance(script, str) and len(script.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("custom script exceeds 1 MiB UTF-8 limit")
+        if custom and operation_id is None:
+            raise ValueError("operation_id is required for durable custom execution")
         operation_id = _id(operation_id)
         if (
             not isinstance(script, str)
@@ -694,8 +811,8 @@ def run_typed(
         context = _workspace_context(receipt_context) if receipt_context is not None else None
         root = _root(journal_dir)
         endpoint_hash = _hash(endpoint)
-        fingerprint = _fingerprint(endpoint, script, read_only, context)
-        instrumented = _instrument(script, root, operation_id, fingerprint, endpoint_hash)
+        fingerprint = _fingerprint(endpoint, ("custom-v1\0" + script) if custom else script, read_only, context)
+        instrumented = (_instrument_custom if custom else _instrument)(script, root, operation_id, fingerprint, endpoint_hash)
     except (ValueError, SyntaxError, OverflowError) as exc:
         return _error("receipt_invalid_input", str(exc))
 
@@ -811,13 +928,16 @@ def run_typed(
                     return _terminal_result(
                         entry, operation_id, read_only=read_only, recovered=True
                     )
-                return _operation_error(
+                result = _operation_error(
                     "receipt_dispatch_unknown",
                     type(exc).__name__,
                     operation_id,
                     read_only=read_only,
                     outcome="unknown",
                 )
+                if entry and "failed" in entry:
+                    result.state["script_execution"] = "raised"
+                return result
             entry = _entry(root, operation_id)
             if entry and "terminal" in entry:
                 try:
@@ -860,6 +980,7 @@ def run_typed(
                 "execution_outcome": "unknown",
                 "model_may_have_changed": not read_only,
                 "retry_safe": read_only,
+                **({"script_execution": "raised"} if entry and "failed" in entry else {}),
             }
             return Envelope(
                 ok=False,

@@ -556,7 +556,16 @@ class FusionAdapter:
             read_only=read_only,
             recovery_probe=recovery_probe,
             receipt_context=receipt_context,
+            journal_dir=getattr(self, "receipt_journal_dir", None),
         )
+
+    def execute_durable_script(self, script: str, *, operation_id: str) -> Envelope:
+        """Execute custom Python under the existing receipt coordinator."""
+        from .receipts import run_typed
+
+        return run_typed(self.execute_script, script, self.url, self.timeout,
+                         operation_id=operation_id, custom=True,
+                         journal_dir=getattr(self, "receipt_journal_dir", None))
 
     def execute_document_op(self, operation: str, **object_args: Any) -> Envelope:
         """Run a document-level op: save, close, open. See Fusion MCP schema."""
