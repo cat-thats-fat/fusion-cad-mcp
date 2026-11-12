@@ -111,8 +111,14 @@ def get_capabilities() -> Envelope:
             "operations": ["workspace_inspect", "workspace_checkpoint"],
             "atomic_edit_precondition": False,
         },
+        "validation": {
+            "checks": ["bounds", "clearance", "interference", "face_distance",
+                       "surface_distance", "pose_interference"],
+            "limits": "surface and pose checks are bounded samples, not full shape or motion proofs",
+            "statuses": ["pass", "violation", "unavailable"],
+        },
         "receipts": {
-            "scope": "trusted JSON-status scripts using the enhanced adapter",
+            "scope": "trusted JSON-status and opt-in durable custom scripts using the enhanced adapter",
             "modules": ["assembly", "construction", "doc_state", "features", "handle_tools",
                         "inspection", "io", "local_files", "native_features", "operations",
                         "parameters", "parametric_sketch", "placement", "primitives", "references",

@@ -29,6 +29,8 @@ Named surface probes use `{"type":"surface_distance","name":"corner","body":scop
 
 Distance checks expose `scalar_valid` and `witness_consistency` separately. Face-distance checks also require both returned points to pass their respective trimmed-face membership checks (`face_membership.a/b`), using explicit positive application point tolerance independently of caller thresholds; false or unavailable membership prevents a face-distance pass. For two faces, if the original point assignment fails but both swapped memberships pass and scalar/separation is valid, witnesses are explicitly normalized with `witness_order:swapped_to_match_entities`, retaining original coordinates/memberships under `native_witnesses`; accepted swapped checks are `face_membership`, while failed alternate assignments retain `swapped_face_membership` diagnostics. Already valid or identical points retain native order. Consistency compares finite native distance with Euclidean witness separation using `1e-6 mm + 64 ulp(coordinate/distance scale)`; surface probes also check the first witness against the input point. This diagnostic tolerance is independent of acceptance thresholds and is not a documented Fusion kernel precision guarantee. Contradictory coordinates do not invalidate the scalar by themselves: the scalar and coordinates remain evidence, while the contradictory candidate cannot prove a distance requirement. Independently established interference still makes clearance a `violation`. These are sampled, directional point-to-surface probes; neither passing probes nor passing bounds/volume establishes Hausdorff distance or full export shape equivalence. Reuse named points on explicitly selected original/imported bodies with freshly acquired handles; compare saved results by name and frame externally. No export, import, automatic sampling, registration or saved-result comparison is performed.
 
+Sampled pose interference: `{'type':'pose_interference','body_a':...,'body_b':...,'frame':'root','max_overlap_mm3':0,'poses':[{'id':'p','translation_mm':[0,0,0],'rotation_deg':0,'rotation_axis':[0,0,1],'pivot_mm':[0,0,0]}]}`. Body A is rotated about the root-frame pivot then translated; B remains fixed. Up to 32 poses per check and 128 per call; 512 faces per body. Read every pose status. This is discrete sampling, not continuous motion or clearance. Failed or indeterminate intersections are unavailable. See `docs/assembly-pose-checks.md`.
+
 ## `create_component(name, parent=None)`
 
 Create a uniquely named local component under root or a unique parent. Refuses shared-parent edits, duplicate names, non-parametric/rolled-back timeline and pending transforms. Returns a scoped occurrence and pose.
@@ -1108,7 +1110,7 @@ Recover a late guarded edit using its clean terminal receipt and a fresh probe o
 
 ---
 
-# `execute(script)`
+# `execute(script, durable=False, operation_id=None)`
 
 A first-class custom Python path. Use it for missing capabilities or whenever scripting better fits the task than a premade tool, including coordinated edits and specialized inspection. It remains available even when a typed tool covers part or all of the operation; the agent can choose or combine either approach.
 
@@ -1131,7 +1133,7 @@ Rules that are not optional:
 
 1. The entry point must be exactly `def run(_ctx):`. No other name works.
 2. **Preserve failures.** Let exceptions propagate. Use `try/finally` for cleanup or re-raise caught exceptions with their traceback; do not swallow errors or print success after a failed edit.
-3. `print()` is the return channel. Stdout becomes the response `message`.
+3. Raw `print()` stdout becomes the response `message`. Durable mode returns captured stdout and stderr in its receipt-backed JSON result.
 4. **A failure can leave changes.** Inspect the document and reported outcome before retrying; raw execution has no general rollback guarantee.
 
 Internal units depend on the quantity: lengths use **cm**, angles use **radians**, and volumes use **cm³**. `Point3D.create` takes cm; numeric parameter values use their quantity's internal units. Prefer unit-bearing expressions such as `ValueInput.createByString("30 mm")`. Convert length to mm with ×10 and volume to mm³ with ×1000; do not apply a length conversion to other quantities.

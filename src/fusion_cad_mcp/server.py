@@ -1381,6 +1381,8 @@ def validate_design(checks: list[dict]) -> CallToolResult:
     known native membership tolerance) even with other face failures; no global minimum is claimed.
     Violations require all native face measurements usable. Without an established bound,
     incomplete evidence is unavailable.
+    pose_interference: body_a, body_b, frame=root, poses with id and translation_mm; optional
+    rotation_deg, rotation_axis, pivot_mm and max_overlap_mm3. Samples are not continuous motion.
     Body selectors accept names, occurrence-qualified names or body handles. Clearance uses B-rep
     measurement plus interference. Bounds are conservative root-axis boxes, not cavity containment.
     Read result.passed and each status: pass, violation or unavailable. No unchecked result passes.
