@@ -51,7 +51,8 @@ def test_measure_restores_or_retains_selected_assembly_context(monkeypatch, exis
     )
     matches = {"a": [first_proxy if existing_proxy else native], "b": [native]}
     design = SimpleNamespace(rootComponent=root, findEntityByToken=matches.__getitem__)
-    measure = Mock(return_value=SimpleNamespace(value=3.5))
+    measure = Mock(return_value=SimpleNamespace(value=3.5,
+                                               positionOne=point(), positionTwo=point(3.5)))
     app = SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=measure))
     handles = [
         "face:Parent:1+Leaf:1 / Body/face[0]|occ=Parent:1+Leaf:1:a",

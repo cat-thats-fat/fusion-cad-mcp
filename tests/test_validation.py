@@ -183,11 +183,13 @@ def test_same_body_face_distance_uses_both_tolerance_boundaries(monkeypatch):
 
     assert not result["passed"]
     assert [row["status"] for row in result["checks"]] == ["pass", "pass", "violation", "violation"]
-    assert result["checks"][0]["evidence"] == {
+    evidence = result["checks"][0]["evidence"]
+    assert {key: evidence[key] for key in ("minimum_distance_mm", "closest_point_a_mm", "closest_point_b_mm", "frame", "units", "method")} == {
         "minimum_distance_mm": 10, "closest_point_a_mm": [10, 20, 30],
         "closest_point_b_mm": [10, 20, 40], "frame": "root", "units": "mm",
         "method": "Fusion MeasureManager.measureMinimumDistance",
     }
+    assert evidence["scalar_valid"] and evidence["witness_consistency"]["status"] == "consistent"
     assert all(call.args == (faces["left"], faces["right"])
                for call in adapter.app.measureManager.measureMinimumDistance.call_args_list)
     adapter.design.analyzeInterference.assert_not_called()
@@ -282,3 +284,178 @@ def test_face_distance_requires_explicit_bound_and_tolerance():
     del missing_tolerance["tolerance_mm"]
     with pytest.raises(ValueError, match="tolerance_mm"):
         build_validate_design([missing_tolerance])
+
+
+@pytest.mark.parametrize("overlap,status", [(False, "unavailable"), (True, "violation")])
+def test_clearance_preserves_contradictory_measurement_and_independent_overlap(monkeypatch, overlap, status):
+    adapter = Adapter(monkeypatch, [body("a"), body("b")], volumes=[1] if overlap else [])
+    adapter.app.measureManager.measureMinimumDistance.return_value = NS(
+        value=0.0777739, positionOne=point(), positionTwo=point())
+    result = validate_design(adapter, [{"type": "clearance", "body_a": "a", "body_b": "b", "min_mm": 0}]).result
+    row = result["checks"][0]
+    assert not result["passed"] and row["status"] == status
+    assert row["evidence"]["minimum_distance_mm"] == pytest.approx(0.777739)
+    assert row["evidence"]["witness_consistency"]["status"] == "inconsistent"
+
+
+def test_face_acceptance_threshold_cannot_mask_witness_inconsistency(monkeypatch):
+    adapter, _ = _face_pair_adapter(monkeypatch)
+    adapter.app.measureManager.measureMinimumDistance.return_value = NS(
+        value=0.0777739, positionOne=point(), positionTwo=point())
+    result = validate_design(adapter, [face_pair_check(max_mm=100, tolerance_mm=1000)]).result
+    row = result["checks"][0]
+    assert row["status"] == "unavailable" and not result["passed"]
+    assert row["evidence"]["minimum_distance_mm"] == pytest.approx(0.777739)
+    assert row["evidence"]["witness_consistency"]["numerical_tolerance_mm"] < 0.00001
+
+
+def surface_check(**update):
+    return {"type": "surface_distance", "name": "corner", "body": "body:box|doc=646f63:box",
+            "point_mm": [15, 25, 35], "frame": "root", "max_mm": 9,
+            "tolerance_mm": 0, "max_faces": 6, **update}
+
+
+def _box_surface_adapter(monkeypatch, *, occurrence_path=None):
+    """Six finite rectangles on a 10x20x30 mm box; point projection is analytic."""
+    import math
+
+    target = body("box", token="box")
+    adapter = Adapter(monkeypatch, [target])
+    target.parentComponent = adapter.root
+    context = NS(fullPathName=occurrence_path) if occurrence_path else None
+    target.assemblyContext = context
+    if context:
+        adapter.root.allOccurrences = Collection([context])
+    # Rotation by +90 degrees around Z plus translation, in centimeters.
+    def to_local(p):
+        return [p.y - 5, 4 - p.x, p.z - 6] if context else [p.x, p.y, p.z]
+
+    def to_root(p):
+        return [4 - p[1], 5 + p[0], 6 + p[2]] if context else p
+
+    target.faces = Collection([
+        NS(axis=axis, coord=coord, assemblyContext=context, isValid=True)
+        for axis, extent in enumerate([1, 2, 3]) for coord in (0, extent)
+    ])
+    def measure(p, face):
+        local = to_local(p)
+        nearest = [min(max(x, 0), extent) for x, extent in zip(local, [1, 2, 3], strict=True)]
+        nearest[face.axis] = face.coord
+        return NS(value=math.dist(local, nearest), positionOne=p, positionTwo=point(*to_root(nearest)))
+
+    adapter.app.measureManager.measureMinimumDistance.side_effect = measure
+    sys.modules["adsk.core"].Point3D = NS(create=point)
+    return adapter, target
+
+
+def test_surface_probe_uses_finite_face_geometry_and_named_points(monkeypatch):
+    import math
+
+    adapter, _ = _box_surface_adapter(monkeypatch)
+    checks = [surface_check(max_mm=math.sqrt(75)),
+              surface_check(name="inside", point_mm=[5, 5, 5], max_mm=4.5, tolerance_mm=0.5),
+              surface_check(name="far", max_mm=8.6)]
+    result = validate_design(adapter, checks).result
+    assert [row["status"] for row in result["checks"]] == ["pass", "pass", "violation"]
+    nearest = result["checks"][0]["evidence"]["minimum_scalar_candidate"]
+    assert nearest["minimum_distance_mm"] == pytest.approx(math.sqrt(75))
+    assert nearest["closest_point_b_mm"] == [10, 20, 30]
+    # Interior point is 5mm from the surface, never zero from a solid-volume interpretation.
+    assert result["checks"][1]["evidence"]["minimum_scalar_candidate"]["minimum_distance_mm"] == 5
+    assert result["checks"][0]["evidence"]["faces_measured"] == 6
+    assert "not Hausdorff" in result["checks"][0]["evidence"]["scope"]
+    adapter.design.analyzeInterference.assert_not_called()
+
+
+def test_surface_probe_transformed_nested_occurrence_and_scope_guard(monkeypatch):
+    adapter, target = _box_surface_adapter(monkeypatch, occurrence_path="Parent:1+Box:2")
+    target.parentComponent = NS(name="Box")
+    scoped = "body:box|occ=Parent:1+Box:2|doc=646f63:box"
+    result = validate_design(adapter, [surface_check(body=scoped, point_mm=[15, 65, 95])]).result
+    assert result["passed"]
+    assert result["checks"][0]["evidence"]["minimum_scalar_candidate"]["closest_point_b_mm"] == [20, 60, 90]
+    bad = validate_design(adapter, [surface_check(point_mm=[15, 65, 95])]).result
+    assert bad["checks"][0]["reason"] == "body_root_context_unavailable"
+    assert adapter.app.measureManager.measureMinimumDistance.call_count == 6
+
+
+@pytest.mark.parametrize("mode", ["raise", "missing", "contradictory", "wrong_anchor"])
+def test_surface_probe_preserves_all_face_failures_and_available_scalar(monkeypatch, mode):
+    adapter, target = _box_surface_adapter(monkeypatch)
+    original = adapter.app.measureManager.measureMinimumDistance.side_effect
+    def measure(p, face):
+        if face is target.faces.item(0):
+            if mode == "raise":
+                raise RuntimeError("kernel failure retained")
+            if mode == "missing":
+                return NS(value=0.01, positionOne=p)
+            if mode == "contradictory":
+                return NS(value=0.01, positionOne=p, positionTwo=p)
+            return NS(value=0.01, positionOne=point(), positionTwo=point(0.01))
+        return original(p, face)
+    adapter.app.measureManager.measureMinimumDistance.side_effect = measure
+    result = validate_design(adapter, [surface_check(max_mm=999, tolerance_mm=999)]).result
+    row = result["checks"][0]
+    assert not result["passed"] and row["status"] == "unavailable"
+    assert row["evidence"]["faces_measured"] == 6
+    failure, = row["evidence"]["face_failures"]
+    assert failure["face_index"] == 0
+    if mode == "raise":
+        assert failure["detail"] == "kernel failure retained"
+    else:
+        assert failure["evidence"]["minimum_distance_mm"] == 0.1
+        assert row["evidence"]["minimum_scalar_candidate"]["minimum_distance_mm"] == 0.1
+
+
+def test_surface_probe_face_budget_prevents_native_measurements(monkeypatch):
+    adapter, _ = _box_surface_adapter(monkeypatch)
+    result = validate_design(adapter, [surface_check(max_faces=5)]).result
+    assert result["checks"][0]["reason"] == "face_budget_exceeded"
+    assert result["checks"][0]["evidence"]["face_count"] == 6
+    adapter.app.measureManager.measureMinimumDistance.assert_not_called()
+
+
+@pytest.mark.parametrize("mode,reason", [("stale", "not_found_in_active_doc"),
+    ("ambiguous", "ambiguous_token"), ("foreign", "document_scope_mismatch")])
+def test_surface_probe_refuses_stale_ambiguous_or_foreign_body(monkeypatch, mode, reason):
+    adapter, target = _box_surface_adapter(monkeypatch)
+    check = surface_check()
+    if mode == "stale":
+        adapter.design.findEntityByToken = lambda token: []
+    elif mode == "ambiguous":
+        adapter.design.findEntityByToken = lambda token: [target, target]
+    else:
+        check["body"] = check["body"].replace("646f63", "666f726569676e")
+    result = validate_design(adapter, [check]).result
+    assert not result["passed"]
+    assert result["checks"][0]["reason"]["detail"]["reason"] == reason
+    adapter.app.measureManager.measureMinimumDistance.assert_not_called()
+
+
+def test_surface_probe_recreates_native_faces_for_nested_root_context(monkeypatch):
+    adapter, target = _box_surface_adapter(monkeypatch, occurrence_path="Parent:1+Box:2")
+    for face in target.faces.items:
+        proxy = NS(**vars(face))
+        face.assemblyContext = None
+        face.createForAssemblyContext = Mock(return_value=proxy)
+    result = validate_design(adapter, [surface_check(
+        body="body:box|occ=Parent:1+Box:2|doc=646f63:box", point_mm=[15, 65, 95])]).result
+    assert result["passed"]
+    for face in target.faces.items:
+        face.createForAssemblyContext.assert_called_once_with(target.assemblyContext)
+
+
+@pytest.mark.parametrize("update", [{"body": "box"}, {"body": "body:box:box"},
+    {"frame": "local"}, {"point_mm": [0, 0, True]}, {"point_mm": [0, 0, float("nan")]},
+    {"max_faces": True}, {"max_faces": 0}, {"max_faces": 513}, {"max_mm": -1},
+    {"tolerance_mm": None}, {"name": " "}, {"name": "x" * 101}, {"extra": 1}])
+def test_surface_probe_rejects_unbounded_ambiguous_or_malformed_input(update):
+    with pytest.raises(ValueError):
+        build_validate_design([surface_check(**update)])
+
+
+def test_surface_probe_requires_unique_names_and_bounds_total_work():
+    with pytest.raises(ValueError, match="unique"):
+        build_validate_design([surface_check(), surface_check()])
+    with pytest.raises(ValueError, match="4096"):
+        build_validate_design([surface_check(name=str(i), max_faces=512) for i in range(9)])

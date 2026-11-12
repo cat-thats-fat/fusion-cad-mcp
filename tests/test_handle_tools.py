@@ -135,7 +135,7 @@ def test_list_body_entities_rejects_unknown_kind():
         ("distance", "measureMinimumDistance",
          SimpleNamespace(value=0.75, positionOne=point(1, 2, 3), positionTwo=point(1, 2, 3.75)),
          {"value_cm": 0.75, "value_mm": 7.5, "point_a_cm": [1, 2, 3], "point_b_cm": [1, 2, 3.75]}),
-        ("min_distance", "measureMinimumDistance", SimpleNamespace(value=0.75),
+        ("min_distance", "measureMinimumDistance", SimpleNamespace(value=0.75, positionOne=point(), positionTwo=point(0.75)),
          {"value_cm": 0.75, "value_mm": 7.5}),
         ("angle", "measureAngle", SimpleNamespace(value=math.pi / 2),
          {"value_radians": math.pi / 2, "value_degrees": 90}),
@@ -159,7 +159,39 @@ def test_measure_dispatches_resolved_entities_and_converts_result(
     assert env.ok is True
     measure.assert_called_once_with(entities["tA"], entities["tB"])
     assert [call.args for call in lookup.call_args_list] == [("tA",), ("tB",)]
-    assert env.result == {"ok": True, "kind": kind, **expected}
+    assert {key: env.result[key] for key in ("ok", "kind", *expected)} == {"ok": True, "kind": kind, **expected}
+    if kind != "angle":
+        assert env.result["distance_evidence"]["witness_consistency"]["status"] == "consistent"
+
+
+@pytest.mark.parametrize("kind", ["distance", "min_distance"])
+@pytest.mark.parametrize("bad_point,expected_status", [(point(), "inconsistent"), (None, "unavailable")])
+def test_measure_preserves_scalar_when_witness_cannot_be_used(monkeypatch, kind, bad_point, expected_status):
+    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace") for token in ("a", "b")}
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=Mock(
+                                return_value=SimpleNamespace(value=0.0777739, positionOne=point(), positionTwo=bad_point)))))
+    result = ht.measure(adapter, "face:body:a", "face:body:b", kind)
+    assert not result.ok and result.error == "measurement_witness_unavailable"
+    assert result.result["value_mm"] == pytest.approx(0.777739)
+    assert result.result["distance_evidence"]["scalar_valid"]
+    assert result.result["distance_evidence"]["witness_consistency"]["status"] == expected_status
+
+
+@pytest.mark.parametrize("mode", ["exception", "null", "nonfinite"])
+def test_measure_preserves_native_call_or_scalar_failure(monkeypatch, mode):
+    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace") for token in ("a", "b")}
+    native = Mock(side_effect=RuntimeError("native distance failed")) if mode == "exception" else Mock(
+        return_value=None if mode == "null" else SimpleNamespace(value=float("nan")))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=native)))
+    result = ht.measure(adapter, "face:body:a", "face:body:b", "min_distance")
+    assert not result.ok and result.error == "measurement_unavailable"
+    if mode == "exception":
+        assert result.result["detail"] == "native distance failed"
+    else:
+        assert result.result["value_mm"] is None
+        assert result.result["distance_evidence"]["witness_consistency"]["issues"]
 
 
 def test_build_measure_rejects_unknown_kind():

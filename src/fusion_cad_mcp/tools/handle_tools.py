@@ -30,6 +30,7 @@ from ..handles import (
     parse_handle,
 )
 from ..health import FEATURE_HEALTH_CHECK, FEATURE_HEALTH_SCRIPT
+from ..measurement import DISTANCE_EVIDENCE_SCRIPT
 from ..native_mesh import MESH_EVIDENCE_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 from .sketch import SKETCH_RESOLVER_SCRIPT
@@ -77,24 +78,23 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
     resolve_a = _indent4(emit_resolve(entity_a, var="_a"))
     resolve_b = _indent4(emit_resolve(entity_b, var="_b"))
 
-    if kind == "distance":
-        measure_call = "result = app.measureManager.measureMinimumDistance(_a, _b)"
-        report = (
-            "{\n"
-            "        'ok': True, 'kind': 'distance',\n"
-            "        'value_cm': result.value, 'value_mm': result.value * 10.0,\n"
-            "        'point_a_cm': [result.positionOne.x, result.positionOne.y, result.positionOne.z],\n"
-            "        'point_b_cm': [result.positionTwo.x, result.positionTwo.y, result.positionTwo.z],\n"
-            "    }"
-        )
-    elif kind == "min_distance":
-        measure_call = "result = app.measureManager.measureMinimumDistance(_a, _b)"
-        report = (
-            "{\n"
-            "        'ok': True, 'kind': 'min_distance',\n"
-            "        'value_cm': result.value, 'value_mm': result.value * 10.0,\n"
-            "    }"
-        )
+    if kind in {"distance", "min_distance"}:
+        measure_call = """try:
+        result = app.measureManager.measureMinimumDistance(_a, _b)
+    except Exception as exc:
+        print(json.dumps({'ok': False, 'error': 'measurement_unavailable', 'detail': str(exc)})); return
+    evidence = _distance_evidence(result)
+    valid = evidence['scalar_valid'] and evidence['witness_consistency']['status'] == 'consistent'
+    report = {'ok': valid, 'kind': KIND, 'value_mm': evidence['minimum_distance_mm'],
+              'value_cm': evidence['minimum_distance_mm'] / 10 if evidence['minimum_distance_mm'] is not None else None,
+              'distance_evidence': evidence}
+    if not valid:
+        report['error'] = 'measurement_witness_unavailable' if evidence['scalar_valid'] else 'measurement_unavailable'
+    if KIND == 'distance':
+        report['point_a_cm'] = [x / 10 for x in evidence['closest_point_a_mm']] if evidence['closest_point_a_mm'] is not None else None
+        report['point_b_cm'] = [x / 10 for x in evidence['closest_point_b_mm']] if evidence['closest_point_b_mm'] is not None else None
+""".replace("KIND", repr(kind)).rstrip()
+        report = "report"
     else:  # angle
         measure_call = "result = app.measureManager.measureAngle(_a, _b)"
         report = (
@@ -106,6 +106,8 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
 
     return f"""\
 {_header()}
+import math
+{DISTANCE_EVIDENCE_SCRIPT}
 def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
