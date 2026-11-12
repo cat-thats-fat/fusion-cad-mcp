@@ -117,7 +117,7 @@ def get_capabilities() -> Envelope:
                         "inspection", "io", "local_files", "native_features", "operations",
                         "parameters", "parametric_sketch", "placement", "primitives", "references",
                         "sketch", "validation", "verify"],
-            "excluded": ["raw execute", "native Autodesk tools", "visualize and timeline tools"],
+            "excluded": ["default raw execute", "native Autodesk tools", "visualize and timeline tools"],
             "normal_manifest_limit": _MAX_ENTRIES - _RECOVERY_RESERVE,
             "recovery_probe_reserve": _RECOVERY_RESERVE,
             "note": "Declarations are not proof of current geometry; lightweight adapters have no receipts.",

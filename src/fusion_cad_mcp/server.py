@@ -1625,14 +1625,15 @@ def workspace_recover(workspace_path: str, operation_id: str) -> CallToolResult:
 
 
 @mcp.tool()
-def execute(script: str) -> CallToolResult:
+def execute(script: str, durable: bool = False, operation_id: str | None = None) -> CallToolResult:
     """Custom Python whenever it fits better than a typed tool, or for missing capabilities.
     Typed tools need not be tried first. Scripts must define `def run(_ctx):`.
     Use print() for any data to return; stdout becomes the response message.
-    Raw execution has no automatic target checks or operation receipts. Verify
-    the intended target and resulting geometry; a successful reply is not proof.
+    With durable=True provide a canonical UUID operation_id; stdout and stderr are
+    captured in a local receipt and receipt_stage(name, data) records progress.
+    Execution and stage records do not verify geometry. Inspect before retrying.
     """
-    return _tool_result(execute_tool.run(_get_adapter(), script))
+    return _tool_result(execute_tool.run(_get_adapter(), script, durable=durable, operation_id=operation_id))
 
 
 _USAGE = """\
