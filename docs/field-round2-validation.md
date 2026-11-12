@@ -14,15 +14,23 @@ A live disposable fixture changed a parameter and independently measured the exp
 
 A simulated reply loss was injected **after** the native call completed; the terminal receipt was recovered without another dispatch. This observation does not demonstrate a genuinely late completion after a timeout. A raw stdout probe was visible in this session; it does not reproduce or resolve the earlier empty-output report. Stream identities differed between separate native calls, which does not establish whether streams were restored within a call. In-process tests exercise restoration and other failure paths. See [durable execute](durable-execute.md).
 
-## Surface and measurement evidence — pending
+## Surface and measurement evidence
 
-Offline tests exercise witness consistency, bounded probes, scope, and failure handling. A live diagnostic on a deliberately altered synthetic surface found that native point-to-face measurements can report a witness outside a trimmed face. A numerical match between the scalar and its endpoints alone is therefore insufficient to establish a valid surface result. The membership safeguard and its live retest are in progress; this record does not claim the original implementation detected the altered surface. Bounds and volume alone do not prove local surface fidelity. Directional point samples do not establish whole-shape equivalence.
+On Fusion Personal 2706.1.17, box outside and inside probes with analytic distances of 5 mm passed with 5.00001 mm witness upper bounds. An edge probe passed with a 0.00001 mm bound; a nested-occurrence outside probe passed at 5.00001 mm. A cylinder outside probe returned a 5 mm scalar with inconsistent witnesses and remained unavailable. A cylinder inside probe had an inconsistent 10 mm raw result, but a separate valid cap witness established a 10.00001 mm upper bound and a pass. A planar face pair measured 10 mm after normalizing reversed native witnesses by face membership; direct `measure` also passed. Stale handle and face-budget checks were refused.
+
+A synthetic 20 × 30 × 10 mm STEP source and imported copy both passed a local surface probe before alteration. A deliberate 1 mm cube notch in the copy left its bounds unchanged and reduced volume from 6,000 to 5,999 mm³, within a 0.1% gross-volume threshold. At the notch opening, a 0.05 mm check was unavailable: the native zero-distance candidate failed trimmed-face membership. A separate 0.6 mm check passed using a valid 0.50001 mm witness upper bound. This demonstrates a bounded local observation, not an automatic STEP translator repair or complete shape comparison.
+
+Native distance and witness consistency alone do not establish membership on a trimmed face. Fusion's point-membership tolerance is included in a satisfying witness upper bound; a pass can use that bound even if other faces are unavailable. A violation requires complete valid face coverage, and an unresolved check is unavailable. Curved-surface native witness inconsistencies remain an observed limitation. Bounds and volume alone do not prove local surface fidelity. Directional point samples do not establish whole-shape equivalence. Selected witnesses for all three pre-existing documents and the separate protected fixture remained intact, and both owned fixtures were closed. See [measurement evidence](measurement-evidence.md) for scope and methods.
 
 ## Assembly poses
 
 On Fusion Personal 2706.1.17, two separated samples passed using strictly disjoint bounds. Translation and rotation samples produced independently expected intersection volumes of 500, 1,000 and 2,000 mm³; a nested occurrence sample produced 500 mm³. A touching sample returned unavailable, rather than a clearance claim. Selected primary, original-document and protected-fixture witnesses remained unchanged. Both owned fixtures were closed and the prior active document was restored. See [assembly pose checks](assembly-pose-checks.md) for methods and limits.
 
 Offline tests exercise temporary body copies, root-frame transforms, bounded pose inputs and uncertain Boolean outcomes. Supplied poses are discrete samples, not a continuous-motion proof or clearance measurement. A failed or uncertain Boolean is unavailable, not a pass.
+
+## Observed timings
+
+These single observations include different work and are not benchmarks or cache guarantees: preflight refusals, corrected extrusion and preservation inventory took about 4,447 ms; durable edit and readback took 265 ms; measurement recheck including inventory took 4,752 ms; and seven pose samples including inventory took 7,799 ms. They do not predict performance for other models or machines.
 
 ## Scope
 

@@ -7,7 +7,7 @@ not test fixtures. Four separate changes keep reliability work reviewable.
 | PR scope | Implementation | Required evidence |
 | --- | --- | --- |
 | Extrusion preflight (merged) | Classify only explicit pre-add refusals as not started; retain an optional operation UUID. Document the observed SAT restriction without inferring a universal entitlement rule. | Generated-script and receipt tests; live missing/ambiguous selectors followed by a valid extrusion; real dimensions and preserved documents. |
-| Measurement evidence (in progress) | Check scalar/witness consistency; add bounded, named point-to-surface probes to existing validation for localized translation checks. | Independent numeric tests, malformed results and stale scopes; live known surfaces and a deliberately altered local region. Gross bounds/volume remain separate evidence. |
+| Measurement evidence (live fixture complete; merge pending) | Check scalar/witness consistency; add bounded, named point-to-surface probes to existing validation for localized translation checks. | Independent numeric tests, malformed results and stale scopes; live known surfaces and a deliberately altered local region. Gross bounds/volume remain separate evidence. |
 | Durable custom Python (merged) | Opt-in existing receipt coordination, bounded output capture, persistent stages and explicit partial-failure records. | Duplicate/conflicting IDs, missing replies, failed scripts, stream restoration and size limits; live successful and deliberately failed staged scripts with independent readback. |
 | Assembly pose checks (review and integration pending) | Extend existing validation with caller-supplied rigid poses using temporary bodies. Preserve per-pose failures and kernel-unavailable results. | Independently computed box intersections/poses, strict scope and work limits; live separated/overlapping/touching poses, nested frames and original-document preservation. |
 
@@ -28,4 +28,4 @@ turns them into passes. Physical fit, simulation service acceptance, entitlement
 changes and missing engineering measurements remain outside this increment.
 
 
-The preflight and durable changes have merged. Measurement remains under review and live validation; pose samples passed the stated live fixture, with cleanup verification and integration pending. The [validation record](field-round2-validation.md) tracks observed results separately from pending work.
+The preflight and durable changes have merged. Measurement and pose live fixtures and owned-document cleanup are complete; their changes remain pending integration. The [validation record](field-round2-validation.md) tracks observed results separately from pending work.

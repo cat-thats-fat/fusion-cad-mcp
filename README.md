@@ -4,7 +4,7 @@ An MCP server that gives Autodesk Fusion a named, typed tool surface: `create_sk
 
 Fusion ships its own MCP server with broad tools for Python execution and queries. This package adds validated tools with structured errors for common operations. Custom Python remains a first-class option whenever an agent judges it better suited than a premade tool, including operations outside the typed surface. Agents can combine both approaches.
 
-**Status: 0.6.0 beta, 104 tools.** Receipt-backed custom execution, preflight outcomes, sampled surface evidence and sampled assembly poses extend the existing tools. Live and offline evidence have different scopes; surface verification remains in progress. [0.6.0 validation and limitations](docs/field-round2-validation.md) | [Earlier validation](docs/field-followup-validation.md)
+**Status: 0.6.0 beta, 104 tools.** Receipt-backed custom execution, preflight outcomes, sampled surface evidence and sampled assembly poses extend the existing tools. Live and offline evidence have different scopes; sampled results do not establish complete geometry or motion. [0.6.0 validation and limitations](docs/field-round2-validation.md) | [Earlier validation](docs/field-followup-validation.md)
 
 The 0.3.0 reliability report records earlier work on local receipts, rigid-group scope, compact inspection, constrained rectangles and archive and image workflows. [0.3.0 reliability report](docs/reliability-validation.md)
 

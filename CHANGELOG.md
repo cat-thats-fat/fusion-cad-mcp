@@ -6,7 +6,7 @@
 - Add opt-in receipt-backed custom Python with bounded output and progress stages.
 - Check native distance witnesses and add bounded named surface probes; uncertain native results remain unavailable.
 - Add caller-supplied sampled assembly pose interference checks on temporary geometry. Samples do not prove continuous clearance.
-- Keep custom Python a first-class option and retain the existing tool count. See the [validation record](docs/field-round2-validation.md) for evidence and pending live checks.
+- Keep custom Python a first-class option and retain the existing tool count. See the [validation record](docs/field-round2-validation.md) for scoped live evidence and limitations.
 
 ## 0.5.0 — Scoped evidence and mesh references
 
