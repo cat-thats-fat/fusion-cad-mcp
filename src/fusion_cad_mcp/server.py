@@ -1367,9 +1367,20 @@ def validate_design(checks: list[dict]) -> CallToolResult:
     """Read-only mechanical checks (1..50). Each check is one of:
     {type:'clearance', body_a, body_b, min_mm}; {type:'interference', body_a, body_b, max_overlap_mm3?:0};
     {type:'bounds', body, min_mm:[x,y,z], max_mm:[x,y,z], tolerance_mm?:0};
-    {type:'face_distance', face_a, face_b, min_mm?, max_mm?, tolerance_mm}.
+    {type:'face_distance', face_a, face_b, min_mm?, max_mm?, tolerance_mm};
+    {type:'surface_distance', name, body, point_mm:[x,y,z], frame:'root', max_mm, tolerance_mm, max_faces}.
     Face distance requires current distinct face handles and at least one bound. It returns native
     minimum distance and witness points in root mm, not global wall thickness. Reacquire faces after edits.
+    Surface distance requires a current document-scoped body handle, unique probe name and max_faces
+    in 1..512 (sum <=4096). It measures the point against every body face; excess faces are unavailable.
+    It is a sampled directional surface check, not Hausdorff distance or full export equivalence.
+    Native scalar/witness contradictions retain scalar evidence and cannot pass distance validation.
+    Face/surface witnesses must pass native trimmed-face membership; reversed face-pair witnesses
+    are normalized only when both swapped memberships pass, preserving original native evidence.
+    Surface checks can pass with a separate validated witness upper bound (query separation plus
+    known native membership tolerance) even with other face failures; no global minimum is claimed.
+    Violations require all native face measurements usable. Without an established bound,
+    incomplete evidence is unavailable.
     Body selectors accept names, occurrence-qualified names or body handles. Clearance uses B-rep
     measurement plus interference. Bounds are conservative root-axis boxes, not cavity containment.
     Read result.passed and each status: pass, violation or unavailable. No unchecked result passes.

@@ -135,7 +135,7 @@ def test_list_body_entities_rejects_unknown_kind():
         ("distance", "measureMinimumDistance",
          SimpleNamespace(value=0.75, positionOne=point(1, 2, 3), positionTwo=point(1, 2, 3.75)),
          {"value_cm": 0.75, "value_mm": 7.5, "point_a_cm": [1, 2, 3], "point_b_cm": [1, 2, 3.75]}),
-        ("min_distance", "measureMinimumDistance", SimpleNamespace(value=0.75),
+        ("min_distance", "measureMinimumDistance", SimpleNamespace(value=0.75, positionOne=point(), positionTwo=point(0.75)),
          {"value_cm": 0.75, "value_mm": 7.5}),
         ("angle", "measureAngle", SimpleNamespace(value=math.pi / 2),
          {"value_radians": math.pi / 2, "value_degrees": 90}),
@@ -145,13 +145,14 @@ def test_list_body_entities_rejects_unknown_kind():
 def test_measure_dispatches_resolved_entities_and_converts_result(
     monkeypatch, kind, method, measurement, expected
 ):
-    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace", token=token)
+    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace", token=token, isPointOnFace=lambda p, tolerance: True)
                 for token in ("tA", "tB")}
     lookup = Mock(side_effect=lambda token: [entities[token]])
     measure = Mock(return_value=measurement)
     adapter = ScriptAdapter(
         monkeypatch, SimpleNamespace(findEntityByToken=lookup),
-        app=SimpleNamespace(measureManager=SimpleNamespace(**{method: measure})),
+        app=SimpleNamespace(pointTolerance=1e-7, measureManager=SimpleNamespace(**{method: measure})),
+        core={"Point3D": SimpleNamespace(create=point)},
     )
 
     env = ht.measure(adapter, "face:body/face[0]:tA", "face:body/face[1]:tB", kind=kind)
@@ -159,7 +160,110 @@ def test_measure_dispatches_resolved_entities_and_converts_result(
     assert env.ok is True
     measure.assert_called_once_with(entities["tA"], entities["tB"])
     assert [call.args for call in lookup.call_args_list] == [("tA",), ("tB",)]
-    assert env.result == {"ok": True, "kind": kind, **expected}
+    assert {key: env.result[key] for key in ("ok", "kind", *expected)} == {"ok": True, "kind": kind, **expected}
+    if kind != "angle":
+        assert env.result["distance_evidence"]["witness_consistency"]["status"] == "consistent"
+
+
+@pytest.mark.parametrize("kind", ["distance", "min_distance"])
+@pytest.mark.parametrize("bad_point,expected_status", [(point(), "inconsistent"), (None, "unavailable")])
+def test_measure_preserves_scalar_when_witness_cannot_be_used(monkeypatch, kind, bad_point, expected_status):
+    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace") for token in ("a", "b")}
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=Mock(
+                                return_value=SimpleNamespace(value=0.0777739, positionOne=point(), positionTwo=bad_point)))))
+    result = ht.measure(adapter, "face:body:a", "face:body:b", kind)
+    assert not result.ok and result.error == "measurement_witness_unavailable"
+    assert result.result["value_mm"] == pytest.approx(0.777739)
+    assert result.result["distance_evidence"]["scalar_valid"]
+    assert result.result["distance_evidence"]["witness_consistency"]["status"] == expected_status
+
+
+@pytest.mark.parametrize("mode", ["exception", "null", "nonfinite"])
+def test_measure_preserves_native_call_or_scalar_failure(monkeypatch, mode):
+    entities = {token: SimpleNamespace(objectType="adsk::fusion::BRepFace") for token in ("a", "b")}
+    native = Mock(side_effect=RuntimeError("native distance failed")) if mode == "exception" else Mock(
+        return_value=None if mode == "null" else SimpleNamespace(value=float("nan")))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=native)))
+    result = ht.measure(adapter, "face:body:a", "face:body:b", "min_distance")
+    assert not result.ok and result.error == "measurement_unavailable"
+    if mode == "exception":
+        assert result.result["detail"] == "native distance failed"
+    else:
+        assert result.result["value_mm"] is None
+        assert result.result["distance_evidence"]["witness_consistency"]["issues"]
+
+
+@pytest.mark.parametrize("kind", ["distance", "min_distance"])
+@pytest.mark.parametrize("bad_entity", ["a", "b"])
+def test_measure_rejects_consistent_witness_inside_trimmed_face_void(monkeypatch, kind, bad_entity):
+    query = point(1, 1.5, 1)
+    def membership(p, *, hole):
+        on_patch = abs(p.z - 1) < 1e-7 and 0 <= p.x <= 2 and 0 <= p.y <= 3
+        in_void = hole and 0.95 < p.x < 1.05 and 1.45 < p.y < 1.55
+        return on_patch and not in_void
+
+    entities = {
+        token: SimpleNamespace(objectType="adsk::fusion::BRepFace",
+                               isPointOnFace=Mock(side_effect=lambda p, tolerance, token=token: membership(p, hole=token == bad_entity)))
+        for token in ("a", "b")
+    }
+    native = Mock(return_value=SimpleNamespace(value=0, positionOne=query, positionTwo=query))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(pointTolerance=1e-7,
+                                                measureManager=SimpleNamespace(measureMinimumDistance=native)),
+                            core={"Point3D": SimpleNamespace(create=point)})
+    result = ht.measure(adapter, "face:top:a", "face:top:b", kind)
+    assert not result.ok and result.error == "measurement_witness_unavailable"
+    assert result.result["value_mm"] == 0
+    evidence = result.result["distance_evidence"]
+    assert evidence["witness_consistency"]["status"] == "consistent"
+    assert evidence["face_membership"][bad_entity]["status"] == "off_face"
+    assert evidence["face_membership"][bad_entity]["tolerance_mm"] == 1e-6
+    for entity in entities.values():
+        entity.isPointOnFace.assert_called_once_with(query, 1e-7)
+
+
+@pytest.mark.parametrize("kind", ["distance", "min_distance"])
+def test_measure_other_entity_kinds_keep_consistency_contract(monkeypatch, kind):
+    entities = {
+        "a": SimpleNamespace(objectType="adsk::fusion::BRepBody"),
+        "b": SimpleNamespace(objectType="adsk::fusion::BRepEdge"),
+    }
+    native = Mock(return_value=SimpleNamespace(value=5, positionOne=point(), positionTwo=point(3, 4)))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=native)))
+    result = ht.measure(adapter, "body:box:a", "edge:line:b", kind)
+    assert result.ok and result.result["value_mm"] == 50
+    assert "face_membership" not in result.result["distance_evidence"]
+
+
+@pytest.mark.parametrize("kind", ["distance", "min_distance"])
+@pytest.mark.parametrize("scalar", [1, 2])
+def test_measure_reassigns_reversed_plane_points_only_when_native_distance_is_consistent(monkeypatch, kind, scalar):
+    entities = {
+        token: SimpleNamespace(objectType="adsk::fusion::BRepFace",
+                               isPointOnFace=lambda p, tolerance, z=z: abs(p.z - z) < tolerance and 0 <= p.x <= 2 and 0 <= p.y <= 3)
+        for token, z in [("a", 1), ("b", 0)]
+    }
+    native = Mock(return_value=SimpleNamespace(value=scalar, positionOne=point(1, 1.5, 0), positionTwo=point(1, 1.5, 1)))
+    adapter = ScriptAdapter(monkeypatch, SimpleNamespace(findEntityByToken=lambda t: [entities[t]]),
+                            app=SimpleNamespace(pointTolerance=1e-7,
+                                                measureManager=SimpleNamespace(measureMinimumDistance=native)),
+                            core={"Point3D": SimpleNamespace(create=point)})
+    result = ht.measure(adapter, "face:top:a", "face:bottom:b", kind)
+    evidence = result.result["distance_evidence"]
+    assert evidence["minimum_distance_mm"] == scalar * 10
+    assert evidence["native_witnesses"]["closest_point_a_mm"] == [10, 15, 0]
+    if scalar == 1:
+        assert result.ok and evidence["witness_order"] == "swapped_to_match_entities"
+        assert evidence["closest_point_a_mm"] == [10, 15, 10] and evidence["closest_point_b_mm"] == [10, 15, 0]
+        if kind == "distance":
+            assert result.result["point_a_cm"] == [1, 1.5, 1] and result.result["point_b_cm"] == [1, 1.5, 0]
+    else:
+        assert not result.ok and result.error == "measurement_witness_unavailable"
+        assert evidence["witness_order"] == "as_returned" and evidence["closest_point_a_mm"] == [10, 15, 0]
 
 
 def test_build_measure_rejects_unknown_kind():

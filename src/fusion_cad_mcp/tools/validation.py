@@ -14,6 +14,7 @@ from ..adapter import FusionAdapter
 from ..envelope import Envelope, parse_status_json, script_parse_failure
 from ..execution import execute_typed_script
 from ..handles import emit_resolve, is_handle, parse_handle
+from ..measurement import DISTANCE_EVIDENCE_SCRIPT
 from ..resolver import RESOLVER_SCRIPT
 
 
@@ -45,6 +46,8 @@ def _prepare(checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[s
         raise ValueError("checks must contain between 1 and 50 checks")
     prepared = []
     handles: dict[str, str] = {}
+    probe_names: set[str] = set()
+    face_budget = 0
     for index, check in enumerate(checks):
         if not isinstance(check, dict):
             raise ValueError(f"checks[{index}] must be an object")
@@ -61,6 +64,25 @@ def _prepare(checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[s
             if any(a > b for a, b in zip(low, high, strict=True)):
                 raise ValueError("min_mm coordinates must not exceed max_mm")
             numeric = {"min_mm": low, "max_mm": high, "tolerance_mm": _number(check.get("tolerance_mm", 0), "tolerance_mm")}
+        elif kind == "surface_distance":
+            required = {"name", "body", "point_mm", "frame", "max_mm", "tolerance_mm", "max_faces"}
+            allowed = required | {"type"}
+            name = check.get("name")
+            if not isinstance(name, str) or not name.strip() or len(name) > 100 or name in probe_names:
+                raise ValueError("surface_distance name must be unique, nonempty and at most 100 characters")
+            probe_names.add(name)
+            if check.get("frame") != "root":
+                raise ValueError("surface_distance frame must be root")
+            cap = check.get("max_faces")
+            if isinstance(cap, bool) or not isinstance(cap, int) or not 1 <= cap <= 512:
+                raise ValueError("surface_distance max_faces must be an integer in 1..512")
+            face_budget += cap
+            if face_budget > 4096:
+                raise ValueError("surface_distance total declared max_faces must not exceed 4096")
+            numeric = {"name": name, "point_mm": _vector(check.get("point_mm"), "point_mm"),
+                       "frame": "root", "max_faces": cap,
+                       "max_mm": _number(check.get("max_mm"), "max_mm"),
+                       "tolerance_mm": _number(check.get("tolerance_mm"), "tolerance_mm")}
         elif kind == "face_distance":
             required = {"face_a", "face_b", "tolerance_mm"}
             allowed = required | {"type", "min_mm", "max_mm"}
@@ -75,19 +97,20 @@ def _prepare(checks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[s
         if set(check) - allowed or not required.issubset(check):
             raise ValueError(f"checks[{index}] has missing or unsupported fields")
         selectors = {
-            "bounds": ("body",), "face_distance": ("face_a", "face_b"),
+            "bounds": ("body",), "surface_distance": ("body",), "face_distance": ("face_a", "face_b"),
         }.get(kind, ("body_a", "body_b"))
         item = {"type": kind, **numeric}
         for field in selectors:
             value = check[field]
             if not isinstance(value, str) or not value:
                 raise ValueError(f"checks[{index}].{field} must be a nonempty selector")
-            if kind == "face_distance":
+            if kind in {"face_distance", "surface_distance"}:
                 handle = parse_handle(value)
-                if handle["kind"] != "face" or not any(
+                expected_kind = "face" if kind == "face_distance" else "body"
+                if handle["kind"] != expected_kind or not any(
                     part.startswith("doc=") for part in handle["path"].split("|")[1:]
                 ):
-                    raise ValueError(f"checks[{index}].{field} must be a document-scoped face handle")
+                    raise ValueError(f"checks[{index}].{field} must be a document-scoped {expected_kind} handle")
                 handles.setdefault(value, f"_entity_handle_{len(handles)}")
             elif is_handle(value):
                 if parse_handle(value)["kind"] != "body":
@@ -108,11 +131,112 @@ def build_validate_design(checks: list[dict[str, Any]]) -> str:
     return (
         "import adsk.core, adsk.fusion, json, math\n"
         + RESOLVER_SCRIPT + "\n" + "\n".join(functions)
-        + "\n_HANDLES = " + mapping + "\n_CHECKS = " + repr(prepared) + "\n" + _SCRIPT
+        + "\n_HANDLES = " + mapping + "\n_CHECKS = " + repr(prepared) + "\n"
+        + DISTANCE_EVIDENCE_SCRIPT + _SCRIPT
     )
 
 
 _SCRIPT = '''
+_FACE_DIAGNOSTIC_BYTES = 16384
+
+def _json_size(value):
+    return len(json.dumps(value, ensure_ascii=True, separators=(',', ':')).encode('utf-8'))
+
+def _face_failure(evidence, failure):
+    global _FACE_DIAGNOSTIC_BYTES
+    evidence['face_failure_count'] += 1
+    issues = failure.get('evidence', {}).get('witness_consistency', {}).get('issues', [])
+    membership = failure.get('evidence', {}).get('surface_membership', {})
+    if failure.get('detail_truncated') or membership.get('detail_truncated') or any(issue.get('detail_truncated') for issue in issues):
+        evidence['diagnostics_truncated'] = True
+    size = _json_size(failure)
+    if len(evidence['face_failures']) < 3 and size <= min(2048 - evidence['_failure_bytes'], _FACE_DIAGNOSTIC_BYTES):
+        evidence['face_failures'].append(failure)
+        evidence['_failure_bytes'] += size
+        _FACE_DIAGNOSTIC_BYTES -= size
+    else:
+        evidence['face_failures_omitted'] += 1
+        evidence['diagnostics_truncated'] = True
+
+def _compact_validation_diagnostics(value, stage):
+    changed = False
+    if isinstance(value, list):
+        for item in value:
+            changed = _compact_validation_diagnostics(item, stage) or changed
+        return changed
+    if not isinstance(value, dict): return False
+    if stage == 'bounded_nested_text':
+        for key in ('reason', 'detail', 'native_value_repr'):
+            if isinstance(value.get(key), str):
+                detail, truncated = _measurement_detail(value[key], 64)
+                if truncated:
+                    value[key] = detail
+                    value[key + '_truncated'] = True
+                    changed = True
+    elif stage == 'repeated_witness_metadata':
+        # Keep numerical/point evidence, frames, statuses and tolerance. These
+        # strings repeat documented API descriptions or diagnostic context.
+        keys = ['tolerance_source', 'occurrence_path', 'occurrence_path_truncated']
+        if 'status' in value and 'separation_mm' in value: keys.append('scope')
+        if 'frame' not in value and isinstance(value.get('method'), str) and value['method'].startswith('Fusion '):
+            keys.append('method')
+        if 'frame' not in value and value.get('units') == 'mm': keys.append('units')
+        for key in keys:
+            if key in value:
+                value.pop(key)
+                changed = True
+    elif stage == 'diagnostic_samples':
+        failures = value.get('face_failures')
+        if failures:
+            value['face_failures_omitted'] = value.get('face_failures_omitted', 0) + len(failures)
+            value['face_failures'] = []
+            value['diagnostics_truncated'] = True
+            changed = True
+        issues = value.get('issues')
+        if issues:
+            value['issues_omitted'] = len(issues)
+            value.pop('issues')
+            changed = True
+    elif stage == 'remaining_diagnostic_text':
+        for key in ('reason', 'detail', 'native_value_repr'):
+            if isinstance(value.get(key), str) and value[key]:
+                value[key] = ''
+                value[key + '_truncated'] = True
+                changed = True
+    for item in list(value.values()):
+        changed = _compact_validation_diagnostics(item, stage) or changed
+    return changed
+
+def _bound_validation_output(payload):
+    # Budget the complete canonical JSON payload, leaving 64 KiB for receipt
+    # metadata. Every check/sample and core measurement/proof survives reduction.
+    if _json_size(payload) <= 196608: return
+    payload['output_compacted'] = True
+    payload['output_compaction'] = ['input_echoes']
+    rows = payload['checks']
+    for index, row in enumerate(rows):
+        row['check_index'] = index
+        if 'check' in row:
+            row.pop('check')
+            row['input_echo_omitted'] = True
+        reason = row.get('reason')
+        if reason is not None and _json_size(reason) > 1024:
+            code = reason.get('error', 'diagnostic_omitted_for_size') if isinstance(reason, dict) else reason
+            text, _ = _measurement_detail(code)
+            row['reason'] = {'error': text, 'diagnostic_truncated': True}
+    if _json_size(payload) <= 196608: return
+    for stage in ('bounded_nested_text', 'repeated_witness_metadata', 'diagnostic_samples', 'remaining_diagnostic_text'):
+        payload['output_compaction'].append(stage)
+        for row in rows:
+            if _compact_validation_diagnostics(row, stage):
+                row['diagnostics_compacted'] = True
+        if _json_size(payload) <= 196608: return
+    # With <=50 checks, <=128 pose IDs, bounded probe names and finite fixed-size
+    # coordinate arrays, retained core evidence fits this budget. Catch future
+    # schema additions that violate that invariant before publishing a receipt.
+    if _json_size(payload) > 196608:
+        raise ValueError('validation core evidence exceeds output budget')
+
 def _point(p):
     if p is None: raise ValueError('closest point unavailable')
     result = [p.x * 10, p.y * 10, p.z * 10]
@@ -138,23 +262,19 @@ def _face_distance(measure, a, b, spec):
     if getattr(context_a, 'fullPathName', None) == getattr(context_b, 'fullPathName', None) and a == b:
         return dict(result, status='unavailable', reason='same_face')
     try:
-        distance = measure.measureMinimumDistance(a, b)
-        if distance is None or not getattr(distance, 'isValid', True):
-            raise ValueError('Fusion could not measure minimum distance')
-        distance_mm = distance.value * 10
-        if not math.isfinite(distance_mm) or distance_mm < 0:
-            raise ValueError('invalid minimum distance')
-        evidence = {
-            'minimum_distance_mm': distance_mm,
-            'closest_point_a_mm': _point(distance.positionOne),
-            'closest_point_b_mm': _point(distance.positionTwo),
-            'frame': 'root', 'units': 'mm',
-            'method': 'Fusion MeasureManager.measureMinimumDistance',
-        }
+        evidence = _distance_evidence(measure.measureMinimumDistance(a, b))
+        evidence['frame'] = 'root'
+        _face_pair_witnesses(evidence, a, b)
     except Exception as exc:
+        detail, truncated = _measurement_detail(exc)
         return dict(result, status='unavailable', reason={
-            'error': 'face_distance_unavailable', 'detail': str(exc),
+            'error': 'face_distance_unavailable', 'detail': detail, 'detail_truncated': truncated,
         })
+    if (not evidence['scalar_valid'] or evidence['witness_consistency']['status'] != 'consistent'
+            or any(item['status'] != 'on_face' for item in evidence['face_membership'].values())):
+        return dict(result, status='unavailable', evidence=evidence,
+                    reason={'error': 'face_distance_unavailable', 'detail': 'native witness consistency or trimmed-face membership unavailable'})
+    distance_mm = evidence['minimum_distance_mm']
     tolerance = spec['tolerance_mm']
     passes = spec.get('min_mm', 0) - tolerance <= distance_mm <= spec.get('max_mm', math.inf) + tolerance
     return dict(result, status='pass' if passes else 'violation', evidence=evidence)
@@ -180,6 +300,88 @@ def _face_pair_check(design, root, measure, spec):
         faces.append(face)
     return _face_distance(measure, faces[0], faces[1], spec)
 
+def _surface_distance(design, root, measure, spec):
+    result = {'type': 'surface_distance', 'check': spec}
+    body, error = _resolve_check_handle(design, spec['body'])
+    if error:
+        return dict(result, status='unavailable', reason=error)
+    if not getattr(body, 'isValid', True):
+        return dict(result, status='unavailable', reason='body_invalid')
+    occurrence_path = next((part[4:] for part in spec['body'].rsplit(':', 1)[0].split('|')[1:]
+                            if part.startswith('occ=')), None)
+    context = getattr(body, 'assemblyContext', None)
+    if getattr(context, 'fullPathName', None) != occurrence_path or (
+        context is None and body.parentComponent != root
+    ):
+        return dict(result, status='unavailable', reason='body_root_context_unavailable')
+    count = body.faces.count
+    evidence = {'name': spec['name'], 'sample_point_mm': spec['point_mm'], 'frame': 'root',
+                'units': 'mm', 'face_count': count, 'faces_attempted': 0, 'faces_measured': 0, 'faces_valid': 0,
+                'scope': 'one caller-supplied point to selected body surface; sampled and directional; not Hausdorff or full shape equivalence',
+                'method': 'minimum native Point3D-to-BRepFace scalar across every selected body face',
+                'minimum_scalar_candidate': None, 'satisfying_witness': None, 'proof': None, 'proof_scope': None,
+                'face_failures': [], 'face_failure_count': 0,
+                'face_failures_omitted': 0, 'diagnostics_truncated': False, '_failure_bytes': 0}
+    if count < 1 or count > spec['max_faces']:
+        evidence.pop('_failure_bytes')
+        return dict(result, status='unavailable', evidence=evidence,
+                    reason='empty_surface' if count < 1 else 'face_budget_exceeded')
+    point = adsk.core.Point3D.create(*[x / 10 for x in spec['point_mm']])
+    for index in range(count):
+        try:
+            face = body.faces.item(index)
+            if face is None or not getattr(face, 'isValid', True):
+                raise ValueError('invalid body face')
+            # Some API versions expose native faces from proxy bodies. Recreate the
+            # proxy explicitly rather than measuring component-local geometry.
+            face_context = getattr(face, 'assemblyContext', None)
+            if context is not None and face_context is None:
+                face = face.createForAssemblyContext(context)
+                face_context = getattr(face, 'assemblyContext', None)
+            if face is None or not getattr(face, 'isValid', True) or getattr(face_context, 'fullPathName', None) != occurrence_path:
+                raise ValueError('face root context unavailable')
+            evidence['faces_attempted'] += 1
+            native_result = measure.measureMinimumDistance(point, face)
+            evidence['faces_measured'] += 1
+            sample = _distance_evidence(native_result, spec['point_mm'])
+            sample['face_index'] = index
+            sample['input_point_separation_mm'] = None
+            sample['witness_upper_bound_mm'] = None
+            sample['surface_membership'] = _face_membership(face, sample['closest_point_b_mm'])
+            value = sample['minimum_distance_mm']
+            if value is not None and (evidence['minimum_scalar_candidate'] is None or value < evidence['minimum_scalar_candidate']['minimum_distance_mm']):
+                evidence['minimum_scalar_candidate'] = sample
+            if (not sample['scalar_valid'] or sample['witness_consistency']['status'] != 'consistent'
+                    or sample['surface_membership']['status'] != 'on_face'):
+                _face_failure(evidence, {'face_index': index, 'evidence': sample})
+            else:
+                evidence['faces_valid'] += 1
+                separation = math.dist(spec['point_mm'], sample['closest_point_b_mm'])
+                sample['input_point_separation_mm'] = separation if math.isfinite(separation) else None
+                membership_tolerance = sample['surface_membership']['tolerance_mm']
+                upper_bound = separation + membership_tolerance if membership_tolerance is not None else None
+                sample['witness_upper_bound_mm'] = upper_bound if upper_bound is not None and math.isfinite(upper_bound) else None
+                if sample['witness_upper_bound_mm'] is not None and upper_bound <= spec['max_mm'] + spec['tolerance_mm']:
+                    previous = evidence['satisfying_witness']
+                    if previous is None or upper_bound < previous['witness_upper_bound_mm']:
+                        evidence['satisfying_witness'] = sample
+        except Exception as exc:
+            detail, truncated = _measurement_detail(exc)
+            _face_failure(evidence, {'face_index': index, 'detail': detail, 'detail_truncated': truncated})
+    evidence.pop('_failure_bytes')
+    if evidence['satisfying_witness'] is not None:
+        evidence['proof'] = 'validated_witness_upper_bound'
+        evidence['proof_scope'] = 'native face membership tolerance plus query-to-witness separation; not a global minimum proof'
+        return dict(result, status='pass', evidence=evidence)
+    if evidence['face_failure_count'] or evidence['minimum_scalar_candidate'] is None:
+        return dict(result, status='unavailable', evidence=evidence, reason='surface_distance_unavailable')
+    value = evidence['minimum_scalar_candidate']['minimum_distance_mm']
+    if value > spec['max_mm'] + spec['tolerance_mm']:
+        evidence['proof'] = 'native_face_minima_above_maximum'
+        evidence['proof_scope'] = 'all selected face native minima usable; conditional on native minimum correctness'
+        return dict(result, status='violation', evidence=evidence)
+    return dict(result, status='unavailable', evidence=evidence, reason='surface_maximum_boundary_uncertain')
+
 def _interference(design, a, b):
     if not getattr(a, 'isSolid', False) or not getattr(b, 'isSolid', False):
         raise ValueError('interference requires two solid BRep bodies')
@@ -203,6 +405,8 @@ def _check(design, root, measure, spec):
     kind = spec['type']
     if kind == 'face_distance':
         return _face_pair_check(design, root, measure, spec)
+    if kind == 'surface_distance':
+        return _surface_distance(design, root, measure, spec)
     names = ['body'] if kind == 'bounds' else ['body_a', 'body_b']
     bodies = []
     for field in names:
@@ -232,17 +436,17 @@ def _check(design, root, measure, spec):
     evidence = {'interference_count': count, 'frame': 'root',
                 'overlap_mm3': sum(volumes) if all(v is not None for v in volumes) else None}
     try:
-        distance = measure.measureMinimumDistance(bodies[0], bodies[1])
-        if distance is None or not math.isfinite(distance.value) or distance.value < 0:
-            raise ValueError('Fusion could not measure minimum distance')
-        distance_mm = distance.value * 10
-        evidence.update({'minimum_distance_mm': distance_mm, 'closest_point_a_mm': _point(distance.positionOne),
-                         'closest_point_b_mm': _point(distance.positionTwo)})
+        evidence.update(_distance_evidence(measure.measureMinimumDistance(bodies[0], bodies[1])))
     except Exception as exc:
-        if count == 0: raise
+        detail, truncated = _measurement_detail(exc)
         evidence.update({'minimum_distance_mm': None, 'closest_point_a_mm': None,
-                         'closest_point_b_mm': None, 'measurement_unavailable': str(exc)})
-        return {'type': kind, 'status': 'violation', 'check': spec, 'evidence': evidence}
+                         'closest_point_b_mm': None, 'measurement_unavailable': detail,
+                         'measurement_detail_truncated': truncated})
+        return {'type': kind, 'status': 'violation' if count else 'unavailable', 'check': spec, 'evidence': evidence}
+    if not evidence['scalar_valid'] or evidence['witness_consistency']['status'] != 'consistent':
+        return {'type': kind, 'status': 'violation' if count else 'unavailable', 'check': spec,
+                'reason': 'clearance_distance_witness_unavailable', 'evidence': evidence}
+    distance_mm = evidence['minimum_distance_mm']
     passes = count == 0 and distance_mm >= spec['min_mm']
     return {'type': kind, 'status': 'pass' if passes else 'violation', 'check': spec, 'evidence': evidence}
 
@@ -256,8 +460,10 @@ def run(_ctx):
     for spec in _CHECKS:
         try: results.append(_check(design, root, app.measureManager, spec))
         except Exception as exc: results.append({'type': spec['type'], 'status': 'unavailable', 'reason': str(exc), 'check': spec})
-    print(json.dumps({'ok': True, 'passed': all(r['status'] == 'pass' for r in results),
-                      'checks': results, 'units': {'distance': 'mm', 'volume': 'mm^3'}}))
+    payload = {'ok': True, 'passed': all(r['status'] == 'pass' for r in results),
+               'checks': results, 'units': {'distance': 'mm', 'volume': 'mm^3'}}
+    _bound_validation_output(payload)
+    print(json.dumps(payload))
 '''
 
 

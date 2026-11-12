@@ -10,7 +10,15 @@ import pytest
 from fusion_cad_mcp.handles import emit_resolve, parse_handle
 from fusion_cad_mcp.resolver import RESOLVER_SCRIPT
 from fusion_cad_mcp.tools import handle_tools, verify
-from tests._assembly_fakes import Collection, ScriptAdapter, occurrence, point, root_with
+from tests._assembly_fakes import (
+    Collection,
+    RigidMatrix,
+    ScriptAdapter,
+    occurrence,
+    point,
+    root_with,
+    transformable_point,
+)
 
 
 def test_occurrence_paths_and_ambiguity():
@@ -41,25 +49,29 @@ def test_occurrence_paths_and_ambiguity():
 def test_measure_restores_or_retains_selected_assembly_context(monkeypatch, existing_proxy):
     occ1 = occurrence("Parent:1+Leaf:1")
     occ2 = occurrence("Parent:2+Leaf:1")
+    occ1.transform2, occ2.transform2 = RigidMatrix(), RigidMatrix()
     root = root_with(occurrences=[occ1, occ2])
     face_type = "adsk::fusion::BRepFace"
-    first_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ1)
-    second_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ2)
+    native_membership = SimpleNamespace(isPointOnFace=lambda p, tolerance: True)
+    first_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ1, nativeObject=native_membership)
+    second_proxy = SimpleNamespace(objectType=face_type, assemblyContext=occ2, nativeObject=native_membership)
     proxies = {id(occ1): first_proxy, id(occ2): second_proxy}
     native = SimpleNamespace(
         objectType=face_type, createForAssemblyContext=Mock(side_effect=lambda occ: proxies[id(occ)])
     )
     matches = {"a": [first_proxy if existing_proxy else native], "b": [native]}
     design = SimpleNamespace(rootComponent=root, findEntityByToken=matches.__getitem__)
-    measure = Mock(return_value=SimpleNamespace(value=3.5))
-    app = SimpleNamespace(measureManager=SimpleNamespace(measureMinimumDistance=measure))
+    measure = Mock(return_value=SimpleNamespace(value=3.5,
+                                               positionOne=point(), positionTwo=point(3.5)))
+    app = SimpleNamespace(pointTolerance=1e-7, measureManager=SimpleNamespace(measureMinimumDistance=measure))
     handles = [
         "face:Parent:1+Leaf:1 / Body/face[0]|occ=Parent:1+Leaf:1:a",
         "face:Parent:2+Leaf:1 / Body/face[0]|occ=Parent:2+Leaf:1:b",
     ]
 
     assert parse_handle(handles[1])["path"].endswith("|occ=Parent:2+Leaf:1")
-    env = handle_tools.measure(ScriptAdapter(monkeypatch, design, app=app), *handles, "min_distance")
+    env = handle_tools.measure(ScriptAdapter(monkeypatch, design, app=app,
+                                           core={"Point3D": SimpleNamespace(create=transformable_point)}), *handles, "min_distance")
 
     assert env.ok is True
     assert env.result["value_mm"] == 35
