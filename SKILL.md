@@ -82,7 +82,7 @@ Use `create_component`, `insert_component` and `place_component` for local assem
 
 For OBJ reference import, pass explicit units and a retained operation UUID. Preflight records a local dependency manifest (a filesystem write), rejects escaping or remote dependencies and requires explicit `geometry_only` when appearance resources are missing. Mesh bounds and hashes do not prove texture, UV, embedding or display fidelity. Inspect the full failure envelope, including `error` and `state`, and retain uncertain operation IDs. Scoped mesh, body and other evidence can be captured by `workspace_inspect` or compared at `workspace_checkpoint` archive reopen; it is not an atomic `workspace_edit` guard. See `tools.md` for the exact scope and field tolerances.
 
-For `validate_design` face-distance checks, reacquire current document-scoped face handles after edits or recompute and read root-frame mm witness points and each check status. Bounded `ray_collision_with_mesh` queries use root or local frames and source-bound replay; no-hit and ambiguous rays do not prove free space or clearance.
+For `validate_design` face-distance and surface checks, reacquire current document-scoped handles after edits or recompute and inspect witness consistency, trimmed-face membership and each status. A surface probe can pass on a validated satisfying witness even if other faces are unavailable; its smallest raw scalar candidate is not necessarily valid. Samples are directional, not full shape equivalence. `pose_interference` evaluates caller-supplied discrete poses on temporary copies; it does not prove continuous motion or clearance. A failed Boolean or contact can be unavailable. Bounded `ray_collision_with_mesh` queries use root or local frames and source-bound replay; no-hit and ambiguous rays do not prove free space or clearance.
 
 ## Guarded workspace edits
 
@@ -143,7 +143,7 @@ def run(_ctx):
 
 1. The entry point must be exactly `def run(_ctx):`. No other name works. (Autodesk's `fusion_mcp_execute` uses `def run(_context: str):`.)
 2. **Preserve failures.** Let exceptions propagate; use `try/finally` for cleanup or re-raise caught exceptions with their traceback. Do not swallow an exception or print success after a failed edit.
-3. `print()` is the return channel; stdout becomes `message`.
+3. For default raw execution, `print()` writes stdout to `message`. Durable execution captures stdout and stderr in its receipt-backed JSON result.
 4. Print the bounding box after any extrude.
 
 Autodesk's capture writers accumulated in one tested session and caused recursive

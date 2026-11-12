@@ -1110,7 +1110,7 @@ Recover a late guarded edit using its clean terminal receipt and a fresh probe o
 
 ---
 
-# `execute(script)`
+# `execute(script, durable=False, operation_id=None)`
 
 A first-class custom Python path. Use it for missing capabilities or whenever scripting better fits the task than a premade tool, including coordinated edits and specialized inspection. It remains available even when a typed tool covers part or all of the operation; the agent can choose or combine either approach.
 
@@ -1133,7 +1133,7 @@ Rules that are not optional:
 
 1. The entry point must be exactly `def run(_ctx):`. No other name works.
 2. **Preserve failures.** Let exceptions propagate. Use `try/finally` for cleanup or re-raise caught exceptions with their traceback; do not swallow errors or print success after a failed edit.
-3. `print()` is the return channel. Stdout becomes the response `message`.
+3. Raw `print()` stdout becomes the response `message`. Durable mode returns captured stdout and stderr in its receipt-backed JSON result.
 4. **A failure can leave changes.** Inspect the document and reported outcome before retrying; raw execution has no general rollback guarantee.
 
 Internal units depend on the quantity: lengths use **cm**, angles use **radians**, and volumes use **cm³**. `Point3D.create` takes cm; numeric parameter values use their quantity's internal units. Prefer unit-bearing expressions such as `ValueInput.createByString("30 mm")`. Convert length to mm with ×10 and volume to mm³ with ×1000; do not apply a length conversion to other quantities.
