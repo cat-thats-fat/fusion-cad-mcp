@@ -792,3 +792,81 @@ def test_proxy_membership_context_diagnostic_is_bounded(monkeypatch):
     membership = result["checks"][0]["evidence"]["satisfying_witness"]["surface_membership"]
     assert membership["occurrence_path_truncated"]
     assert len(json.dumps(membership["occurrence_path"], ensure_ascii=True).encode()) <= 256
+
+
+def _receipt_validation(adapter, checks, tmp_path):
+    from fusion_cad_mcp import receipts
+
+    adapter.execute_typed_script = lambda script, **kwargs: receipts.run_typed(
+        adapter.execute_script, script, "offline-output-budget", 1, journal_dir=tmp_path, **kwargs)
+    return validate_design(adapter, checks)
+
+
+def _assert_bounded_receipt(env, tmp_path):
+    import json
+
+    assert env.ok, env
+    assert len(json.dumps(env.result, ensure_ascii=True, separators=(",", ":"), allow_nan=False).encode()) <= 196608
+    assert (tmp_path / (env.state["operation_id"] + ".terminal.json")).stat().st_size < 256 * 1024
+    assert env.result["output_compacted"] and env.result["output_compaction"]
+    assert [row["check_index"] for row in env.result["checks"]] == list(range(len(env.result["checks"])))
+
+
+def test_nested_face_pair_failures_preserve_core_evidence_in_bounded_receipt(monkeypatch, tmp_path):
+    adapter, faces = _face_pair_adapter(monkeypatch)
+    path = "Parent:1+" + "界" * 270
+    context = NS(fullPathName=path, transform2=RigidMatrix())
+    adapter.root.allOccurrences = Collection([context])
+    for face in faces.values():
+        face.isPointOnFace = Mock(side_effect=RuntimeError("\x00界" * 50000))
+        proxy = NS(assemblyContext=context, nativeObject=face, body=face.body)
+        face.createForAssemblyContext = Mock(return_value=proxy)
+    env = _receipt_validation(adapter, [face_pair_check(occurrence=path, max_mm=100) for _ in range(50)], tmp_path)
+    _assert_bounded_receipt(env, tmp_path)
+    assert not env.result["passed"] and len(env.result["checks"]) == 50
+    for row in env.result["checks"]:
+        assert row["status"] == "unavailable" and row["diagnostics_compacted"]
+        evidence = row["evidence"]
+        assert evidence["minimum_distance_mm"] == 10 and evidence["scalar_valid"]
+        assert evidence["closest_point_a_mm"] == [10, 20, 30]
+        assert evidence["closest_point_b_mm"] == [10, 20, 40]
+        assert evidence["witness_consistency"]["status"] == "consistent"
+        assert evidence["native_witnesses"]["closest_point_a_mm"] == [10, 20, 30]
+        for assignment in (evidence["face_membership"], evidence["swapped_face_membership"],
+                           evidence["native_witnesses"]["face_membership"]):
+            assert all(member["status"] == "unavailable" for member in assignment.values())
+            for member in assignment.values():
+                assert member["tolerance_mm"] == 1e-6
+                assert member["frame_conversion"] == "inverse_occurrence_transform2"
+                assert len(member["input_point_mm"]) == len(member["membership_point_mm"]) == 3
+
+
+@pytest.mark.parametrize("character", ["\x01", "😀"])
+def test_full_surface_witness_batches_preserve_proofs_in_bounded_receipt(monkeypatch, tmp_path, character):
+    path = "Parent:1+" + "x" * 270
+    adapter, target = _box_surface_adapter(monkeypatch, occurrence_path=path)
+    native = adapter.app.measureManager.measureMinimumDistance.side_effect
+    def partly_failed(p, face):
+        if any(face is selected for selected in target.faces.items[:3]):
+            raise RuntimeError("\x00界" * 50000)
+        return native(p, face)
+    adapter.app.measureManager.measureMinimumDistance.side_effect = partly_failed
+    names = [f"{index:02d}" + character * 98 for index in range(50)]
+    checks = [surface_check(name=name, body=f"body:box|occ={path}|doc=646f63:box",
+                            point_mm=[15, 65, 95], max_mm=1000) for name in names]
+    env = _receipt_validation(adapter, checks, tmp_path)
+    _assert_bounded_receipt(env, tmp_path)
+    assert env.result["passed"] and len(env.result["checks"]) == 50
+    assert [row["evidence"]["name"] for row in env.result["checks"]] == names
+    for row in env.result["checks"]:
+        evidence = row["evidence"]
+        assert row["status"] == "pass" and evidence["proof"] == "validated_witness_upper_bound"
+        assert evidence["face_failure_count"] == 3
+        assert evidence["face_failures_omitted"] + len(evidence["face_failures"]) == 3
+        for sample in (evidence["minimum_scalar_candidate"], evidence["satisfying_witness"]):
+            assert sample["minimum_distance_mm"] > 0 and sample["scalar_valid"]
+            assert sample["witness_consistency"]["status"] == "consistent"
+            assert sample["surface_membership"]["status"] == "on_face"
+            assert sample["surface_membership"]["frame_conversion"] == "inverse_occurrence_transform2"
+            assert len(sample["closest_point_a_mm"]) == len(sample["closest_point_b_mm"]) == 3
+        assert evidence["satisfying_witness"]["witness_upper_bound_mm"] <= 1000

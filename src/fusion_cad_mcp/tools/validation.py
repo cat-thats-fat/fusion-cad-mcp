@@ -158,20 +158,84 @@ def _face_failure(evidence, failure):
         evidence['face_failures_omitted'] += 1
         evidence['diagnostics_truncated'] = True
 
-def _bound_validation_output(results):
-    # Leave room for receipt identity/metadata inside the 256 KiB record limit.
-    # Never drop a check status or its minimum native scalar candidate.
-    if _json_size(results) <= 196608: return
-    for index, row in enumerate(results):
+def _compact_validation_diagnostics(value, stage):
+    changed = False
+    if isinstance(value, list):
+        for item in value:
+            changed = _compact_validation_diagnostics(item, stage) or changed
+        return changed
+    if not isinstance(value, dict): return False
+    if stage == 'bounded_nested_text':
+        for key in ('reason', 'detail', 'native_value_repr'):
+            if isinstance(value.get(key), str):
+                detail, truncated = _measurement_detail(value[key], 64)
+                if truncated:
+                    value[key] = detail
+                    value[key + '_truncated'] = True
+                    changed = True
+    elif stage == 'repeated_witness_metadata':
+        # Keep numerical/point evidence, frames, statuses and tolerance. These
+        # strings repeat documented API descriptions or diagnostic context.
+        keys = ['tolerance_source', 'occurrence_path', 'occurrence_path_truncated']
+        if 'status' in value and 'separation_mm' in value: keys.append('scope')
+        if 'frame' not in value and isinstance(value.get('method'), str) and value['method'].startswith('Fusion '):
+            keys.append('method')
+        if 'frame' not in value and value.get('units') == 'mm': keys.append('units')
+        for key in keys:
+            if key in value:
+                value.pop(key)
+                changed = True
+    elif stage == 'diagnostic_samples':
+        failures = value.get('face_failures')
+        if failures:
+            value['face_failures_omitted'] = value.get('face_failures_omitted', 0) + len(failures)
+            value['face_failures'] = []
+            value['diagnostics_truncated'] = True
+            changed = True
+        issues = value.get('issues')
+        if issues:
+            value['issues_omitted'] = len(issues)
+            value.pop('issues')
+            changed = True
+    elif stage == 'remaining_diagnostic_text':
+        for key in ('reason', 'detail', 'native_value_repr'):
+            if isinstance(value.get(key), str) and value[key]:
+                value[key] = ''
+                value[key + '_truncated'] = True
+                changed = True
+    for item in list(value.values()):
+        changed = _compact_validation_diagnostics(item, stage) or changed
+    return changed
+
+def _bound_validation_output(payload):
+    # Budget the complete canonical JSON payload, leaving 64 KiB for receipt
+    # metadata. Every check/sample and core measurement/proof survives reduction.
+    if _json_size(payload) <= 196608: return
+    payload['output_compacted'] = True
+    payload['output_compaction'] = ['input_echoes']
+    rows = payload['checks']
+    for index, row in enumerate(rows):
+        row['check_index'] = index
         if 'check' in row:
             row.pop('check')
-            row.update(check_index=index, input_echo_omitted=True)
+            row['input_echo_omitted'] = True
         reason = row.get('reason')
         if reason is not None and _json_size(reason) > 1024:
             code = reason.get('error', 'diagnostic_omitted_for_size') if isinstance(reason, dict) else reason
             text, _ = _measurement_detail(code)
             row['reason'] = {'error': text, 'diagnostic_truncated': True}
-        if _json_size(results) <= 196608: return
+    if _json_size(payload) <= 196608: return
+    for stage in ('bounded_nested_text', 'repeated_witness_metadata', 'diagnostic_samples', 'remaining_diagnostic_text'):
+        payload['output_compaction'].append(stage)
+        for row in rows:
+            if _compact_validation_diagnostics(row, stage):
+                row['diagnostics_compacted'] = True
+        if _json_size(payload) <= 196608: return
+    # With <=50 checks, <=128 pose IDs, bounded probe names and finite fixed-size
+    # coordinate arrays, retained core evidence fits this budget. Catch future
+    # schema additions that violate that invariant before publishing a receipt.
+    if _json_size(payload) > 196608:
+        raise ValueError('validation core evidence exceeds output budget')
 
 def _point(p):
     if p is None: raise ValueError('closest point unavailable')
@@ -396,9 +460,10 @@ def run(_ctx):
     for spec in _CHECKS:
         try: results.append(_check(design, root, app.measureManager, spec))
         except Exception as exc: results.append({'type': spec['type'], 'status': 'unavailable', 'reason': str(exc), 'check': spec})
-    _bound_validation_output(results)
-    print(json.dumps({'ok': True, 'passed': all(r['status'] == 'pass' for r in results),
-                      'checks': results, 'units': {'distance': 'mm', 'volume': 'mm^3'}}))
+    payload = {'ok': True, 'passed': all(r['status'] == 'pass' for r in results),
+               'checks': results, 'units': {'distance': 'mm', 'volume': 'mm^3'}}
+    _bound_validation_output(payload)
+    print(json.dumps(payload))
 '''
 
 

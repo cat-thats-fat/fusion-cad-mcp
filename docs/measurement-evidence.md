@@ -120,6 +120,18 @@ Large output can omit input check
 echoes, reporting `check_index` and `input_echo_omitted`; every check status and
 minimum scalar candidate remains.
 
+The complete canonical JSON result, including every check and output flag, is
+budgeted to 196608 bytes before receipt publication. If needed,
+`output_compacted` and ordered `output_compaction` stages identify reductions;
+each affected check has `diagnostics_compacted`. Input echoes can be omitted with
+`check_index`/`input_echo_omitted`, nested error text can be shortened with
+truncation flags, repeated API descriptions/context diagnostics can be omitted,
+and representative failure/issue lists can be omitted with counts. Core check
+and sample statuses/IDs, coordinates, scalar values, consistency/membership
+states, membership frames/tolerances and satisfying upper bounds remain. This
+shared budget also covers combined validation kinds; independent request limits
+alone do not bound their combined diagnostic size.
+
 A usable scalar/separation-consistent, on-face witness supplies a conservative
 upper bound without claiming that it is the closest point. The actual
 query-to-witness separation plus the finite known application point tolerance is
