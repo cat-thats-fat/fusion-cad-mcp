@@ -137,6 +137,41 @@ def build_validate_design(checks: list[dict[str, Any]]) -> str:
 
 
 _SCRIPT = '''
+_FACE_DIAGNOSTIC_BYTES = 16384
+
+def _json_size(value):
+    return len(json.dumps(value, ensure_ascii=True, separators=(',', ':')).encode('utf-8'))
+
+def _face_failure(evidence, failure):
+    global _FACE_DIAGNOSTIC_BYTES
+    evidence['face_failure_count'] += 1
+    issues = failure.get('evidence', {}).get('witness_consistency', {}).get('issues', [])
+    if failure.get('detail_truncated') or any(issue.get('detail_truncated') for issue in issues):
+        evidence['diagnostics_truncated'] = True
+    size = _json_size(failure)
+    if len(evidence['face_failures']) < 3 and size <= min(2048 - evidence['_failure_bytes'], _FACE_DIAGNOSTIC_BYTES):
+        evidence['face_failures'].append(failure)
+        evidence['_failure_bytes'] += size
+        _FACE_DIAGNOSTIC_BYTES -= size
+    else:
+        evidence['face_failures_omitted'] += 1
+        evidence['diagnostics_truncated'] = True
+
+def _bound_validation_output(results):
+    # Leave room for receipt identity/metadata inside the 256 KiB record limit.
+    # Never drop a check status or its minimum native scalar candidate.
+    if _json_size(results) <= 196608: return
+    for index, row in enumerate(results):
+        if 'check' in row:
+            row.pop('check')
+            row.update(check_index=index, input_echo_omitted=True)
+        reason = row.get('reason')
+        if reason is not None and _json_size(reason) > 1024:
+            code = reason.get('error', 'diagnostic_omitted_for_size') if isinstance(reason, dict) else reason
+            text, _ = _measurement_detail(code)
+            row['reason'] = {'error': text, 'diagnostic_truncated': True}
+        if _json_size(results) <= 196608: return
+
 def _point(p):
     if p is None: raise ValueError('closest point unavailable')
     result = [p.x * 10, p.y * 10, p.z * 10]
@@ -165,8 +200,9 @@ def _face_distance(measure, a, b, spec):
         evidence = _distance_evidence(measure.measureMinimumDistance(a, b))
         evidence['frame'] = 'root'
     except Exception as exc:
+        detail, truncated = _measurement_detail(exc)
         return dict(result, status='unavailable', reason={
-            'error': 'face_distance_unavailable', 'detail': str(exc),
+            'error': 'face_distance_unavailable', 'detail': detail, 'detail_truncated': truncated,
         })
     if not evidence['scalar_valid'] or evidence['witness_consistency']['status'] != 'consistent':
         return dict(result, status='unavailable', evidence=evidence,
@@ -213,11 +249,13 @@ def _surface_distance(design, root, measure, spec):
         return dict(result, status='unavailable', reason='body_root_context_unavailable')
     count = body.faces.count
     evidence = {'name': spec['name'], 'sample_point_mm': spec['point_mm'], 'frame': 'root',
-                'units': 'mm', 'face_count': count, 'faces_measured': 0,
+                'units': 'mm', 'face_count': count, 'faces_attempted': 0, 'faces_measured': 0, 'faces_valid': 0,
                 'scope': 'one caller-supplied point to selected body surface; sampled and directional; not Hausdorff or full shape equivalence',
                 'method': 'minimum native Point3D-to-BRepFace scalar across every selected body face',
-                'minimum_scalar_candidate': None, 'face_failures': []}
+                'minimum_scalar_candidate': None, 'face_failures': [], 'face_failure_count': 0,
+                'face_failures_omitted': 0, 'diagnostics_truncated': False, '_failure_bytes': 0}
     if count < 1 or count > spec['max_faces']:
+        evidence.pop('_failure_bytes')
         return dict(result, status='unavailable', evidence=evidence,
                     reason='empty_surface' if count < 1 else 'face_budget_exceeded')
     point = adsk.core.Point3D.create(*[x / 10 for x in spec['point_mm']])
@@ -234,17 +272,23 @@ def _surface_distance(design, root, measure, spec):
                 face_context = getattr(face, 'assemblyContext', None)
             if face is None or not getattr(face, 'isValid', True) or getattr(face_context, 'fullPathName', None) != occurrence_path:
                 raise ValueError('face root context unavailable')
+            evidence['faces_attempted'] += 1
+            native_result = measure.measureMinimumDistance(point, face)
             evidence['faces_measured'] += 1
-            sample = _distance_evidence(measure.measureMinimumDistance(point, face), spec['point_mm'])
+            sample = _distance_evidence(native_result, spec['point_mm'])
             sample['face_index'] = index
             value = sample['minimum_distance_mm']
             if value is not None and (evidence['minimum_scalar_candidate'] is None or value < evidence['minimum_scalar_candidate']['minimum_distance_mm']):
                 evidence['minimum_scalar_candidate'] = sample
             if not sample['scalar_valid'] or sample['witness_consistency']['status'] != 'consistent':
-                evidence['face_failures'].append({'face_index': index, 'evidence': sample})
+                _face_failure(evidence, {'face_index': index, 'evidence': sample})
+            else:
+                evidence['faces_valid'] += 1
         except Exception as exc:
-            evidence['face_failures'].append({'face_index': index, 'detail': str(exc)})
-    if evidence['face_failures'] or evidence['minimum_scalar_candidate'] is None:
+            detail, truncated = _measurement_detail(exc)
+            _face_failure(evidence, {'face_index': index, 'detail': detail, 'detail_truncated': truncated})
+    evidence.pop('_failure_bytes')
+    if evidence['face_failure_count'] or evidence['minimum_scalar_candidate'] is None:
         return dict(result, status='unavailable', evidence=evidence, reason='surface_distance_unavailable')
     value = evidence['minimum_scalar_candidate']['minimum_distance_mm']
     passes = value <= spec['max_mm'] + spec['tolerance_mm']
@@ -306,8 +350,10 @@ def _check(design, root, measure, spec):
     try:
         evidence.update(_distance_evidence(measure.measureMinimumDistance(bodies[0], bodies[1])))
     except Exception as exc:
+        detail, truncated = _measurement_detail(exc)
         evidence.update({'minimum_distance_mm': None, 'closest_point_a_mm': None,
-                         'closest_point_b_mm': None, 'measurement_unavailable': str(exc)})
+                         'closest_point_b_mm': None, 'measurement_unavailable': detail,
+                         'measurement_detail_truncated': truncated})
         return {'type': kind, 'status': 'violation' if count else 'unavailable', 'check': spec, 'evidence': evidence}
     if not evidence['scalar_valid'] or evidence['witness_consistency']['status'] != 'consistent':
         return {'type': kind, 'status': 'violation' if count else 'unavailable', 'check': spec,
@@ -326,6 +372,7 @@ def run(_ctx):
     for spec in _CHECKS:
         try: results.append(_check(design, root, app.measureManager, spec))
         except Exception as exc: results.append({'type': spec['type'], 'status': 'unavailable', 'reason': str(exc), 'check': spec})
+    _bound_validation_output(results)
     print(json.dumps({'ok': True, 'passed': all(r['status'] == 'pass' for r in results),
                       'checks': results, 'units': {'distance': 'mm', 'volume': 'mm^3'}}))
 '''

@@ -5,6 +5,21 @@ point membership on the selected geometry. Keep native scalars on witness failur
 """
 
 DISTANCE_EVIDENCE_SCRIPT = '''
+def _measurement_detail(value, limit=256):
+    try: text = str(value)
+    except BaseException: text = '<detail unavailable>'
+    # Bound the escaped JSON footprint, including control characters and Unicode.
+    lo, hi = 0, min(len(text), limit)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(json.dumps(text[:mid], ensure_ascii=True)) <= limit: lo = mid
+        else: hi = mid - 1
+    return text[:lo], lo < len(text)
+
+def _measurement_issue(field, detail):
+    text, truncated = _measurement_detail(detail)
+    return {'field': field, 'detail': text, 'detail_truncated': truncated}
+
 def _distance_number(value):
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
 
@@ -19,7 +34,7 @@ def _distance_point(result, field, issues):
             raise ValueError('non-finite coordinates')
         return values
     except Exception as exc:
-        issues.append({'field': field, 'detail': str(exc)})
+        issues.append(_measurement_issue(field, exc))
         return None
 
 def _distance_evidence(result, input_point_mm=None):
@@ -40,12 +55,12 @@ def _distance_evidence(result, input_point_mm=None):
         evidence['minimum_distance_mm'] = value
         scalar_valid = True
     except Exception as exc:
-        issues.append({'field': 'value', 'detail': str(exc)})
+        issues.append(_measurement_issue('value', exc))
     try:
         native_valid = result is not None and bool(getattr(result, 'isValid', True))
     except Exception as exc:
         native_valid = False
-        issues.append({'field': 'isValid', 'detail': str(exc)})
+        issues.append(_measurement_issue('isValid', exc))
     if not native_valid:
         issues.append({'field': 'isValid', 'detail': 'native measurement unavailable or invalid'})
     a = _distance_point(result, 'positionOne', issues)

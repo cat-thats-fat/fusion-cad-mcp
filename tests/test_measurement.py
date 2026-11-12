@@ -10,7 +10,7 @@ from fusion_cad_mcp.measurement import DISTANCE_EVIDENCE_SCRIPT
 
 
 def evidence(result, anchor=None):
-    namespace = {"math": math}
+    namespace = {"math": math, "json": json}
     exec(DISTANCE_EVIDENCE_SCRIPT, namespace)
     return namespace["_distance_evidence"](result, anchor)
 

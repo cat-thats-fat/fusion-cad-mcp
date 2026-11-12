@@ -397,7 +397,9 @@ def test_surface_probe_preserves_all_face_failures_and_available_scalar(monkeypa
     result = validate_design(adapter, [surface_check(max_mm=999, tolerance_mm=999)]).result
     row = result["checks"][0]
     assert not result["passed"] and row["status"] == "unavailable"
-    assert row["evidence"]["faces_measured"] == 6
+    assert row["evidence"]["faces_attempted"] == 6
+    assert row["evidence"]["faces_measured"] == (5 if mode == "raise" else 6)
+    assert row["evidence"]["faces_valid"] == 5
     failure, = row["evidence"]["face_failures"]
     assert failure["face_index"] == 0
     if mode == "raise":
@@ -459,3 +461,74 @@ def test_surface_probe_requires_unique_names_and_bounds_total_work():
         build_validate_design([surface_check(), surface_check()])
     with pytest.raises(ValueError, match="4096"):
         build_validate_design([surface_check(name=str(i), max_faces=512) for i in range(9)])
+
+
+def test_maximum_probe_work_with_long_failures_survives_real_receipt(monkeypatch, tmp_path):
+    import json
+
+    from fusion_cad_mcp import receipts
+
+    class ReceiptAdapter(Adapter):
+        def execute_typed_script(self, script, **kwargs):
+            return receipts.run_typed(self.execute_script, script, "offline-measurement", 1,
+                                      journal_dir=tmp_path, **kwargs)
+
+    target = body("box", token="box")
+    adapter = ReceiptAdapter(monkeypatch, [target])
+    target.parentComponent = adapter.root
+    target.faces = Collection([NS(assemblyContext=None, isValid=True) for _ in range(80)])
+    dense = body("dense", token="dense")
+    dense.parentComponent = adapter.root
+    dense.faces = Collection(target.faces.items + [NS(assemblyContext=None, isValid=True) for _ in range(96)])
+    adapter.design.findEntityByToken = lambda token: [{"box": target, "dense": dense}[token]]
+    sys.modules["adsk.core"].Point3D = NS(create=point)
+
+    def native(p, face):
+        if face is target.faces.item(0):
+            return NS(value=0.0777739, positionOne=p, positionTwo=p)
+        raise RuntimeError("\x00" * 50000 + "é" * 50000)
+
+    adapter.app.measureManager.measureMinimumDistance.side_effect = native
+    checks = [surface_check(name=str(i), max_faces=80) for i in range(49)]
+    checks.append(surface_check(name="49", max_faces=176, body="body:dense|doc=646f63:dense"))
+    env = validate_design(adapter, checks)
+    assert env.ok and env.result["passed"] is False
+    assert adapter.app.measureManager.measureMinimumDistance.call_count == 4096
+    assert len(env.result["checks"]) == 50
+    total_failures = 0
+    for row in env.result["checks"]:
+        evidence = row["evidence"]
+        assert row["status"] == "unavailable"
+        expected_faces = 176 if evidence["name"] == "49" else 80
+        assert evidence["faces_attempted"] == expected_faces and evidence["faces_measured"] == 1
+        assert evidence["faces_valid"] == 0 and evidence["face_failure_count"] == expected_faces
+        assert evidence["minimum_scalar_candidate"]["minimum_distance_mm"] == pytest.approx(0.777739)
+        assert evidence["diagnostics_truncated"]
+        assert evidence["face_failures_omitted"] + len(evidence["face_failures"]) == expected_faces
+        total_failures += len(evidence["face_failures"])
+    assert 0 < total_failures < 150
+    status = receipts.get_status(env.state["operation_id"], journal_dir=tmp_path).result
+    assert status["status"] == "completed" and len(status["declared_result"]["checks"]) == 50
+    assert len(json.dumps(status["declared_result"], ensure_ascii=True).encode()) < 196608
+
+
+def test_large_probe_input_echo_does_not_discard_candidate_or_status(monkeypatch, tmp_path):
+    import json
+
+    from fusion_cad_mcp import receipts
+
+    adapter, _ = _box_surface_adapter(monkeypatch)
+    adapter.execute_typed_script = lambda script, **kwargs: receipts.run_typed(
+        adapter.execute_script, script, "offline-large-echo", 1, journal_dir=tmp_path, **kwargs)
+    # Long human-readable paths are not resolver identity. Their output echo may
+    # be omitted, while document/token targeting and numerical evidence remain.
+    handle = "body:" + "x" * 10000 + "|doc=646f63:box"
+    env = validate_design(adapter, [surface_check(name=str(i), body=handle) for i in range(50)])
+    assert env.ok
+    result = env.result
+    assert len(result["checks"]) == 50
+    assert all(row["status"] == "pass" for row in result["checks"])
+    assert any(row.get("input_echo_omitted") for row in result["checks"])
+    assert all(row["evidence"]["minimum_scalar_candidate"]["minimum_distance_mm"] > 0 for row in result["checks"])
+    assert len(json.dumps(result, ensure_ascii=True, separators=(",", ":")).encode()) < 197632
+    assert (tmp_path / (env.state["operation_id"] + ".terminal.json")).stat().st_size < receipts._MAX_RECORD

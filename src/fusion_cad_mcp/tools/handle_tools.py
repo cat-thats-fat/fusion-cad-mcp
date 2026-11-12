@@ -82,7 +82,8 @@ def build_measure(entity_a: str, entity_b: str, kind: str = "distance") -> str:
         measure_call = """try:
         result = app.measureManager.measureMinimumDistance(_a, _b)
     except Exception as exc:
-        print(json.dumps({'ok': False, 'error': 'measurement_unavailable', 'detail': str(exc)})); return
+        detail, truncated = _measurement_detail(exc)
+        print(json.dumps({'ok': False, 'error': 'measurement_unavailable', 'detail': detail, 'detail_truncated': truncated})); return
     evidence = _distance_evidence(result)
     valid = evidence['scalar_valid'] and evidence['witness_consistency']['status'] == 'consistent'
     report = {'ok': valid, 'kind': KIND, 'value_mm': evidence['minimum_distance_mm'],

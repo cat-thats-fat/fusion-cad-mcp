@@ -55,9 +55,9 @@ point arrays remain in cm; the added `distance_evidence` uses mm.
   "checks": [
     {
       "type": "surface_distance",
-      "name": "lower-scoop-corner",
+      "name": "corner-probe",
       "body": "body:Air|doc=REACQUIRE_CURRENT_SCOPE:REACQUIRE_CURRENT_TOKEN",
-      "point_mm": [35.36304600809834, 50.0003, 73.70139644041652],
+      "point_mm": [15, 5, 5],
       "frame": "root",
       "max_mm": 0.05,
       "tolerance_mm": 0,
@@ -82,8 +82,18 @@ query for interior points too, avoiding reliance on a solid-volume distance
 interpretation. The native API supports these input types. All faces must yield
 usable measurements; a failed face cannot be silently omitted. The smallest
 returned finite scalar is retained under `minimum_scalar_candidate`, with native
-positions and face index. `face_failures` preserves exceptions and contradictory
-or missing witnesses. Passing compares that scalar with `max_mm + tolerance_mm`.
+positions and face index. `face_failures` retains representative exceptions and
+contradictory or missing witnesses: at most three entries and 2048 escaped-JSON
+bytes per check, sharing a 16384-byte diagnostic budget per call. Native exception
+and field-issue text is bounded to 256 escaped-JSON bytes with truncation flags.
+`face_failure_count`, `face_failures_omitted` and `diagnostics_truncated` preserve
+the number and presence of every failure even after detailed diagnostics are
+omitted. `faces_attempted` counts native calls, `faces_measured` counts returned
+calls (including malformed results), and `faces_valid` counts usable measurements.
+Any failure still makes the check unavailable. Large output can omit input check
+echoes, reporting `check_index` and `input_echo_omitted`; every check status and
+minimum scalar candidate remains. Passing compares that scalar with
+`max_mm + tolerance_mm`.
 
 For translation comparison, retain the same named root points, units, frame,
 thresholds and source provenance; acquire current handles separately in the
@@ -116,8 +126,11 @@ No live Fusion calls were made: another agent was using the active R6 session.
 No export roundtrip was attempted. Live capability/precision results remain
 unverified.
 
-Final offline validation: `python -m pytest` completed with **1239 passed,
-1 skipped**. Ruff checks on the changed Python files and `git diff --check` passed.
+The full offline suite is rerun after changes, along with Ruff checks on changed
+Python files and `git diff --check`. Receipt integration tests execute the actual
+generated script through the real receipt runtime for 50 checks and 4096 native
+attempts with long escaped exception text, and for oversized input echoes. They
+verify receipt recovery retains every status and finite scalar candidate.
 
 ## Deferred live synthetic test plan
 
@@ -158,8 +171,8 @@ record the Fusion build/API version, document scope, units and all full envelope
 - [Autodesk measure sample](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/MeasureSample_Sample.htm)
   demonstrates transient point and B-rep measurement.
 
-The installed Autodesk API Python package was inspected offline at
-`webdeploy/production/39e8a3d5e919c70b05ef3ebfe9c6bfc8d9ee001e/API/Python/packages/adsk/core.py`,
-`MeasureManager.measureMinimumDistance` lines 17759..17769. Its documented supported
+The installed Autodesk API Python package was inspected offline at the
+installation-relative `API/Python/packages/adsk/core.py`,
+`MeasureManager.measureMinimumDistance`. Its documented supported
 types and cm output agree with the official pages. This inspection establishes
 the installed binding signature, not successful live kernel behavior.
