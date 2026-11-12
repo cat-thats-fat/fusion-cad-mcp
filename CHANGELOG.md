@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - Execution and geometric evidence
+
+- Classify explicit pre-add extrusion refusals and allow a retained operation ID.
+- Add opt-in receipt-backed custom Python with bounded output and progress stages.
+- Check native distance witnesses and add bounded named surface probes; uncertain native results remain unavailable.
+- Add caller-supplied sampled assembly pose interference checks on temporary geometry. Samples do not prove continuous clearance.
+- Keep custom Python a first-class option and retain the existing tool count. See the [validation record](docs/field-round2-validation.md) for evidence and pending live checks.
+
 ## 0.5.0 — Scoped evidence and mesh references
 
 - Extend workspace inspection/checkpoints with strict, bounded entity inventories
