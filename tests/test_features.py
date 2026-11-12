@@ -337,3 +337,38 @@ def test_fillet_surfaces_no_edges_matched_error():
 
 
 # ---------- rebuild_feature duplicate-sketch-name resolution ----------
+
+@pytest.mark.parametrize("case, expected", [
+    ("no_design", "no_active_design"),
+    ("missing", "sketch_not_found"),
+    ("ambiguous", "sketch_ambiguous"),
+    ("profile", "profile_index_out_of_range"),
+    ("participant_missing", "body_not_found"),
+    ("participant_scope", "participant_wrong_component"),
+])
+def test_extrude_preflight_executes_without_adding(monkeypatch, case, expected):
+    sk = SimpleNamespace(name="Plate - Profile", profiles=Collection([object()]))
+    root = root_with(sketches=Collection([sk]))
+    feature_add = Mock(side_effect=AssertionError("add must not run"))
+    root.features = SimpleNamespace(extrudeFeatures=SimpleNamespace(
+        createInput=lambda *args: SimpleNamespace(setAllExtent=lambda *args: None), add=feature_add))
+    if case == "ambiguous":
+        root.sketches = Collection([sk, sk])
+    if case == "participant_scope":
+        root.bRepBodies = Collection([SimpleNamespace(name="other", parentComponent=object())])
+    adapter = ScriptAdapter(monkeypatch, None if case == "no_design" else SimpleNamespace(rootComponent=root),
+        fusion={"FeatureOperations": SimpleNamespace(CutFeatureOperation=1),
+                "ExtentDirections": SimpleNamespace(PositiveExtentDirection=1)})
+    env = f.extrude(adapter, "Plate" if case == "missing" else "Plate - Profile",
+                    profile_index=1 if case == "profile" else 0, operation="cut", extent_kind="all_positive",
+                    participants=["other"] if case.startswith("participant") else None)
+    assert not env.ok and env.error == expected
+    assert env.result["mutation_state"] == "not_started"
+    feature_add.assert_not_called()
+
+
+def test_extrude_operation_id_is_forwarded():
+    adapter = Mock()
+    adapter.execute_typed_script.return_value = Envelope(ok=True, message='{"ok": true}')
+    f.extrude(adapter, "plate", extent_kind="all_positive", operation_id="retained-id")
+    assert adapter.execute_typed_script.call_args.kwargs["operation_id"] == "retained-id"

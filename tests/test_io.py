@@ -728,3 +728,14 @@ def test_obj_bundle_accepts_crlf_and_tabs(tmp_path):
     source.write_bytes(b"mtllib\tmaterial.mtl\r\nv 0 0 0\r\n")
     (tmp_path / "material.mtl").write_bytes(b"newmtl\tmaterial\r\n")
     assert len(_bundle(str(source), None, "require_resources")["dependencies"]) == 2
+
+
+def test_sat_restriction_exception_is_not_classified_or_declared_safe(fusion, tmp_path, monkeypatch):
+    destination = tmp_path / "part.sat"
+    destination.write_bytes(b"previous")
+    def restricted(_options):
+        raise RuntimeError("3 : Cannot execute the export operation to create the file in the format specified by the ExportOptions as the user is restricted.")
+    monkeypatch.setattr(fusion.exporter, "execute", restricted)
+    with pytest.raises(RuntimeError, match="user is restricted"):
+        io_tool.export(fusion.adapter, "sat", str(destination))
+    assert destination.read_bytes() == b"previous"

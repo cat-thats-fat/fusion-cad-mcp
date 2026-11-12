@@ -106,8 +106,8 @@ import json
 """ + FEATURE_HEALTH_SCRIPT
 
 
-def _ok_runner(adapter: FusionAdapter, script: str, label: str) -> Envelope:
-    env = execute_typed_script(adapter, script)
+def _ok_runner(adapter: FusionAdapter, script: str, label: str, *, operation_id: str | None = None) -> Envelope:
+    env = execute_typed_script(adapter, script, operation_id=operation_id)
     if not env.ok:
         return env
     parsed = parse_status_json(env)
@@ -178,8 +178,8 @@ def build_extrude(
                 "    _parts = []",
                 *[
                     f"    _b, _error = _select_body(root, {json.dumps(p, ensure_ascii=False)})"
-                    + "\n    if _error: print(json.dumps(_error)); return"
-                    + "\n    if _b.parentComponent != owner: print(json.dumps({'ok': False, 'error': 'participant_wrong_component'})); return"
+                    + "\n    if _error: _error['mutation_state'] = 'not_started'; print(json.dumps(_error)); return"
+                    + "\n    if _b.parentComponent != owner: print(json.dumps({'ok': False, 'error': 'participant_wrong_component', 'mutation_state': 'not_started'})); return"
                     + "\n    _parts.append(_b.nativeObject or _b)"
                     for p in participants
                 ],
@@ -198,15 +198,15 @@ def run(_ctx):
     app = adsk.core.Application.get()
     design = adsk.fusion.Design.cast(app.activeProduct)
     if design is None:
-        print(json.dumps({{"ok": False, "error": "no_active_design"}})); return
+        print(json.dumps({{"ok": False, "error": "no_active_design", "mutation_state": "not_started"}})); return
     root = design.rootComponent
 
     sk, owner, error = _select_sketch(root, {sketch!r})
     if error:
-        print(json.dumps(error)); return
+        error["mutation_state"] = "not_started"; print(json.dumps(error)); return
     if {profile_index} < 0 or {profile_index} >= sk.profiles.count:
         print(json.dumps({{"ok": False, "error": "profile_index_out_of_range",
-                           "got": {profile_index}, "count": sk.profiles.count}})); return
+                           "got": {profile_index}, "count": sk.profiles.count, "mutation_state": "not_started"}})); return
 
     ext_in = owner.features.extrudeFeatures.createInput(sk.profiles.item({profile_index}), {op_expr})
     {extent_setter}
@@ -236,6 +236,7 @@ def extrude(
     is_full_length: bool = True,
     participants: list[str] | None = None,
     name: str | None = None,
+    operation_id: str | None = None,
 ) -> Envelope:
     try:
         script = build_extrude(
@@ -251,7 +252,7 @@ def extrude(
         )
     except ValueError as e:
         return Envelope(ok=False, error="invalid_input", message=str(e))
-    return _ok_runner(adapter, script, "extrude")
+    return _ok_runner(adapter, script, "extrude", operation_id=operation_id)
 
 
 # ---------- fillet_edges_by_geometry ----------

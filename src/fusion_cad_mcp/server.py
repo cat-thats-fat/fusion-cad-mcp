@@ -377,12 +377,14 @@ def extrude(
     is_full_length: bool = True,
     participants: list[str] | None = None,
     name: str | None = None,
+    operation_id: str | None = None,
 ) -> CallToolResult:
     """Extrude a sketch profile into a feature.
     operation: new_body | join | cut | intersect | new_component
     extent_kind: distance (needs expression) | symmetric (needs expression) | all_positive | all_negative
     direction: positive | negative (for distance kind)
     participants: body names to operate on (for cut/join/intersect)
+    operation_id: optional UUID for receipt-backed replay and recovery.
     Returns feature_name + bodies_added.
     """
     return _tool_result(feat.extrude(
@@ -396,6 +398,7 @@ def extrude(
         is_full_length,
         participants,
         name,
+        operation_id,
     ))
 
 
