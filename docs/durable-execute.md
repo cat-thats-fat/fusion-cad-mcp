@@ -20,3 +20,33 @@ A completed receipt means the Python call returned, not that Fusion's geometry i
 ## Live fixture plan
 
 On a disposable, identified Fusion document, retain a fresh UUID and run a small named mutation followed by `receipt_stage`, print Unicode output, and verify the receipt and independent geometry measurements. Repeat with an optional diagnostic deliberately raising after the checkpoint: inspect stage and failure status, independently establish the execution ended and examine the actual document, confirm a later coordinated write is blocked, then use documented reconciliation with fresh bound readback. Separately exercise a deliberately lost/empty transport response and retrieve its late terminal receipt without redispatch. Record Fusion version, document identity, operation IDs, expected and actual measures, and restoration of any test document. These fixtures require a live session and are not implied by offline tests.
+
+## Verification on November 11
+
+`scripts/live_durable_execute.py` exercised local Fusion Personal 2706.1.17 in two
+disposable fixtures. A parameter edit from 10 to 11 mm produced an independently
+measured 11 mm body height and 6,600 mm³ volume, with Unicode stdout and separate
+stderr retained. Reusing the same ID did not execute again; changed input under
+that ID was refused. Edit-to-readback time was 265 ms in this run.
+
+A second script recorded its recompute stage, then deliberately raised an optional
+diagnostic exception. The failure and stage survived; a subsequent mutation was
+blocked. Fresh geometry inspection found 11 mm, although the stage recorded the
+intermediate 12 mm expression: Fusion reverted this particular failed parameter
+operation. The first test draft incorrectly expected persistence and was corrected
+after inspecting the outcome. No general rollback guarantee is inferred. Explicit
+reconciliation preceded a targeted restoration to 10 mm / 6,000 mm³.
+
+Another live native script completed while the test deliberately replaced its
+transport reply with a failure. Its terminal receipt was recovered without a
+second dispatch. This is injected reply loss, not a reproduced native timeout.
+The ordinary raw print probe worked in this session; the intermittent Autodesk
+output defect was not reproduced or declared fixed. Cross-call stream identities
+differed because Autodesk manages capture between calls; stream restoration inside
+the wrapper is covered separately by in-process automated tests.
+
+Selected witnesses in all three pre-existing documents and the protected fixture
+remained intact. Both owned fixtures were closed and the original active document
+was restored. Independent code reviews covered receipt limits, failure handling,
+async/generator refusal and the live fixture. Automated results and CI accompany
+the PR; the checks establish only the stated execution and geometry outcomes.
